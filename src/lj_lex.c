@@ -222,33 +222,35 @@ static void lex_string(LexState *ls, TValue *tv, LexChar delim)
 	  c += 9;
 	}
 	break;
-      case 'u':  /* Unicode escape '\u{XX...}'. */
+      case 'u': {  /* Unicode escape '\u{XX...}' (5.4: up to 0x7FFFFFFF). */
+	uint32_t u = 0;
+	char ub[8];
+	unsigned int n = 1, i;
 	if (lex_next(ls) != '{') goto err_xesc;
 	lex_next(ls);
-	c = 0;
-	do {
-	  c = (c << 4) | (ls->c & 15u);
-	  if (!lj_char_isdigit(ls->c)) {
-	    if (!lj_char_isxdigit(ls->c)) goto err_xesc;
-	    c += 9;
-	  }
-	  if (c >= 0x110000) goto err_xesc;  /* Out of Unicode range. */
-	} while (lex_next(ls) != '}');
-	if (c < 0x800) {
-	  if (c < 0x80) break;
-	  lex_save(ls, 0xc0 | (c >> 6));
-	} else {
-	  if (c >= 0x10000) {
-	    lex_save(ls, 0xf0 | (c >> 18));
-	    lex_save(ls, 0x80 | ((c >> 12) & 0x3f));
-	  } else {
-	    if (c >= 0xd800 && c < 0xe000) goto err_xesc;  /* No surrogates. */
-	    lex_save(ls, 0xe0 | (c >> 12));
-	  }
-	  lex_save(ls, 0x80 | ((c >> 6) & 0x3f));
+	for (;;) {
+	  if (!lj_char_isxdigit(ls->c)) goto err_xesc;
+	  u = (u << 4) | (uint32_t)(ls->c & 15u);
+	  if (!lj_char_isdigit(ls->c)) u += 9;
+	  if (u > 0x7FFFFFFFu) goto err_xesc;  /* escape sequence too large */
+	  if (lex_next(ls) == '}') break;
 	}
-	c = 0x80 | (c & 0x3f);
-	break;
+	/* Encode as UTF-8 (1..6 bytes), backwards like the reference. */
+	if (u < 0x80) {
+	  ub[7] = (char)u;
+	} else {
+	  unsigned int mfb = 0x3F;  /* maximum that fits in the first byte */
+	  do {
+	    ub[8 - (n++)] = (char)(0x80 | (u & 0x3F));
+	    u >>= 6;
+	    mfb >>= 1;
+	  } while (u > mfb);
+	  ub[8 - n] = (char)((~mfb << 1) | u);
+	}
+	for (i = 8 - n; i < 8; i++) lex_save(ls, ub[i]);
+	lex_next(ls);
+	continue;
+	}
       case 'z':  /* Skip whitespace. */
 	lex_next(ls);
 	while (lj_char_isspace(ls->c))

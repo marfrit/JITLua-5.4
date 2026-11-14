@@ -19,7 +19,7 @@ tests/corpus/puc54/math.lua	A	P1: int64 numeric model + math library 5.4
 tests/corpus/puc54/pm.lua	A	P5: pattern matching 5.4 exactness
 tests/corpus/puc54/sort.lua	A	P5: table.sort 5.4 + string.pack
 tests/corpus/puc54/tpack.lua	A	P5: string.pack/unpack absent
-tests/corpus/puc54/utf8.lua	A	P5: utf8 library absent
+tests/corpus/puc54/utf8.lua	A	P1: utf8 lib + \u{} + NUL-in-pattern done; last assert needs int64 bitwise ((1<<31)-1)
 tests/corpus/puc54/vararg.lua	A	P1: vararg 5.4 semantics
 tests/d54/bits_01_ops.lua	A	P1: bitwise ops, logical >>, mod-64/negative counts
 tests/d54/bits_02_metamethods.lua	A	P1: __band/__bor/__bxor/__shl/__shr/__bnot dispatch
@@ -39,6 +39,5 @@ tests/d54/numeric_01_types.lua	A	P1: int64/float value model, math.type, wrap
 tests/d54/numeric_02_arith.lua	A	P1: int/float arithmetic, coercion, wrap
 tests/d54/numeric_03_idiv.lua	A	P1: // floor division (5.4 syntax absent)
 tests/d54/numeric_04_mod.lua	A	P1: % floor-mod sign rules (5.1 is fmod-like)
-tests/d54/str_02_pack.lua	A	P5: string.pack/unpack/packsize absent
+tests/d54/str_02_pack.lua	A	P1.8: pack/unpack/packsize implemented and correct; only library function-name resolution in error messages differs ('?' vs 'string.pack')
 tests/d54/tbl_01_lib.lua	AR	P5/P1.3b: table.move/unpack now correct; remaining diffs are the # border algorithm (PUC=3 for {1,nil,3}) and the dump/reload template-border bug
-tests/d54/utf8_01_lib.lua	A	P5: utf8 library absent

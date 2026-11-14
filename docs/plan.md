@@ -79,6 +79,19 @@ Gate: **mode A fully green** (interpreter ≡ PUC 5.4.7), dump round-trip normal
   `<const>` attributives, goto/label 5.4 scoping, `OP_IDIV/OP_BAND/…`, int
   constants via EXTRAARG, 5.4 dump header + strip. Tests: `goto_01_labels.lua`,
   `numeric_03_idiv.lua`, `bits_01_ops.lua`, upstream `constructs.lua`.
+  **NOTE:** bitwise BC ops (BNOT/BAND/BOR/BXOR/BSHL/BSHR/BSAR), IR ops, recorder
+  and all backends ALREADY EXIST in 2.1 (int32 semantics via lj_num2bit) — the
+  task is to change semantics to int64/5.4, not to add infrastructure. `//`
+  (IDIV) is the only genuinely new arithmetic op.
+* `[ ]` **P1.3b table borders** — replicate PUC `luaH_getn` in `lj_tab_len`
+  (5.4 `#` returns 3 for `{1,nil,3}`, 2.1 returns 1). Fixes `table.concat`,
+  `table.unpack`, `#{...}` diffs. Also fix the dump/reload template-table
+  inconsistency found by mode R (`tests/d54/dump_02_border.lua`): the same
+  source gives border 1 direct and 3 after `string.dump`→`load`.
+* `[ ]` **P1.8 error messages** — LuaJIT reports `bad argument #1 to '?'` when a
+  library function is called without a name context (e.g. `pcall(table.move,…)`);
+  PUC resolves `table.move` by searching globals/upvalues. Port PUC's
+  `getobjname`/`funcnamefromcode` name search into `lj_debug.c`/`lj_err.c`.
 * `[ ]` **P1.4 interpreter semantics** (`lj_vm*.dasc`, `lj_meta.c`, `lj_vmmath.c`):
   int64 wrap arithmetic, `//` floor, `%` sign rules, `^`→float, bitwise with
   exactly-representable floats, mod-64/negative shifts, exact int↔float compare,
@@ -88,11 +101,13 @@ Gate: **mode A fully green** (interpreter ≡ PUC 5.4.7), dump round-trip normal
 * `[ ]` **P1.5 to-be-closed** (`<close>`, `__close`, `coroutine.close`): VM close
   handling, coroutine close, error-path ordering. Tests: `gc_01_tbc_gc.lua`,
   `coro_01_close.lua`.
-* `[ ]` **P1.6 C API surface** (`lj_api.c`, `lauxlib.c`, `luaconf.h`, `lua.h`):
-  `lua_Integer`→int64 semantics, `lua_absindex`, `lua_stringtonumber`,
-  `luaL_len`, `luaL_getsubtable`, `luaL_getmetafield`, `lua_pushvfstring`,
-  `lua_gc` 5.4 actions, version strings, `LUA_OK`/err codes. Needs a C-side test
-  harness (`tests/capi/`). (dep: P1.1 for exact integer round-trips)
+* `[~]` **P1.6 C API surface** (`lj_api.c`, `lauxlib.c`, `luaconf.h`, `lua.h`):
+  DONE: `lua_absindex`, `lua_isinteger`, `lua_geti`, `lua_seti`, `lua_len`,
+  `lua_compare`, `lua_stringtonumber`, `luaL_len`, `luaL_getsubtable`
+  (29-check C harness `tests/capi/`, all green).
+  TODO: `lua_Integer`→int64 exactness (dep: P1.1), `lua_pushvfstring` audit,
+  `lua_gc` 5.4 actions, version strings, `lua_arith`, `lua_getiuservalue`,
+  `lua_setiuservalue`, `lua_newuserdatauv`, `lua_warning`.
 * `[ ]` **P1.7 number formatting/parsing** (`lj_strfmt*.c`, `lj_strscan.c`):
   `%.14g` rendering, `%d` integer-representation rule, `%a`, `%q` for numbers,
   `tonumber` bases/hex/whitespace. Tests: `fmt_01_format.lua`, `lex_01_literals.lua`.
@@ -127,8 +142,12 @@ Gate: GC-fuzz mode green, ASan/LSan clean.
 Gate: PUC 5.4 suite green in mode A; mode B green; per-library sign-off.
 Independent of the numeric core (can proceed in parallel):
 * `[ ]` P5.1 `utf8` (new `lj_lib_utf8.c` or `lib_utf8.c`). Tests: `utf8_01_lib.lua`.
-* `[ ]` P5.2 `string.pack/unpack/packsize`. Tests: `str_02_pack.lua`, `tpack.lua`.
-* `[ ]` P5.3 `table.move/pack/unpack(i,j)/concat` 5.4. Tests: `tbl_01_lib.lua`.
+* `[x]` P5.2 `string.pack/unpack/packsize` — implemented in `lib_string.c`
+  (adapted from 5.4.7 reference); `str_02_pack.lua` matches PUC except the
+  P1.8 function-name issue.
+* `[~]` P5.3 `table.move/pack/unpack(i,j)/concat` 5.4 — `table.move` and
+  `table.unpack` implemented with metamethod-aware `lua_geti/lua_seti`;
+  `table.pack` ungated from LJ_52. Remaining: `#` border algorithm (P1.3b).
 * `[ ]` P5.4 `string` lib 5.4 (`rep` sep, `format`, patterns). Tests: `dump_str_01.lua`, `pm.lua`.
 * `[ ]` P5.5 `math` 5.4 (`type/tointeger/ult/maxinteger/mininteger`, random). (dep: P1.1)
 * `[ ]` P5.6 `os`/`io` 5.4. Tests: `math_os_01.lua`, `files.lua`.

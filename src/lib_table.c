@@ -13,6 +13,8 @@
 #include "lauxlib.h"
 #include "lualib.h"
 
+#include <limits.h>
+
 #include "lj_obj.h"
 #include "lj_gc.h"
 #include "lj_err.h"
@@ -267,7 +269,6 @@ LJLIB_CF(table_sort)
   return 0;
 }
 
-#if LJ_52
 LJLIB_PUSH("n")
 LJLIB_CF(table_pack)
 {
@@ -283,7 +284,59 @@ LJLIB_CF(table_pack)
   lj_gc_check(L);
   return 1;
 }
-#endif
+
+/* -- Lua 5.4 additions (MISSION P5.3) ------------------------------------ */
+
+/* Unsigned counterpart of lua_Integer (ptrdiff_t) for overflow-safe math. */
+typedef size_t lj_tab_Unsigned;
+#define LJ_TAB_MAXINT ((lua_Integer)(~(lj_tab_Unsigned)0 >> 1))
+
+LJLIB_CF(table_move)
+{
+  lua_Integer f = luaL_checkinteger(L, 2);
+  lua_Integer e = luaL_checkinteger(L, 3);
+  lua_Integer t = luaL_checkinteger(L, 4);
+  int tt = !lua_isnoneornil(L, 5) ? 5 : 1;  /* destination table */
+  lj_lib_checktab(L, 1);
+  lj_lib_checktab(L, tt);
+  if (e >= f) {  /* otherwise, nothing to move */
+    lua_Integer n, i;
+    luaL_argcheck(L, f > 0 || e < LJ_TAB_MAXINT + f, 3,
+		  "too many elements to move");
+    n = e - f + 1;
+    luaL_argcheck(L, t <= LJ_TAB_MAXINT - n + 1, 4,
+		  "destination wrap around");
+    if (t > e || t <= f || (tt != 1 && !lua_compare(L, 1, tt, LUA_OPEQ))) {
+      for (i = 0; i < n; i++) {
+	lua_geti(L, 1, f + i);
+	lua_seti(L, tt, t + i);
+      }
+    } else {  /* overlapping ranges: move backwards */
+      for (i = n - 1; i >= 0; i--) {
+	lua_geti(L, 1, f + i);
+	lua_seti(L, tt, t + i);
+      }
+    }
+  }
+  lua_pushvalue(L, tt);  /* return destination table */
+  return 1;
+}
+
+LJLIB_CF(table_unpack)
+{
+  lj_tab_Unsigned n;
+  lua_Integer i = luaL_optinteger(L, 2, 1);
+  lua_Integer e = luaL_opt(L, luaL_checkinteger, 3, luaL_len(L, 1));
+  if (i > e) return 0;  /* empty range */
+  n = (lj_tab_Unsigned)e - i;  /* number of elements minus 1 */
+  if (LJ_UNLIKELY(n >= (lj_tab_Unsigned)INT_MAX ||
+		  !lua_checkstack(L, (int)(++n))))
+    return luaL_error(L, "too many results to unpack");
+  for (; i < e; i++)
+    lua_geti(L, 1, i);
+  lua_geti(L, 1, e);  /* push last element */
+  return (int)n;
+}
 
 LJLIB_NOREG LJLIB_CF(table_new)		LJLIB_REC(.)
 {
@@ -316,10 +369,6 @@ static int luaopen_table_clear(lua_State *L)
 LUALIB_API int luaopen_table(lua_State *L)
 {
   LJ_LIB_REG(L, LUA_TABLIBNAME, table);
-#if LJ_52
-  lua_getglobal(L, "unpack");
-  lua_setfield(L, -2, "unpack");
-#endif
   lj_lib_prereg(L, LUA_TABLIBNAME ".new", luaopen_table_new, tabV(L->top-1));
   lj_lib_prereg(L, LUA_TABLIBNAME ".clear", luaopen_table_clear, tabV(L->top-1));
   return 1;

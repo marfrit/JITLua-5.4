@@ -25,6 +25,7 @@ tests/d54/bits_01_ops.lua	A	P1: bitwise ops, logical >>, mod-64/negative counts
 tests/d54/bits_02_metamethods.lua	A	P1: __band/__bor/__bxor/__shl/__shr/__bnot dispatch
 tests/d54/coro_01_close.lua	A	P1/P5: coroutine.close absent, <close> support
 tests/d54/dump_str_01.lua	A	P1: 5.4 dump header/strip flag; string lib deltas
+tests/d54/dump_02_border.lua	AR	P1: BUG template-table border differs after dump/reload ({1,nil,3} -> 1 direct, 3 reloaded; PUC=3). Also needs PUC luaH_getn border algorithm + rawlen.
 tests/d54/env_01_fenv.lua	A	P1: _ENV model (5.1 globals); getfenv/setfenv kept as ext
 tests/d54/err_01_xpcall.lua	A	P1: error(level)/non-string error object semantics
 tests/d54/fmt_01_format.lua	A	P1/P5: string.format 5.4 (%d float rule, %a, %q)
@@ -39,5 +40,5 @@ tests/d54/numeric_02_arith.lua	A	P1: int/float arithmetic, coercion, wrap
 tests/d54/numeric_03_idiv.lua	A	P1: // floor division (5.4 syntax absent)
 tests/d54/numeric_04_mod.lua	A	P1: % floor-mod sign rules (5.1 is fmod-like)
 tests/d54/str_02_pack.lua	A	P5: string.pack/unpack/packsize absent
-tests/d54/tbl_01_lib.lua	A	P5: table.move/pack/unpack(i,j) 5.4 semantics
+tests/d54/tbl_01_lib.lua	AR	P5/P1.3b: table.move/unpack now correct; remaining diffs are the # border algorithm (PUC=3 for {1,nil,3}) and the dump/reload template-border bug
 tests/d54/utf8_01_lib.lua	A	P5: utf8 library absent

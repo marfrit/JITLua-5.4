@@ -1,0 +1,33 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  linux-x64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make -j$(nproc)
+      - run: tests/ref/fetch-ref.sh
+      - run: tests/harness.sh --mode all --timeout 120 --strict
+      - run: python3 tests/fuzz/fuzz.py --seed 1 --count 500 --mode B --opt-levels 0,1,2,3 --gc
+      - run: python3 tests/fuzz/fuzz.py --seed 1 --count 200 --mode R --gc
+  linux-x64-sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: tests/ref/fetch-ref.sh
+      - run: tests/ci-local.sh --sanitizers-only
+  linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - run: make -j$(nproc)
+      - run: tests/ref/fetch-ref.sh
+      - run: tests/harness.sh --mode all --timeout 120
+  windows-x64-build:
+    runs-on: windows-latest
+    defaults: { run: { shell: msys2 {0} } }
+    steps:
+      - uses: msys2/setup-msys2@v2
+        with: { msystem: MINGW64, install: "mingw-w64-x86_64-gcc make" }
+      - uses: actions/checkout@v4
+      - run: make -j$(nproc)   # build check only (MISSION Phase 0)

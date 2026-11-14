@@ -14,7 +14,9 @@
 # LuaJIT-5.4 port: Phase 0 verification artifacts (not source)
 tests/ref/bin/
 tests/ref/src/
+tests/ref/sanbuild/
 tests/report/
 tests/fuzz/out/
 tests/fuzz/failures/
+__pycache__/
 *.tar.gz

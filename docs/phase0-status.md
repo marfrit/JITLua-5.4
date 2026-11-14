@@ -74,19 +74,36 @@ Also fixed a real syntax error in `err_01_xpcall.lua` (missing paren) found by t
 9. `tostring(-(0/0))` == "-nan" on aarch64 PUC → nan sign is observable; do NOT normalize it away.
 10. `os.time{...}` is TZ-dependent → harness forces TZ=UTC.
 
-## Remaining Phase 0 TODO (in priority order)
-1. Re-run `tests/harness.sh --mode all` (full corpus incl. puc54) → generate
-   `tests/known-bad.tsv` via `--update-known-bad`, then curate reasons.
-2. Fuzzers: `tests/fuzz/gen.py` (seeded, valid 5.4 programs: numeric/bitwise/metamethod/GC modes),
-   `tests/fuzz/fuzz.py` (differential driver A/B/R, saves failing seed+program to
-   `tests/fuzz/failures/`, reproducible), `tests/fuzz/README.md`. Smoke run (few hundred programs).
-3. `tests/ci-local.sh` (normal + ASan/UBSan build: `make CC=... XCFLAGS=-DLUAJIT_USE_SYSMALLOC`,
-   `ASAN_OPTIONS=detect_leaks=0` initially) and `.github/workflows/ci.yml`
-   (x64 linux, x64 sanitizers, arm64 linux, windows x64 build check). CI dormant until a real remote.
-4. `docs/54port.md` (§4 checklist → test refs), `docs/phase0-baseline.md` (numbers, deviations,
-   MISSION errata above), `tests/README.md`, `tests/corpus/puc54/README.md` (provenance/license).
-5. `.gitignore`: add `tests/ref/bin/`, `tests/ref/src/`, `tests/report/`, `tests/fuzz/out/`,
-   `tests/fuzz/failures/` (keep committed seeds separately), `*.tar.gz`.
-6. Commit MISSION.md + Phase 0 (labeled commit `Phase 0 (M0): ...`), `git push -u origin main`.
-7. M0 acceptance: harness runs, corpus fails as expected (known-bad recorded), ASan build clean.
-8. Optional: persist decisions to mneme (`sic hertz lmcp-tool mneme command=remember ...`).
+## Phase 0 deliverable status (session 1)
+DONE:
+1. Harness (A/B/R) + pre-flight + known-bad + reports; full-corpus baseline recorded.
+2. `tests/d54/` 20 files; `tests/corpus/puc54/` vendored; `tests/README.md`.
+3. Fuzzers `tests/fuzz/gen.py` + `fuzz.py`; smoke 240/240 mode-B green (opt 0-3, GC),
+   0 invalid programs; mode A 15/15 fail as expected on unported 2.1.
+4. `tests/ci-local.sh` + `.github/workflows/ci.yml` (x64, x64-sanitizers, arm64, win-build).
+5. ASan+UBSan build works and harness is green under it (d54 corpus, no ASan/UBSan reports).
+   **Gotcha:** `HOST_CC` defaults to `$(CC)` in src/Makefile, so passing sanitizer flags
+   via CC also instruments host `buildvm`, whose intentional leaks abort the build under
+   LSan. Fix: `HOST_CC=gcc` + `ASAN_OPTIONS=detect_leaks=0` for the build; target uses
+   `-DLUAJIT_USE_SYSMALLOC` (bundled allocator hides overflows from ASan).
+   Sanitizer tree lives in `tests/ref/sanbuild/` (gitignored), binary `src/luajit` there.
+6. `docs/54port.md` (§4 -> test map + errata), `docs/phase0-status.md` (this file).
+7. Commits pushed to the bare origin: base `63c8f1a9` -> `03031827` (harness+corpus)
+   -> `12bdf979` (fuzz/CI/sanitizers/docs). Build artifacts were accidentally committed
+   once and removed via amend + force-push + gc; `.gitignore` now covers
+   `tests/ref/{bin,src,sanbuild}`, `tests/report`, `tests/fuzz/{out,failures}`, `__pycache__`.
+
+OPEN / next:
+- Triage `tests/known-bad.tsv` reasons by root cause (feeds Phase 1 task ordering).
+- `tests/corpus/puc54/closure.lua` fails **mode B** on unported 2.1 (JIT vs interpreter):
+  triage — real LuaJIT 2.1 bug, upstream-suite assumption, or timeout artifact.
+- `calls.lua` B/R and `heavy.lua` exceed 60 s per side -> TIMEOUT (inconclusive).
+  Either raise the limit for those files (`--! timeout:`) or split them.
+- Full-corpus run under ASan/UBSan (only d54 done so far).
+- Persist decisions to mneme (`sic hertz lmcp-tool mneme command=remember ...`).
+- M0 sign-off, then Phase 1 (lexer -> parser -> bytecode -> interpreter -> C API).
+
+## Blocking-command discipline
+Long runs: `nohup ... > /tmp/log 2>&1 &` then poll, or `timeout N`. Full harness run
+with `--timeout 60` takes ~2 min wall (calls.lua/heavy.lua dominate). Sanitizer build
+~1 min. Never run two harness invocations concurrently (they share tests/report/).

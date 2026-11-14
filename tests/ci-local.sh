@@ -12,6 +12,7 @@ for a in "$@"; do case "$a" in --sanitizers-only) SAN=1;; --quick) QUICK=1;; esa
 if [ "$SAN" = 0 ]; then
   make -j"$(nproc)" >/dev/null
   tests/harness.sh --mode all --timeout 120
+  tests/capi/run.sh
   N=200; [ "$QUICK" = 1 ] && N=40
   python3 tests/fuzz/fuzz.py --seed 1 --count "$N" --mode B --opt-levels 0,1,2,3 --gc
   python3 tests/fuzz/fuzz.py --seed 1 --count "$N" --mode R --gc

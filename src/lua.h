@@ -149,6 +149,16 @@ LUA_API lua_Integer     (lua_tointeger) (lua_State *L, int idx);
 LUA_API int             (lua_toboolean) (lua_State *L, int idx);
 LUA_API const char     *(lua_tolstring) (lua_State *L, int idx, size_t *len);
 LUA_API size_t          (lua_objlen) (lua_State *L, int idx);
+LUA_API void            (lua_len) (lua_State *L, int idx);
+LUA_API int             (lua_absindex) (lua_State *L, int idx);
+LUA_API int             (lua_isinteger) (lua_State *L, int idx);
+LUA_API size_t          (lua_stringtonumber) (lua_State *L, const char *s);
+LUA_API int             (lua_compare) (lua_State *L, int idx1, int idx2, int op);
+
+/* Comparison operations for lua_compare. ORDER LUA_OP. */
+#define LUA_OPEQ	0
+#define LUA_OPLT	1
+#define LUA_OPLE	2
 LUA_API lua_CFunction   (lua_tocfunction) (lua_State *L, int idx);
 LUA_API void	       *(lua_touserdata) (lua_State *L, int idx);
 LUA_API lua_State      *(lua_tothread) (lua_State *L, int idx);
@@ -179,6 +189,7 @@ LUA_API void  (lua_gettable) (lua_State *L, int idx);
 LUA_API void  (lua_getfield) (lua_State *L, int idx, const char *k);
 LUA_API void  (lua_rawget) (lua_State *L, int idx);
 LUA_API void  (lua_rawgeti) (lua_State *L, int idx, int n);
+LUA_API void  (lua_geti) (lua_State *L, int idx, lua_Integer n);
 LUA_API void  (lua_createtable) (lua_State *L, int narr, int nrec);
 LUA_API void *(lua_newuserdata) (lua_State *L, size_t sz);
 LUA_API int   (lua_getmetatable) (lua_State *L, int objindex);
@@ -192,6 +203,7 @@ LUA_API void  (lua_settable) (lua_State *L, int idx);
 LUA_API void  (lua_setfield) (lua_State *L, int idx, const char *k);
 LUA_API void  (lua_rawset) (lua_State *L, int idx);
 LUA_API void  (lua_rawseti) (lua_State *L, int idx, int n);
+LUA_API void  (lua_seti) (lua_State *L, int idx, lua_Integer n);
 LUA_API int   (lua_setmetatable) (lua_State *L, int objindex);
 LUA_API int   (lua_setfenv) (lua_State *L, int idx);
 

@@ -348,6 +348,132 @@ LUA_API int lua_lessthan(lua_State *L, int idx1, int idx2)
   }
 }
 
+/* -- Lua 5.4 API additions (MISSION P1.6) -------------------------------- */
+
+LUA_API int lua_absindex(lua_State *L, int idx)
+{
+  return (idx > 0 || idx <= LUA_REGISTRYINDEX) ? idx : lua_gettop(L) + idx + 1;
+}
+
+LUA_API int lua_isinteger(lua_State *L, int idx)
+{
+  cTValue *o = index2adr(L, idx);
+  return tvisint(o);
+}
+
+LUA_API void lua_geti(lua_State *L, int idx, lua_Integer n)
+{
+  cTValue *v, *t = index2adr_check(L, idx);
+  TValue key;
+  setint64V(&key, (int64_t)n);
+  v = lj_meta_tget(L, t, &key);
+  if (v == NULL) {
+    L->top += 2;
+    lj_vm_call(L, L->top-2, 1+1);
+    L->top -= 2+LJ_FR2;
+    v = L->top+1+LJ_FR2;
+  }
+  copyTV(L, L->top, v);
+  incr_top(L);
+}
+
+LUA_API void lua_seti(lua_State *L, int idx, lua_Integer n)
+{
+  TValue *o;
+  TValue key;
+  cTValue *t = index2adr_check(L, idx);
+  lj_checkapi_slot(1);
+  setint64V(&key, (int64_t)n);
+  o = lj_meta_tset(L, t, &key);
+  if (o) {
+    /* NOBARRIER: lj_meta_tset ensures the table is not black. */
+    copyTV(L, o, --L->top);
+  } else {
+    TValue *base = L->top;
+    copyTV(L, base+2, base-3-2*LJ_FR2);
+    L->top = base+3;
+    lj_vm_call(L, base, 0+1);
+    L->top -= 2+LJ_FR2;
+  }
+}
+
+LUA_API void lua_len(lua_State *L, int idx)
+{
+  cTValue *o = index2adr(L, idx);
+  if (tvisstr(o)) {
+    setint64V(L->top, (int64_t)strV(o)->len);
+    incr_top(L);
+  } else if (tvistab(o) || tvisudata(o)) {
+    cTValue *mo = lj_meta_lookup(L, o, MM_len);
+    if (!tvisnil(mo)) {
+      TValue *base = L->top;
+      copyTV(L, base, mo);
+      copyTV(L, base+1, o);
+      L->top = base+2;
+      lua_call(L, 1, 1);
+    } else {
+      if (tvistab(o))
+	setint64V(L->top, (int64_t)lj_tab_len(tabV(o)));
+      else
+	setint64V(L->top, (int64_t)udataV(o)->len);
+      incr_top(L);
+    }
+  } else {
+    lj_err_optype(L, o, LJ_ERR_OPLEN);
+  }
+}
+
+LUA_API int lua_compare(lua_State *L, int idx1, int idx2, int op)
+{
+  cTValue *o1 = index2adr(L, idx1);
+  cTValue *o2 = index2adr(L, idx2);
+  if (op == LUA_OPEQ)
+    return lua_equal(L, idx1, idx2);
+  if (o1 == niltv(L) || o2 == niltv(L))
+    return 0;
+  if (tvisint(o1) && tvisint(o2))
+    return (op == LUA_OPLT) ? (intV(o1) < intV(o2)) : (intV(o1) <= intV(o2));
+  if (tvisnumber(o1) && tvisnumber(o2)) {
+    lua_Number a = numberVnum(o1), b = numberVnum(o2);
+    return (op == LUA_OPLT) ? (a < b) : (a <= b);
+  }
+  {
+    /* lj_meta_comp: bit 0 inverts the result, bit 1 selects __le. */
+    TValue *base = lj_meta_comp(L, o1, o2, (op == LUA_OPLE) ? 2 : 0);
+    if ((uintptr_t)base <= 1)
+      return (int)(uintptr_t)base;
+    L->top = base+2;
+    lj_vm_call(L, base, 1+1);
+    L->top -= 2+LJ_FR2;
+    return tvistruecond(L->top+1+LJ_FR2);
+  }
+}
+
+LUA_API size_t lua_stringtonumber(lua_State *L, const char *s)
+{
+  TValue o;
+  size_t len = strlen(s);
+  const char *p = s;
+  StrScanFmt fmt;
+  /* 5.4 does not accept "inf"/"nan" here (unlike tonumber). */
+  while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r' ||
+	 *p == '\v' || *p == '\f') p++;
+  if (*p == '+' || *p == '-') p++;
+  if ((p[0]|0x20) == 'i' || (p[0]|0x20) == 'n')
+    return 0;
+#if LJ_DUALNUM
+  fmt = lj_strscan_scan((const uint8_t *)s, (MSize)len, &o, STRSCAN_OPT_TOINT);
+  if (fmt == STRSCAN_ERROR) return 0;
+  if (fmt == STRSCAN_INT) setitype(&o, LJ_TISNUM);
+#else
+  fmt = lj_strscan_scan((const uint8_t *)s, (MSize)len, &o, STRSCAN_OPT_TONUM);
+  if (fmt == STRSCAN_ERROR) return 0;
+#endif
+  copyTV(L, L->top, &o);
+  incr_top(L);
+  return len+1;
+}
+
 LUA_API lua_Number lua_tonumber(lua_State *L, int idx)
 {
   cTValue *o = index2adr(L, idx);

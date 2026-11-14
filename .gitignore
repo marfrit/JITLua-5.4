@@ -18,5 +18,6 @@ tests/ref/sanbuild/
 tests/report/
 tests/fuzz/out/
 tests/fuzz/failures/
+tests/capi/build/
 __pycache__/
 *.tar.gz

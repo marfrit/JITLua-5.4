@@ -146,6 +146,33 @@ LUALIB_API void luaL_register(lua_State *L, const char *libname,
   luaL_openlib(L, libname, l, 0);
 }
 
+/* -- Lua 5.4 auxiliary library additions (MISSION P1.6) ------------------ */
+
+LUALIB_API lua_Integer luaL_len(lua_State *L, int idx)
+{
+  lua_Integer l;
+  int isnum;
+  lua_len(L, idx);
+  l = lua_tointegerx(L, -1, &isnum);
+  if (!isnum)
+    luaL_error(L, "object length is not an integer");
+  lua_pop(L, 1);
+  return l;
+}
+
+LUALIB_API int luaL_getsubtable(lua_State *L, int idx, const char *fname)
+{
+  lua_getfield(L, idx, fname);
+  if (lua_istable(L, -1))
+    return 1;  /* table already there */
+  lua_pop(L, 1);  /* remove previous result */
+  idx = lua_absindex(L, idx);
+  lua_newtable(L);
+  lua_pushvalue(L, -1);  /* copy to be left on stack */
+  lua_setfield(L, idx, fname);
+  return 0;
+}
+
 LUALIB_API void luaL_setfuncs(lua_State *L, const luaL_Reg *l, int nup)
 {
   luaL_checkstack(L, nup, "too many upvalues");

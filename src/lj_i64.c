@@ -165,11 +165,12 @@ void lj_i64_push(lua_State *L, int64_t v)
 
 /* -- C semantics helper (ADR-001b steps 2-3) ------------------------------ */
 
-/* Store an integer result: int32 inline when it fits, otherwise boxed.
-** Boxing allocates and a GC allocation may grow (move) the Lua stack, which
-** would invalidate the destination pointer the VM handed us -- measured on x64.
-** Store through a base-relative offset instead. */
-static void i64_store(lua_State *L, TValue *ra, int64_t v)
+/* Store an integer result: int32 inline when it fits, widened inline when the
+** payload bits are distinguishable, otherwise boxed. Boxing allocates and a GC
+** allocation may grow (move) the Lua stack, which would invalidate the
+** destination pointer the VM handed us -- measured on x64. Store through a
+** base-relative offset instead. Also used by the JIT snapshot restore path. */
+void LJ_FASTCALL lj_i64_toTValue(lua_State *L, TValue *ra, int64_t v)
 {
   if ((int64_t)(int32_t)v == v) {
     setintV(ra, (int32_t)v);
@@ -186,6 +187,8 @@ static void i64_store(lua_State *L, TValue *ra, int64_t v)
     setudataV(L, L->base + ofs, ud);
   }
 }
+
+#define i64_store(L, ra, v)	lj_i64_toTValue((L), (ra), (v))
 
 /* Integer floor division: wraps like 5.4 (INT64_MIN // -1 == INT64_MIN). */
 static int64_t i64_idiv(lua_State *L, int64_t a, int64_t b)

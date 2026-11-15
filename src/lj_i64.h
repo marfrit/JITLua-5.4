@@ -25,6 +25,11 @@ LJ_FUNC void LJ_FASTCALL lj_i64_remove(global_State *g, GCudata *ud);
 /* Free the intern hash on state close. */
 LJ_FUNC void LJ_FASTCALL lj_i64_freetab(global_State *g);
 
+/* Encode an int64 value into a TValue slot: int32 inline, widened 47-bit
+** inline (payload bits 32..46 nonzero), otherwise an interned box. Used by the
+** JIT snapshot restore path as well as the interpreter helper. */
+LJ_FUNC void LJ_FASTCALL lj_i64_toTValue(lua_State *L, TValue *o, int64_t v);
+
 /* Push a boxed integer onto the stack. */
 LJ_FUNC void lj_i64_push(lua_State *L, int64_t v);
 

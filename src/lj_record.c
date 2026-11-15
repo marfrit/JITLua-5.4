@@ -163,8 +163,10 @@ static void rec_check_slots(jit_State *J)
 				   s, tref_type(tr));
       } else {
 	/* Number repr. may differ, but other types must be the same. */
-	lj_assertJ(tvisnumber(tv) ? tref_isnumber(tr) :
-				    itype2irt(tv) == tref_type(tr),
+	/* A widened inline integer is represented as an equivalent box object in
+	** the trace (ADR-001b step 3): same value, canonical identity. */
+	lj_assertJ((tvisnumber(tv) ? tref_isnumber(tr) : 0) ||
+		   (tvisi47w(tv) && tref_isudata(tr)),
 		   "slot %d type mismatch: stack type %d vs IR type %d",
 		   s, itypemap(tv), tref_type(tr));
 	if (tref_isk(tr)) {  /* Compare constants. */
@@ -197,16 +199,34 @@ static TRef sloadt(jit_State *J, int32_t slot, IRType t, int mode)
   return ref;
 }
 
+/* Load a boxed int64 payload or a widened inline int64 as an IRT_I64 value.
+** Both are real integers for Lua 5.4; the trace keeps them as 64-bit IR
+** values and only materialises a TValue at a trace exit (lj_snap.c). */
+static TRef sloadi64(jit_State *J, int32_t slot, cTValue *o)
+{
+  TRef ref;
+  if (tvisi64(o)) {  /* Boxed: keep the object, guard the private udtype. */
+    IRType t = (IRType)~itype(o);
+    ref = emitir_raw(IRTG(IR_SLOAD, t), (int32_t)J->baseslot+slot,
+		     IRSLOAD_TYPECHECK);
+    {
+      TRef udt = emitir(IRT(IR_FLOAD, IRT_U8), ref, IRFL_UDATA_UDTYPE);
+      emitir(IRTGI(IR_EQ), udt, lj_ir_kint(J, UDTYPE_I64BOX));
+    }
+  } else {  /* Widened 47-bit inline integer: decode, then allocate a box. */
+    TRef v = emitir_raw(IRTG(IR_SLOAD, IRT_I64), (int32_t)J->baseslot+slot,
+			IRSLOAD_I47);
+    ref = emitir(IRT(IR_BOX, IRT_UDATA), v, 0);
+  }
+  J->base[slot] = ref;
+  return ref;
+}
+
 /* Specialize a slot to the runtime type. Note: slot can be negative! */
 static TRef sload(jit_State *J, int32_t slot)
 {
-  /* ADR-001b step 4: a boxed 64-bit integer (private udtype) is NYI --
-  ** aborting keeps the interpreter's exact semantics instead of letting the
-  ** backends misinterpret the object (measured: JIT-on segfaulted on
-  ** tostring/%d of a box). Boxing becomes fast only with the later IRT_I64
-  ** lowering, not before. */
-  if (tvisi64(&J->L->base[slot]))
-    lj_trace_err(J, LJ_TRERR_BADTYPE);
+  if (tvisi64(&J->L->base[slot]) || tvisi47w(&J->L->base[slot]))
+    return sloadi64(J, slot, &J->L->base[slot]);
   {
     IRType t = itype2irt(&J->L->base[slot]);
     TRef ref = emitir_raw(IRTG(IR_SLOAD, t), (int32_t)J->baseslot+slot,
@@ -215,6 +235,79 @@ static TRef sload(jit_State *J, int32_t slot)
     J->base[slot] = ref;
     return ref;
   }
+}
+
+/* -- 64-bit integer recording (ADR-001b step 3) -------------------------- */
+
+/* Load the int64 payload of a box object, or convert an integer to IRT_I64. */
+static TRef rec_i64_payload(jit_State *J, TRef tr, cTValue *v)
+{
+  UNUSED(v);
+  if (tref_typerange(tr, IRT_I64, IRT_U64)) return tr;
+  if (tref_isudata(tr))  /* Our int64 box object: load the payload. */
+    return emitir(IRT(IR_FLOAD, IRT_I64), tr, IRFL_UDATA_I64);
+  lj_assertJ(tref_isinteger(tr), "bad i64 operand type");
+  return emitir(IRT(IR_CONV, IRT_I64), tr,
+		IRT_INT|(IRT_I64 << IRCONV_DSH)|IRCONV_SEXT);
+}
+
+/* True if the operand takes part in 64-bit integer arithmetic. Aborts a trace
+** that carries some other userdata object in the same slot (type stability). */
+static int rec_i64_oper(jit_State *J, TRef tr, cTValue *v)
+{
+  if (tref_typerange(tr, IRT_I64, IRT_U64)) return 1;
+  if (tvisi64(v) || tvisi47w(v)) return 1;
+  if (tref_isudata(tr)) lj_trace_err(J, LJ_TRERR_BADTYPE);
+  return 0;
+}
+
+/* Integer arithmetic and bit operations on 64-bit values (5.4 semantics:
+** wrap modulo 2^64). The result becomes a box object that the slot can hold;
+** allocation sinking removes it when it does not escape. */
+static TRef rec_i64_arith(jit_State *J, BCOp op, TRef rb, TRef rc,
+			  cTValue *rbv, cTValue *rcv)
+{
+  int ib = tref_isinteger(rb) || rec_i64_oper(J, rb, rbv);
+  int ic = tref_isinteger(rc) || rec_i64_oper(J, rc, rcv);
+  if (ib && ic) {
+    int irop;
+    rb = rec_i64_payload(J, rb, rbv);
+    rc = rec_i64_payload(J, rc, rcv);
+    switch (op) {
+    case BC_ADDVN: case BC_ADDVV: irop = IR_ADD; break;
+    case BC_SUBVN: case BC_SUBVV: irop = IR_SUB; break;
+    case BC_MULVN: case BC_MULVV: irop = IR_MUL; break;
+    case BC_BAND: irop = IR_BAND; break;
+    case BC_BOR: irop = IR_BOR; break;
+    case BC_BXOR: irop = IR_BXOR; break;
+    case BC_BNOT: return emitir(IRT(IR_BOX, IRT_UDATA),
+				emitir(IRT(IR_BNOT, IRT_I64), rb, 0), 0);
+    default:  /* /, %, shifts: not yet handled here. */
+      lj_trace_err(J, LJ_TRERR_NYIBC);
+      return 0;
+    }
+    return emitir(IRT(IR_BOX, IRT_UDATA),
+		  emitir(IRT(irop, IRT_I64), rb, rc), 0);
+  }
+  /* A float operand makes the result a float, as in Lua 5.4. */
+  if (tref_isnum(rb) || tref_isnum(rc) || tvisnum(rbv) || tvisnum(rcv)) {
+    if (ib)
+      rb = emitir(IRT(IR_CONV, IRT_NUM), rec_i64_payload(J, rb, rbv),
+		  ((IRT_NUM<<IRCONV_DSH)|IRT_I64));
+    if (ic)
+      rc = emitir(IRT(IR_CONV, IRT_NUM), rec_i64_payload(J, rc, rcv),
+		  ((IRT_NUM<<IRCONV_DSH)|IRT_I64));
+    switch (op) {
+    case BC_ADDVN: case BC_ADDVV: return emitir(IRTN(IR_ADD), rb, rc);
+    case BC_SUBVN: case BC_SUBVV: return emitir(IRTN(IR_SUB), rb, rc);
+    case BC_MULVN: case BC_MULVV: return emitir(IRTN(IR_MUL), rb, rc);
+    case BC_DIVVN: case BC_DIVVV: return emitir(IRTN(IR_DIV), rb, rc);
+    case BC_POW: return emitir(IRTN(IR_POW), rb, rc);
+    default: lj_trace_err(J, LJ_TRERR_NYIBC); return 0;
+    }
+  }
+  lj_trace_err(J, LJ_TRERR_NYIBC);  /* strings/metamethods: not in a trace */
+  return 0;
 }
 
 /* Get TRef from slot. Load slot and specialize if not done already. */
@@ -261,8 +354,10 @@ int lj_record_objcmp(jit_State *J, TRef a, TRef b, cTValue *av, cTValue *bv)
 /* Constify a value. Returns 0 for non-representable object types. */
 TRef lj_record_constify(jit_State *J, cTValue *o)
 {
-  if (tvisi64(o))
-    lj_trace_err(J, LJ_TRERR_BADTYPE);  /* ADR-001b step 4: boxed int64 is NYI */
+  if (tvisi64(o))  /* Boxed 64-bit integer: exact 64-bit constant. */
+    return lj_ir_kint64(J, i64V(o));
+  if (tvisi47w(o))  /* Widened 47-bit inline integer: exact constant. */
+    return lj_ir_kint64(J, intV47(o));
   if (tvisgcv(o))
     return lj_ir_kgc(J, gcV(o), itype2irt(o));
   else if (tvisint(o))
@@ -2497,6 +2592,10 @@ void lj_record_ins(jit_State *J)
   case BC_ADDVN: case BC_SUBVN: case BC_MULVN: case BC_DIVVN:
   case BC_ADDVV: case BC_SUBVV: case BC_MULVV: case BC_DIVVV: {
     MMS mm = bcmode_mm(op);
+    if (tvisi64(rbv) || tvisi47w(rbv) || tvisi64(rcv) || tvisi47w(rcv) || tref_typerange(rb, IRT_I64, IRT_U64) || tref_typerange(rc, IRT_I64, IRT_U64) || tref_isudata(rb) || tref_isudata(rc)) {
+      rc = rec_i64_arith(J, op, rb, rc, rbv, rcv);
+      break;
+    }
     if (tref_isnumber_str(rb) && tref_isnumber_str(rc))
       rc = lj_opt_narrow_arith(J, rb, rc, rbv, rcv,
 			       (int)mm - (int)MM_add + (int)IR_ADD);
@@ -2507,6 +2606,9 @@ void lj_record_ins(jit_State *J)
 
   case BC_MODVN: case BC_MODVV:
   recmod:
+    if (tvisi64(rbv) || tvisi47w(rbv) || tvisi64(rcv) || tvisi47w(rcv) ||
+	tref_typerange(rb, IRT_I64, IRT_U64) || tref_typerange(rc, IRT_I64, IRT_U64))
+      lj_trace_err(J, LJ_TRERR_NYIBC);  /* TODO(step 3): i64 % via helper */
     if (tref_isnumber_str(rb) && tref_isnumber_str(rc))
       rc = lj_opt_narrow_mod(J, rb, rc, rbv, rcv);
     else
@@ -2514,6 +2616,10 @@ void lj_record_ins(jit_State *J)
     break;
 
   case BC_POW:
+    if (tvisi64(rbv) || tvisi47w(rbv) || tvisi64(rcv) || tvisi47w(rcv) || tref_typerange(rb, IRT_I64, IRT_U64) || tref_typerange(rc, IRT_I64, IRT_U64) || tref_isudata(rb) || tref_isudata(rc)) {
+      rc = rec_i64_arith(J, op, rb, rc, rbv, rcv);
+      break;
+    }
     if (tref_isnumber_str(rb) && tref_isnumber_str(rc))
       rc = lj_opt_narrow_arith(J, rb, rc, rbv, rcv, IR_POW);
     else
@@ -2529,11 +2635,19 @@ void lj_record_ins(jit_State *J)
       break;
     }
 #endif
+    if (tvisi64(rcv) || tvisi47w(rcv) || tref_typerange(rc, IRT_I64, IRT_U64) || tref_isudata(rc)) {
+      rc = rec_i64_arith(J, BC_BNOT, rc, rc, rcv, rcv);
+      break;
+    }
     rc = lj_opt_narrow_tobit(J, rc);
     rc = emitir(IRTI(IR_BNOT), rc, 0);
     break;
 
   case BC_BAND: case BC_BOR: case BC_BXOR:
+    if (tvisi64(rbv) || tvisi47w(rbv) || tvisi64(rcv) || tvisi47w(rcv) || tref_typerange(rb, IRT_I64, IRT_U64) || tref_typerange(rc, IRT_I64, IRT_U64) || tref_isudata(rb) || tref_isudata(rc)) {
+      rc = rec_i64_arith(J, op, rb, rc, rbv, rcv);
+      break;
+    }
 #if LJ_HASFFI
     if (tref_iscdata(rb) || tref_iscdata(rc)) {
       rc = recff_bit64_bitop(J, rb, rc, rbv, rcv, (int)op - (int)BC_BAND + (int)IR_BAND);
@@ -2547,6 +2661,10 @@ void lj_record_ins(jit_State *J)
     break;
 
   case BC_BSHL: case BC_BSHR: case BC_BSAR:
+    if (tvisi64(rbv) || tvisi47w(rbv) || tvisi64(rcv) || tvisi47w(rcv) ||
+	tref_typerange(rb, IRT_I64, IRT_U64) || tref_typerange(rc, IRT_I64, IRT_U64) ||
+	tref_isudata(rb) || tref_isudata(rc))
+      lj_trace_err(J, LJ_TRERR_NYIBC);  /* TODO(step 3): 5.4 shift rules */
 #if LJ_HASFFI
     {
       TRef xrb = rb, xrc = rc;
@@ -2590,6 +2708,9 @@ void lj_record_ins(jit_State *J)
     while (ra <= rc)
       J->base[ra++] = TREF_NIL;
     if (rc >= J->maxslot) J->maxslot = rc+1;
+    break;
+  case BC_KI64:  /* Boxed int64 literal: an interned constant object. */
+    rc = lj_ir_kgc(J, proto_kgc(J->pt, ~(ptrdiff_t)rc), IRT_UDATA);
     break;
 #if LJ_HASFFI
   case BC_KCDATA:

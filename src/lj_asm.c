@@ -959,6 +959,9 @@ static void asm_snap_alloc1(ASMState *as, IRRef ref)
     if (ra_used(ir)) return;
     if (ir->r == RID_SINK || ir->r == RID_SUNK) {
       ir->r = RID_SUNK;
+      if (ir->o == IR_BOX) {  /* Allocate the payload value. */
+	asm_snap_alloc1(as, ir->op1);
+      } else
 #if LJ_HASFFI
       if (ir->o == IR_CNEWI) {  /* Allocate CNEWI value. */
 	asm_snap_alloc1(as, ir->op2);
@@ -1149,6 +1152,19 @@ static void asm_snew(ASMState *as, IRIns *ir)
   args[2] = ir->op2;   /* size_t len      */
   as->gcsteps++;
   asm_setupresult(as, ir, ci);  /* GCstr * */
+  asm_gencall(as, ci, args);
+}
+
+/* Int64 box allocation (ADR-001b step 3): call the interning helper. */
+static void asm_box(ASMState *as, IRIns *ir)
+{
+  const CCallInfo *ci = &lj_ir_callinfo[IRCALL_lj_i64_box];
+  IRRef args[2];
+  asm_snap_prep(as);
+  args[0] = ASMREF_L;  /* lua_State *L */
+  args[1] = ir->op1;   /* int64_t v    */
+  as->gcsteps++;
+  asm_setupresult(as, ir, ci);  /* GCudata * */
   asm_gencall(as, ci, args);
 }
 
@@ -1878,6 +1894,7 @@ static void asm_ir(ASMState *as, IRIns *ir)
   case IR_SNEW: case IR_XSNEW: asm_snew(as, ir); break;
   case IR_TNEW: asm_tnew(as, ir); break;
   case IR_TDUP: asm_tdup(as, ir); break;
+  case IR_BOX: asm_box(as, ir); break;
   case IR_CNEW: case IR_CNEWI:
 #if LJ_HASFFI
     asm_cnew(as, ir);
@@ -2353,7 +2370,7 @@ static void asm_setup_regsp(ASMState *as)
     case IR_CNEW:
 #endif
       /* fallthrough */
-    case IR_TNEW: case IR_TDUP: case IR_CNEWI: case IR_TOSTR:
+    case IR_TNEW: case IR_TDUP: case IR_CNEWI: case IR_BOX: case IR_TOSTR:
     case IR_BUFSTR:
       ir->prev = REGSP_HINT(RID_RET);
       if (inloop)
@@ -2473,6 +2490,11 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
 {
   ASMState as_;
   ASMState *as = &as_;
+#ifdef LJDBG_ABORT
+  { extern int printf(const char *, ...);
+    IRIns *d; for (d = &T->ir[REF_FIRST]; d < &T->ir[T->nins]; d++)
+      printf("IR %03d op=%3d type=%2d op1=%d op2=%d\n", (int)(d-&T->ir[REF_FIRST]), d->o, d->t.irt, (int)d->op1, (int)d->op2); }
+#endif
 
   /* Remove nops/renames left over from ASM restart due to LJ_TRERR_MCODELM. */
   {

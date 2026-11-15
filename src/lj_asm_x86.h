@@ -1737,6 +1737,35 @@ static void asm_sload(ASMState *as, IRIns *ir)
 	     !irt_isint(t) ||
 	     (ir->op2 & (IRSLOAD_CONVERT|IRSLOAD_FRAME|IRSLOAD_KEYINDEX)),
 	     "bad SLOAD type");
+  if ((ir->op2 & IRSLOAD_I47)) {  /* Widened 47-bit inline int as IRT_I64. */
+    lj_assertA(irt_isint64(t), "bad I47 SLOAD type");
+    base = ra_alloc1(as, REF_BASE, RSET_GPR);
+    {
+      Reg dest = ra_dest(as, ir, RSET_GPR);
+      if ((ir->op2 & IRSLOAD_TYPECHECK)) {
+	Reg tmp = ra_scratch(as, rset_exclude(RSET_GPR, dest));
+	/* Executed order: mov, sar47, cmp itype, shr32, and, cmp0, shl/sar 17. */
+	emit_shifti(as, XOg_SAR|REX_64, dest, 17);
+	emit_shifti(as, XOg_SHL|REX_64, dest, 17);
+	asm_guardcc(as, CC_E);  /* Fail when payload bits 32..46 are zero. */
+	emit_u32(as, 0);
+	emit_rr(as, XO_ARITHi, XOg_CMP, tmp);
+	emit_u32(as, 0x7fff);
+	emit_rr(as, XO_ARITHi, XOg_AND, tmp);
+	emit_shifti(as, XOg_SHR|REX_64, tmp, 32);
+	asm_guardcc(as, CC_NE);  /* Fail when itype != LJ_TISNUM. */
+	emit_u32(as, (uint32_t)LJ_TISNUM);
+	emit_rr(as, XO_ARITHi, XOg_CMP, tmp);
+	emit_shifti(as, XOg_SAR|REX_64, tmp, 47);
+	emit_rmro(as, XO_MOV, dest|REX_64, base, ofs);
+      } else {
+	emit_shifti(as, XOg_SAR|REX_64, dest, 17);
+	emit_shifti(as, XOg_SHL|REX_64, dest, 17);
+	emit_rmro(as, XO_MOV, dest|REX_64, base, ofs);
+      }
+    }
+    return;
+  }
   if ((ir->op2 & IRSLOAD_CONVERT) && irt_isguard(t) && irt_isint(t)) {
     Reg left = ra_scratch(as, RSET_FPR);
     asm_tointg(as, ir, left);  /* Frees dest reg. Do this before base alloc. */

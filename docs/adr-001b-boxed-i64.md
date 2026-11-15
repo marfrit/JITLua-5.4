@@ -159,3 +159,37 @@ Note: the *constant-folded* `7//2` path works on both boxes (PASS), so this is
 specifically the runtime BC_IDIV store on x64. Also already measured: GC64 tag
 encoding preserves only tags with bit 0 = 0, so LJ_TNUMX must stay odd (~13) --
 ~14 broke VM/C agreement and was reverted.
+
+## Benchmark gate result (arm-box, median of 3, 2026-11-15)
+
+Boxed interned int64, steps 2-3 + literal constants, recorder NYI for boxes.
+"alloc" is the collectgarbage("count") delta of our arms.
+
+| bench | ours JIT on | ours -joff | stock 2.1 FFI uint64 | PUC 5.4.7 |
+|---|---|---|---|---|
+| B1 FNV-1a-64, 10 MiB | **16080 ms** | 17851 ms | **15.1 ms** | 286.5 ms |
+| B2 table of 1e6 64-bit values | 3450 ms, **899 MB** alloc | 3590 ms, 899 MB | 690.7 ms, 31.6 MB | 522.8 ms, 16.4 MB |
+| B2b table of 1e6 ~2^41 values | 773.8 ms, 253 MB alloc | 753.9 ms | 138.7 ms, 8.2 MB (float) | 171.6 ms, 16.4 MB |
+| B3 int32 control | 37.9 ms | 5439 ms | 42.3 ms | 279.9 ms |
+
+Against Markus's gates:
+
+- **B1 fails hard**: 16080 ms is ~1060x the FFI yardstick (15.1 ms), not within
+  1.5x. The recorder aborts on boxes (step 4), so not a single 64-bit operation
+  is compiled; every op allocates and interns. Step 5 (IRT_I64 + sinking) is
+  the only fix for compute -- and it is untested here.
+- **B2 fails both halves**: it allocates per element (899 MB, ~900 bytes per
+  value: udata + interned 8-byte key string + registry nodes) and is 6.6x
+  slower than PUC. Interning by string key is the dominant memory cost.
+- **B2b fails**: 773.8 ms / 253 MB vs PUC 171.6 ms / 16.4 MB. This is exactly
+  the window Markus's addendum 2 targets: with 47-bit inline integers these
+  values would not box at all.
+- **B3 does not regress**: 37.9 ms vs stock 42.3 ms (JIT int32 path untouched).
+  The interpreter side degraded (5439 ms) because int32 overflow now boxes --
+  visible, and consistent with 5.4 semantics.
+
+Interpretation for the ADR decision: boxed int64 is *correct* and green on both
+boxes, but as implemented it cannot meet B1/B2 without (a) step 5 lowering and
+(b) a cheaper box representation (dedicated i64 intern hash, not string keys),
+and B2-class memory needs 47-bit inline integers (step 6). 16-byte TValue would
+fix B2 memory (~2x slots) but not B1 compute without the same IRT_I64 work.

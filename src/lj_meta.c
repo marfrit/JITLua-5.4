@@ -494,6 +494,13 @@ TValue * LJ_FASTCALL lj_meta_equal_cd(lua_State *L, BCIns ins)
 /* Helper for ordered comparisons. String compare, __lt/__le metamethods. */
 TValue *lj_meta_comp(lua_State *L, cTValue *o1, cTValue *o2, int op)
 {
+  /* ADR-001b: comparisons involving a boxed int64 are numeric comparisons
+  ** (5.4: int/float comparison is exact), never metamethod dispatch. */
+  if (tvisi64(o1) || tvisi64(o2)) {
+    int res;
+    if (lj_i64_compare(o1, o2, op & 2 ? 2 : 1, &res))
+      return (TValue *)(intptr_t)(res ^ (op & 1));
+  }
   if (LJ_HASFFI && (tviscdata(o1) || tviscdata(o2))) {
     ASMFunction cont = (op & 1) ? lj_cont_condf : lj_cont_condt;
     MMS mm = (op & 2) ? MM_le : MM_lt;

@@ -14,6 +14,7 @@
 #include "lj_err.h"
 #include "lj_buf.h"
 #include "lj_str.h"
+#include "lj_i64.h"
 #include "lj_tab.h"
 #include "lj_func.h"
 #include "lj_meta.h"
@@ -224,6 +225,7 @@ static void close_state(lua_State *L)
   lj_ctype_freestate(g);
 #endif
   lj_str_freetab(g);
+  lj_i64_freetab(g);	/* ADR-001b intern hash */
   lj_buf_free(g, &g->tmpbuf);
   lj_mem_freevec(g, tvref(L->stack), L->stacksize, TValue);
 #if LJ_64

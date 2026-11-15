@@ -653,6 +653,11 @@ typedef struct global_State {
   uint8_t dispatchmode;	/* Dispatch mode. */
   uint8_t vmevmask;	/* VM event mask. */
   StrInternState str;	/* String interning. */
+  struct {		/* ADR-001b: boxed-int64 intern hash (weak, swept with data). */
+    GCRef *tab;		/* Open-addressing anchors (NULL = empty, 1 = tombstone). */
+    MSize mask;		/* Hash mask (size - 1). */
+    MSize num;		/* Number of live boxes in the table. */
+  } i64;			/* appended: assembler offsets are recomputed at build */
   volatile int32_t vmstate;  /* VM state or current JIT code trace number. */
   GCRef mainthref;	/* Link to main thread. */
   SBuf tmpbuf;		/* Temporary string buffer. */

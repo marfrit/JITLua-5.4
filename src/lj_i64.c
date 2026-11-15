@@ -53,25 +53,99 @@ int LJ_FASTCALL lj_i64_getint(cTValue *o, int64_t *p)
   return 0;
 }
 
+/* -- Intern hash (ADR-001b step 1) --------------------------------------- */
+/* A dedicated open-addressing hash keyed by the int64 value. Entries are weak:
+** the table is not a GC root, so a box is collected normally and the sweep
+** removes its entry (lj_i64_remove). Tombstones (GCRef bits == 1) keep probe
+** chains intact; empty slots hold NULL. */
+
+#define I64_HSIZE_MIN	64
+#define I64_TOMB		((uintptr_t)1)
+
+static LJ_AINLINE uint32_t i64_hash(int64_t v)
+{
+  uint64_t u = (uint64_t)v * 0x9e3779b97f4a7c15ULL;
+  return (uint32_t)(u >> 32);
+}
+
+static void i64_resize(lua_State *L, MSize size)
+{
+  global_State *g = G(L);
+  GCRef *newtab = (GCRef *)lj_mem_new(L, (GCSize)(size * sizeof(GCRef)));
+  MSize i;
+  for (i = 0; i < size; i++) setgcrefnull(newtab[i]);
+  if (g->i64.tab) {
+    MSize mask = g->i64.mask;
+    for (i = 0; i <= mask; i++) {
+      uintptr_t u = gcrefu(g->i64.tab[i]);
+      GCobj *o;
+      if (u == 0 || u == I64_TOMB) continue;
+      o = (GCobj *)(uintptr_t)u;
+      {
+	uint32_t h = i64_hash(*(int64_t *)uddata(gco2ud(o))) & (size-1);
+	while (gcrefu(newtab[h]) != 0) h = (h + 1) & (size-1);
+	setgcref(newtab[h], o);
+      }
+    }
+    lj_mem_free(g, g->i64.tab, (mask+1) * sizeof(GCRef));
+  }
+  g->i64.tab = newtab;
+  g->i64.mask = size-1;
+}
+
+void LJ_FASTCALL lj_i64_remove(global_State *g, GCudata *ud)
+{
+  int64_t v = *(int64_t *)uddata(ud);
+  MSize mask = g->i64.mask, h = i64_hash(v) & mask, i;
+  /* Find the entry for this object. */
+  for (i = h; ; i = (i + 1) & mask) {
+    GCRef r = g->i64.tab[i];
+    uintptr_t u = gcrefu(r);
+    if (u == 0) return;  /* not interned (should not happen) */
+    if (u != I64_TOMB && (GCobj *)(uintptr_t)u == obj2gco(ud)) break;
+  }
+  setgcrefp(g->i64.tab[i], (void *)(uintptr_t)I64_TOMB);
+  g->i64.num--;
+}
+
 GCudata *lj_i64_box(lua_State *L, int64_t v)
 {
-  GCtab *reg = tabV(registry(L));
-  GCstr *k = lj_str_new(L, (const char *)&v, sizeof(v));
-  cTValue *o = lj_tab_getstr(reg, k);
-  if (o != NULL && tvisi64(o))
-    return udataV(o);  /* Already interned. */
+  global_State *g = G(L);
+  if (g->i64.tab) {
+    MSize mask = g->i64.mask, h = i64_hash(v) & mask, i;
+    for (i = h; ; i = (i + 1) & mask) {
+      uintptr_t u = gcrefu(g->i64.tab[i]);
+      if (u == 0) break;  /* empty slot: not interned */
+      if (u != I64_TOMB && *(int64_t *)uddata(gco2ud((GCobj *)(uintptr_t)u)) == v)
+	return gco2ud((GCobj *)(uintptr_t)u);
+    }
+  }
   {
     /* Userdata must never have a NULL env: gc_mark() unconditionally marks it. */
     GCudata *ud = lj_udata_new(L, sizeof(int64_t), tabref(L->env));
-    TValue key;
-    TValue *slot;
     ud->udtype = UDTYPE_I64BOX;
     *(int64_t *)uddata(ud) = v;
-    setstrV(L, &key, k);
-    slot = lj_tab_set(L, reg, &key);
-    setudataV(L, slot, ud);
-    lj_gc_anybarriert(L, reg);  /* The registry table may be black. */
+    /* Insert (rehash if the table is getting full). */
+    if (!g->i64.tab || g->i64.num >= (g->i64.mask+1) * 3 / 4)
+      i64_resize(L, g->i64.tab ? (g->i64.mask+1) * 2 : I64_HSIZE_MIN);
+    {
+      MSize mask = g->i64.mask, h = i64_hash(v) & mask;
+      while (gcrefu(g->i64.tab[h]) != 0 && gcrefu(g->i64.tab[h]) != I64_TOMB)
+	h = (h + 1) & mask;
+      setgcref(g->i64.tab[h], obj2gco(ud));
+      g->i64.num++;
+    }
     return ud;
+  }
+}
+
+void LJ_FASTCALL lj_i64_freetab(global_State *g)
+{
+  if (g->i64.tab) {
+    lj_mem_freevec(g, g->i64.tab, g->i64.mask+1, GCRef);
+    g->i64.tab = NULL;
+    g->i64.mask = 0;
+    g->i64.num = 0;
   }
 }
 

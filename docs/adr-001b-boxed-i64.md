@@ -193,3 +193,33 @@ boxes, but as implemented it cannot meet B1/B2 without (a) step 5 lowering and
 (b) a cheaper box representation (dedicated i64 intern hash, not string keys),
 and B2-class memory needs 47-bit inline integers (step 6). 16-byte TValue would
 fix B2 memory (~2x slots) but not B1 compute without the same IRT_I64 work.
+
+## Step 1 done: dedicated int64 intern hash (2026-11-15)
+
+Boxes are now interned in an open-addressing hash keyed by the int64 value
+(GCRef anchors in global_State, NULL = empty, 1 = tombstone, grow at 75%).
+The table is not a GC root, so entries are weak by construction; the sweep
+removes a dead box's entry before freeing it (lj_gc.c) and the table is freed
+on state close (lj_state.c / lj_i64_freetab). Verified: identity across
+collection, table-key use, 100 interned values survive two full GCs. Gates on
+both boxes green: A+B 47 PASS / 0 FAIL / 17 XFAIL, opt 0-3 128 PASS, R 32 PASS,
+C API 34/34 + i64 14/14.
+
+Benchmark after step 1 (arm-box, median of 3):
+
+| bench | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
+|---|---|---|---|---|
+| B1 FNV-1a-64 | 8510 ms | 8461 ms | 8.9 ms | 276.8 ms |
+| B2 1e6 64-bit values | 2211 ms, 522 MB | 2220 ms, 522 MB | 624 ms, 31.6 MB | 532 ms, 16.4 MB |
+| B2b 1e6 ~2^41 | 400 ms, 150 MB | 392 ms, 150 MB | 137 ms, 8.2 MB (float) | 171 ms, 16.4 MB |
+| B3 int32 control | 37.9 ms | 3663 ms | 46.4 ms | 277.9 ms |
+
+Effect: B1 16080 -> 8510 ms (2x), B2 899 -> 522 MB (1.7x), b2b 253 -> 150 MB
+(1.7x). The raw string-key overhead is gone, but B2 is still far from the
+16-32 B/value target: a box is a GCudata (~56 B) plus hash anchors and GC
+turnover, so "allocates per element" still holds. B1 still ~950x the yardstick
+because the recorder is NYI on boxes.
+
+Interpretation: the remaining memory cost is inherent to one-object-per-value,
+i.e. the 47-bit inline-integer step (step 6 / order step 2) is what actually
+reaches the B2/B2b targets; step 5 then fixes B1 compute.

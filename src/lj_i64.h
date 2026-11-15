@@ -19,6 +19,12 @@ typedef enum I64Op {
 ** return the same pointer, so pointer equality == value equality. */
 LJ_FUNC GCudata *lj_i64_box(lua_State *L, int64_t v);
 
+/* Remove a box from the intern hash (called by the GC sweep before freeing). */
+LJ_FUNC void LJ_FASTCALL lj_i64_remove(global_State *g, GCudata *ud);
+
+/* Free the intern hash on state close. */
+LJ_FUNC void LJ_FASTCALL lj_i64_freetab(global_State *g);
+
 /* Push a boxed integer onto the stack. */
 LJ_FUNC void lj_i64_push(lua_State *L, int64_t v);
 

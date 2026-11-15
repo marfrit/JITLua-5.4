@@ -17,6 +17,7 @@
 #include "lj_tab.h"
 #include "lj_func.h"
 #include "lj_udata.h"
+#include "lj_i64.h"
 #include "lj_meta.h"
 #include "lj_state.h"
 #include "lj_frame.h"
@@ -421,6 +422,10 @@ static GCRef *gc_sweep(global_State *g, GCRef *p, uint32_t lim)
       setgcrefr(*p, o->gch.nextgc);
       if (o == gcref(g->gc.root))
 	setgcrefr(g->gc.root, o->gch.nextgc);  /* Adjust list anchor. */
+      /* ADR-001b: a dead boxed int64 must leave the intern hash first. */
+      if (LJ_LIKELY(o->gch.gct == ~LJ_TUDATA) &&
+	  gco2ud(o)->udtype == UDTYPE_I64BOX)
+	lj_i64_remove(g, gco2ud(o));
       gc_freefunc[o->gch.gct - ~LJ_TSTR](g, o);
     }
   }

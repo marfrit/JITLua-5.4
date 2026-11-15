@@ -82,3 +82,42 @@ Either way, Markus decides on the ADR.
 Intercom: the broker was full (128 sessions, all held by pi-web's session daemon). His raised the cap and
 restarted the broker at 10:2x. `ask claude` should work again; if it doesn't, write a file like this one. Never
 kill or start the broker or the bridge yourself.
+
+## Addendum (Markus, 10:31): does boxing break the JIT? Measure it in the spike.
+
+Markus's concern: with boxed int64, does everything outside int32 turn into an exception path and ruin the JIT?
+My view:
+- Hot int32 code is unaffected. It already has overflow guards, and only the overflow target changes from a
+  double to a box.
+- 64-bit code (hashes, PRNGs, 64-bit masks, ms/ns timestamps) is ruined while the recorder only aborts on boxed
+  ints (step 4).
+- It is fine once step 5 keeps int64 unboxed in registers and sinks the boxes. That is how FFI `uint64_t` loops
+  run with zero allocations today.
+- The residual cost is big ints stored in memory: tables of 64-bit values, where every element is a box plus an
+  intern lookup.
+
+So **step 5 is part of acceptance, not "later"**. Add a benchmark gate to the spike so the ADR rests on numbers.
+
+- **B1 FNV-1a-64** over a long string (e.g. 10 MB, built in-script): a register-resident 64-bit loop.
+- **B2 table of 1e6 64-bit values:** fill with an LCG/xorshift64, read and sum, `table.sort`.
+- **B3 int32 control:** the same loops staying in int32 range, to show the normal case did not regress.
+
+Run each benchmark on four arms:
+1. our build with JIT on;
+2. our build with `-joff`;
+3. **stock LuaJIT v2.1** with FFI `uint64_t` / `0ULL` literals as the yardstick: build it from the `upstream`
+   remote, e.g. `git archive v2.1 | (mkdir -p /tmp/stock && tar x -C /tmp/stock)`, then `arm-box` there;
+4. PUC-Lua 5.4.7 (`tests/ref/bin/lua54ref`).
+
+Method:
+- Run all arms inside the **same** arm-box job: same box, same moment. Repeat 3×, report the median wall time,
+  and for our build also allocation counts (`collectgarbage("count")` before/after).
+- escher shares its CPU with model serving, so treat differences under ~10 % as noise.
+
+Write the table into the ADR (ADR-001b, or the 16-byte fallback).
+
+What would favour 16 bytes:
+- B1 with JIT on does not reach the FFI yardstick within ~1.5× after step 5;
+- or B2 allocates per element and is slower than PUC-Lua.
+
+B3 must not regress against today's main.

@@ -71,6 +71,8 @@ resolution · goto/label 5.4 diagnostics · `<const>` attributives · int/float
 literal split (scanner, parser float-constant table, fold rules, JIT recorder) ·
 5.4 `.0` float rendering (tostring/concat/table.concat, interp+JIT) ·
 math.type/tointeger/ult · os.time/date/difftime/rename · io.write/open/lines ·
+math.random 5.4 (xoshiro256**, seed-exact with PUC) · dual-number mode forced on
+x64/x86 (`-DLUAJIT_NUMMODE=2`, otherwise those targets have no integer type) ·
 tonumber 5.4 rules · debug.upvalueid/upvaluejoin · table borders + rawlen ·
 `__len` on tables (any value) · `__pairs` · `__name` type names ·
 C API: absindex, isinteger, geti/seti, len, compare, stringtonumber, rotate,

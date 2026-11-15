@@ -19,7 +19,10 @@ tests/report/
 tests/fuzz/out/
 tests/fuzz/failures/
 tests/capi/build/
+# benchmark scratch (stock LuaJIT build)
+tmp/
 __pycache__/
 *.tar.gz
-# except the reference source vendored for offline build boxes
+# except the reference sources vendored for offline build boxes
 !tests/ref/dist/*.tar.gz
+!tests/bench/dist/*.tar.gz

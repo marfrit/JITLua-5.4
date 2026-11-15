@@ -257,7 +257,7 @@ TRef lj_record_constify(jit_State *J, cTValue *o)
   else if (tvisint(o))
     return lj_ir_kint(J, intV(o));
   else if (tvisnum(o))
-    return lj_ir_knumint(J, numV(o));
+    return lj_ir_knum(J, numV(o));  /* 5.4: a float stays a float (3.0 != 3). */
   else if (tvisbool(o))
     return TREF_PRI(itype2irt(o));
   else
@@ -2335,7 +2335,7 @@ void lj_record_ins(jit_State *J)
   case BCMnum: { cTValue *tv = proto_knumtv(J->pt, rc);
     copyTV(J->L, rcv, tv); ix.key = rc = tvisint(tv) ? lj_ir_kint(J, intV(tv)) :
     tv->u32.hi == LJ_KEYINDEX ? (lj_ir_kint(J, 0) | TREF_KEYINDEX) :
-    lj_ir_knumint(J, numV(tv)); } break;
+    lj_ir_knum(J, numV(tv)); } break;  /* 5.4: keep float constants float. */
   case BCMstr: { GCstr *s = gco2str(proto_kgc(J->pt, ~(ptrdiff_t)rc));
     setstrV(J->L, rcv, s); ix.key = rc = lj_ir_kstr(J, s); } break;
   default: break;  /* Handled later. */

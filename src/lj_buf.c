@@ -255,7 +255,7 @@ SBuf *lj_buf_puttab(SBuf *sb, GCtab *t, GCstr *sep, int32_t i, int32_t e)
       } else if (tvisint(o)) {
 	w = lj_strfmt_wint(lj_buf_more(sb, STRFMT_MAXBUF_INT+seplen), intV(o));
       } else if (tvisnum(o)) {
-	w = lj_buf_more(lj_strfmt_putfnum(sb, STRFMT_G14, numV(o)), seplen);
+	w = lj_buf_more(lj_strfmt_putfnumstr(sb, numV(o)), seplen);
       } else {
 	goto badtype;
       }

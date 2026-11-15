@@ -141,6 +141,7 @@ typedef struct FuncScope {
 /* Per-function state. */
 typedef struct FuncState {
   GCtab *kt;			/* Hash table for constants. */
+  GCtab *ktf;			/* Hash table for float constants (5.4: keyed by bits). */
   LexState *ls;			/* Lexer state. */
   lua_State *L;			/* Lua state. */
   FuncScope *bl;		/* Current scope. */
@@ -229,7 +230,20 @@ static BCReg const_num(FuncState *fs, ExpDesc *e)
   lua_State *L = fs->L;
   TValue *o;
   lj_assertFS(expr_isnumk(e), "bad usage");
-  o = lj_tab_set(L, fs->kt, &e->u.nval);
+  if (LJ_DUALNUM && tvisnum(&e->u.nval)) {
+    /* Lua 5.4 keeps int and float constants distinct (3 vs 3.0) and keeps
+    ** -0.0 distinct from 0.0.  The main constant table is keyed by number,
+    ** which normalizes integral doubles to int keys, so float constants go
+    ** into a dedicated table keyed by their raw bit pattern. */
+    uint64_t u = e->u.nval.u64;
+    TValue *kv = L->top;
+    setstrV(L, kv, lj_str_new(L, (const char *)&u, sizeof(u)));
+    incr_top(L);
+    o = lj_tab_set(L, fs->ktf, kv);
+    L->top--;  /* ktf (anchored on the stack) keeps the key alive. */
+  } else {
+    o = lj_tab_set(L, fs->kt, &e->u.nval);
+  }
   if (tvhaskslot(o))
     return tvkslot(o);
   o->u64 = fs->nkn;
@@ -812,7 +826,10 @@ static int foldarith(BinOpr opr, ExpDesc *e1, ExpDesc *e2)
   n = lj_vm_foldarith(expr_numberV(e1), expr_numberV(e2), (int)opr-OPR_ADD);
   setnumV(&o, n);
   if (tvisnan(&o) || tvismzero(&o)) return 0;  /* Avoid NaN and -0 as consts. */
-  if (LJ_DUALNUM) {
+  if (LJ_DUALNUM && tvisint(&e1->u.nval) && tvisint(&e2->u.nval) &&
+      opr != OPR_DIV && opr != OPR_POW) {
+    /* 5.4: int op int stays int, but / and ^ always yield a float, and a
+    ** float operand makes the result float (3.0 + 0 is 3.0, not 3). */
     int64_t i64;
     int32_t k;
     if (lj_num2int_check(n, i64, k)) {
@@ -1551,6 +1568,22 @@ static void fs_fixup_k(FuncState *fs, GCproto *pt, void *kptr)
       }
     }
   }
+  /* Float constants (5.4): stored in ktf keyed by their raw bit pattern. */
+  kt = fs->ktf;
+  node = noderef(kt->node);
+  hmask = kt->hmask;
+  for (i = 0; i <= hmask; i++) {
+    Node *n = &node[i];
+    if (tvhaskslot(&n->val)) {
+      ptrdiff_t kidx = (ptrdiff_t)tvkslot(&n->val);
+      TValue *tv = &((TValue *)kptr)[kidx];
+      uint64_t u;
+      lj_assertFS(tvisstr(&n->key) && strV(&n->key)->len == sizeof(u),
+		  "bad float constant key");
+      memcpy(&u, strdata(strV(&n->key)), sizeof(u));
+      tv->u64 = u;
+    }
+  }
 }
 
 /* Fixup upvalues for prototype, step #1. */
@@ -1773,6 +1806,9 @@ static void fs_init(LexState *ls, FuncState *fs)
   fs->kt = lj_tab_new(L, 0, 0);
   /* Anchor table of constants in stack to avoid being collected. */
   settabV(L, L->top, fs->kt);
+  incr_top(L);
+  fs->ktf = lj_tab_new(L, 0, 0);
+  settabV(L, L->top, fs->ktf);
   incr_top(L);
 }
 

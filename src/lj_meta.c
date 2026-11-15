@@ -373,7 +373,7 @@ TValue *lj_meta_cat(lua_State *L, TValue *top, int left)
 	} else if (tvisint(o)) {
 	  lj_strfmt_putint(sb, intV(o));
 	} else {
-	  lj_strfmt_putfnum(sb, STRFMT_G14, numV(o));
+	  lj_strfmt_putfnumstr(sb, numV(o));
 	}
       }
       setstrV(L, top, lj_buf_str(L, sb));

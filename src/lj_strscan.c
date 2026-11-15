@@ -522,12 +522,11 @@ StrScanFmt lj_strscan_scan(const uint8_t *p, MSize len, TValue *o,
     else
       fmt = strscan_dec(sp, o, fmt, opt, ex, neg, dig);
 
-    /* Try to convert number to integer, if requested. */
-    if (fmt == STRSCAN_NUM && (opt & STRSCAN_OPT_TOINT)) {
-      int64_t tmp;
-      if (lj_num2int_check(o->n, tmp, o->i) && !tvismzero(o))
-	return STRSCAN_INT;
-    }
+    /* Lua 5.4: a numeral with a decimal point or exponent stays a float,
+    ** even when its value is integral (3.0 is a float, 3 is an integer).
+    ** LuaJIT 2.1 narrowed such values to integers here; that is wrong for 5.4
+    ** and also for string->number coercion ("3.0" + 0 must be a float).
+    */
     return fmt;
   }
 }

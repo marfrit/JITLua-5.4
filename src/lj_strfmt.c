@@ -174,7 +174,7 @@ const char *lj_strfmt_wstrnum(lua_State *L, cTValue *o, MSize *lenp)
   } else if (tvisint(o)) {
     sb = lj_strfmt_putint(lj_buf_tmp_(L), intV(o));
   } else if (tvisnum(o)) {
-    sb = lj_strfmt_putfnum(lj_buf_tmp_(L), STRFMT_G14, o->n);
+    sb = lj_strfmt_putfnumstr(lj_buf_tmp_(L), o->n);
   } else {
     return NULL;
   }
@@ -195,9 +195,30 @@ SBuf * LJ_FASTCALL lj_strfmt_putint(SBuf *sb, int32_t k)
 /* Add number to buffer. */
 SBuf * LJ_FASTCALL lj_strfmt_putnum(SBuf *sb, cTValue *o)
 {
-  return lj_strfmt_putfnum(sb, STRFMT_G14, o->n);
+  return lj_strfmt_putfnumstr(sb, o->n);
 }
 #endif
+
+/* Lua 5.4 number->string for tostring/concat: %.14g, but a rendering that
+** looks like an integer gets a ".0" suffix (tostring(3.0) == "3.0"). */
+SBuf * LJ_FASTCALL lj_strfmt_putfnumstr(SBuf *sb, lua_Number n)
+{
+  MSize ofs = sbuflen(sb);  /* Offset, not pointer: putnum may reallocate. */
+  MSize len, i;
+  sb = lj_strfmt_putfnum(sb, STRFMT_G14, n);
+  len = sbuflen(sb) - ofs;
+  i = 0;
+  while (i < len &&
+	 (sb->b[ofs+i] == '-' || (sb->b[ofs+i] >= '0' && sb->b[ofs+i] <= '9')))
+    i++;
+  if (i == len) {
+    char *w = lj_buf_more(sb, 2);
+    w[0] = '.';
+    w[1] = '0';
+    sb->w = w + 2;
+  }
+  return sb;
+}
 
 SBuf * LJ_FASTCALL lj_strfmt_putptr(SBuf *sb, const void *v)
 {

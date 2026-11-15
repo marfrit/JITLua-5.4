@@ -625,6 +625,16 @@ GCstr * LJ_FASTCALL lj_strfmt_num(lua_State *L, cTValue *o)
 {
   char buf[STRFMT_MAXBUF_NUM];
   MSize len = (MSize)(lj_strfmt_wfnum(NULL, STRFMT_G14, o->n, buf) - buf);
+  /* Lua 5.4: a float whose %.14g rendering looks like an integer gets a
+  ** ".0" suffix, so that tostring(3.0) == "3.0" (but %g still gives "3"). */
+  {
+    MSize i = 0;
+    while (i < len && (buf[i] == '-' || (buf[i] >= '0' && buf[i] <= '9'))) i++;
+    if (i == len && len+2 < STRFMT_MAXBUF_NUM) {
+      buf[len++] = '.';
+      buf[len++] = '0';
+    }
+  }
   return lj_str_new(L, buf, len);
 }
 

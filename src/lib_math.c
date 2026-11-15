@@ -191,6 +191,51 @@ LJLIB_CF(math_randomseed)
   return 0;
 }
 
+/* -- Lua 5.4 additions (MISSION P5.5) ------------------------------------
+** math.maxinteger/math.mininteger are deliberately absent until the int64
+** value model lands (ADR-001): they cannot be represented exactly as doubles.
+*/
+
+LJLIB_CF(math_type)
+{
+  TValue *o = L->base;
+  luaL_checkany(L, 1);
+  if (tvisint(o))
+    lua_pushstring(L, "integer");
+  else if (tvisnum(o))
+    lua_pushstring(L, "float");
+  else
+    lua_pushnil(L);  /* 5.4 returns fail for non-numbers */
+  return 1;
+}
+
+LJLIB_CF(math_tointeger)
+{
+  int ok, isnum;
+  lua_Integer n;
+  lua_Number d;
+  luaL_checkany(L, 1);
+  n = lua_tointegerx(L, 1, &ok);
+  /* 5.4: the value must have an exact integer representation (also for
+  ** numeric strings, which lua_tointegerx would otherwise truncate). */
+  d = lua_tonumberx(L, 1, &isnum);
+  if (ok && (!isnum || (lua_Number)n != d))
+    ok = 0;
+  if (ok)
+    lua_pushinteger(L, n);
+  else
+    lua_pushnil(L);
+  return 1;
+}
+
+LJLIB_CF(math_ult)
+{
+  lua_Integer a = luaL_checkinteger(L, 1);
+  lua_Integer b = luaL_checkinteger(L, 2);
+  lua_pushboolean(L, (size_t)a < (size_t)b);  /* unsigned comparison */
+  return 1;
+}
+
 /* ------------------------------------------------------------------------ */
 
 #include "lj_libdef.h"

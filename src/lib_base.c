@@ -612,17 +612,53 @@ LJLIB_CF(coroutine_status)
   return 1;
 }
 
+LJLIB_CF(coroutine_close)
+{
+  lua_State *co;
+  const char *s;
+  if (!(L->top > L->base && tvisthread(L->base)))
+    lj_err_arg(L, 1, LJ_ERR_NOCORO);
+  co = threadV(L->base);
+  if (co == L) s = "running";
+  else if (co->status == LUA_YIELD) s = "suspended";
+  else if (co->status != LUA_OK) s = "dead";
+  else if (co->base > tvref(co->stack)+1+LJ_FR2) s = "normal";
+  else if (co->top == co->base) s = "dead";
+  else s = "suspended";
+  if (strcmp(s, "suspended") == 0) {
+    /* 5.4: close a suspended coroutine. Without to-be-closed variables the
+    ** close is just a reset of the coroutine's stack. */
+    lj_func_closeuv(co, tvref(co->stack));
+    co->status = LUA_OK;
+    co->base = co->top = tvref(co->stack) + 1 + LJ_FR2;
+    co->cframe = NULL;
+    setboolV(L->top++, 1);
+    return 1;
+  }
+  if (strcmp(s, "dead") == 0) {
+    if (co->status == LUA_OK) {  /* Finished without error. */
+      setboolV(L->top++, 1);
+    } else {  /* Died with an error: return false plus the error object. */
+      setboolV(L->top++, 0);
+      if (co->top > co->base) {
+	copyTV(L, L->top++, co->top-1);
+      } else {
+	setnilV(L->top++);
+      }
+    }
+    return (co->status == LUA_OK) ? 1 : 2;
+  }
+  lj_err_callermsg(L, s[0] == 'r' ? "cannot close a running coroutine" :
+		       "cannot close a normal coroutine");
+  return 0;
+}
+
 LJLIB_CF(coroutine_running)
 {
-#if LJ_52
+  /* Lua 5.4: the running coroutine plus a boolean (true for the main one). */
   int ismain = lua_pushthread(L);
   setboolV(L->top++, ismain);
   return 2;
-#else
-  if (lua_pushthread(L))
-    setnilV(L->top++);
-  return 1;
-#endif
 }
 
 LJLIB_CF(coroutine_isyieldable)

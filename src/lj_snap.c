@@ -19,6 +19,7 @@
 #include "lj_jit.h"
 #include "lj_iropt.h"
 #include "lj_trace.h"
+#include "lj_i64.h"
 #include "lj_snap.h"
 #include "lj_target.h"
 #if LJ_HASFFI
@@ -719,6 +720,10 @@ static void snap_restoreval(jit_State *J, GCtrace *T, ExitState *ex,
     int32_t *sps = &ex->spill[regsp_spill(rs)];
     if (irt_isinteger(t)) {
       setintV(o, *sps);
+#if LJ_GC64
+    } else if (irt_isint64(t)) {  /* 64-bit integer value (ADR-001b step 3). */
+      lj_i64_toTValue(J->L, o, *(int64_t *)sps);
+#endif
 #if !LJ_SOFTFP32
     } else if (irt_isnum(t)) {
       o->u64 = *(uint64_t *)sps;
@@ -742,6 +747,10 @@ static void snap_restoreval(jit_State *J, GCtrace *T, ExitState *ex,
       return;
     } else if (irt_isinteger(t)) {
       setintV(o, (int32_t)ex->gpr[r-RID_MIN_GPR]);
+#if LJ_GC64
+    } else if (irt_isint64(t)) {  /* 64-bit integer value (ADR-001b step 3). */
+      lj_i64_toTValue(J->L, o, (int64_t)ex->gpr[r-RID_MIN_GPR]);
+#endif
 #if !LJ_SOFTFP
     } else if (irt_isnum(t)) {
       setnumV(o, ex->fpr[r-RID_MIN_FPR]);

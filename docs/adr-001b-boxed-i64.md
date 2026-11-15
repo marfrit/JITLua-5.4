@@ -355,3 +355,40 @@ truncate to 32 bits. Measured in this tree (~100 `intV(` sites):
 Rule for the audit: integer values that are *indices/lengths/lines* stay
 int32-bounded by the language or the API; anything that can be a user value
 uses the exact reader.
+
+## Step 3 time-box result and resumption plan (2026-11-15)
+
+Time-boxed attempt (commit `b99fe41d`, reverted to keep the step-2 gates):
+
+1. What works: the **raw IRT_I64 slot model**. With `snap_restoreval` handling
+   IRT_I64 (spill and register branches, encoding via `lj_i64_toTValue`), a loop
+   that is widened from entry runs in mcode: 1,000,000 iterations in ~0.38 ms,
+   values and exit encoding exact (e.g. `local s=1<<40; for i=1,300000 do
+   s=s+p end` ~0.13 ms in mcode).
+2. Where it stops: the **int32 -> I64 type transition inside a root trace**.
+   Loops that start at an int32 value and overflow into widened values (b1's
+   `h`, b3's `st`) retry the root trace 55-165 times with LJ_TRERR_NYICOAL
+   (register coalescing up on the mixed-type PHI) and fall back to the
+   interpreter; b3 then takes 4325 ms instead of the 46 ms int32 path. That
+   model also removed the b3 JIT-vs-joff checksum divergence (both now
+   == PUC's 1196193376), but at that cost.
+3. Resumption rule: **never promote a slot's type inside a trace**. Do it the
+   way LuaJIT already handles int->num:
+   - the int32 trace keeps ADDOV/SUBOV/MULOV guards;
+   - a guard overflow exits to the interpreter, which computes the widened
+     (5.4) value;
+   - the next recording (side trace from that exit, or a fresh root once the
+     loop entry slot is already widened) specialises the slot as I64 from the
+     start, so each trace is type-stable;
+   - a loop whose PHI would need two types must abort and re-record with the
+     new entry type (LJ_TRERR_TYPEINS-style retry), never emit a mixed-type PHI.
+4. To build:
+   - recorder rule "slot widened at trace entry -> IRSLOAD_I47 / boxed udata
+     payload load as I64" (only at entry, not mid-trace);
+   - abort-and-retry when a loop PHI's entry type changes (rec_loop /
+     LJ_TRERR_TYPEINS);
+   - keep the `snap_restoreval` IRT_I64 branch and `lj_i64_toTValue` from the
+     time-box (they are correct and are now in the tree, inert until a I64 TRef
+     exists).
+5. Gates for the resumed step: b1 <= 1.5x stock FFI; b3 back to ~46 ms with the
+   JIT and -joff checksums both 1196193376; full suites green on arm64 and x64.

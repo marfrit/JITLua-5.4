@@ -116,6 +116,11 @@ static void lex_number(LexState *ls, TValue *tv)
 	  (LJ_HASFFI ? (STRSCAN_OPT_LL|STRSCAN_OPT_IMAG) : 0));
   if (LJ_DUALNUM && fmt == STRSCAN_INT) {
     setitype(tv, LJ_TISNUM);
+  } else if (fmt == STRSCAN_I64 || fmt == STRSCAN_U64) {
+    /* Lua 5.4: a pure integer literal that exceeds int32 is an integer (boxed
+    ** interned int64), not a float and not an FFI cdata. */
+    extern GCudata *lj_i64_box(lua_State *L, int64_t v);
+    setudataV(ls->L, tv, lj_i64_box(ls->L, (int64_t)tv->u64));
   } else if (fmt == STRSCAN_NUM) {
     /* Already in correct format. */
 #if LJ_HASFFI

@@ -288,3 +288,32 @@ OPEN / next:
 Long runs: `nohup ... > /tmp/log 2>&1 &` then poll, or `timeout N`. Full harness run
 with `--timeout 60` takes ~2 min wall (calls.lua/heavy.lua dominate). Sanitizer build
 ~1 min. Never run two harness invocations concurrently (they share tests/report/).
+
+## Session 9 — step 2b in progress: boxed int64 literal constants
+
+Both boxes were green after steps 2-3 (x64 fix committed `548242a3`: jump to
+`vmeta_arith_vvo` after `movzx RAd, PC_RA`; mixed float/int `//` routed to the
+C helper; NaN sign documented as implementation-defined and canonicalised
+inside the test only).
+
+Benchmark gate ran (arm-box, four arms) BEFORE 2b: b1/b2 fail with
+"number has no integer representation" because integer literals beyond int32
+are still floats. Measured meanwhile: b3 int32 control ours JIT 46.5 ms vs
+stock 38.1 vs PUC 264; b2b (~2^41) ours 143 ms/8 MB, stock(float) 127.8, PUC 172
+-- b2b was NOT honest (values came from a float literal, not boxes).
+
+IN PROGRESS (edits applied, NOT yet compiled):
+- `lj_bc.h`: new `_(KI64, dst, ___, cdata, ___)` after KCDATA.
+- `lj_lex.c` lex_number: STRSCAN_I64/U64 now create a boxed integer via
+  `lj_i64_box` (extern decl inside the function is ugly -> move to include
+  lj_i64.h). Boxes are rooted in the registry intern table, so holding one in
+  the lexer token is GC-safe.
+- `lj_parse.c`: big integer literals use the VKCDATA kind (not foldable) and
+  emit BC_KI64 with const_gc(..., LJ_TUDATA) instead of KCDATA.
+- STILL TO DO: BC_KI64 VM cases arm64 + x64 (copy the 8-byte TValue from
+  KBASE+~kidx to BASE+RA*8 UNCHANGED -- do not settp, His's hint), and the dump
+  format: `bcwrite_kgc`/`bcread_kgc` assert only STR/TAB/cdata/proto, so a
+  udata constant breaks string.dump; add a BCDUMP_KGC_I64BOX tag writing the
+  int64 bits and reading them back through lj_i64_box.
+- Then: literals test (`lex_01_literals` mode A), full gates both boxes,
+  benchmark gate again (now honest), commit per step.

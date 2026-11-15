@@ -573,12 +573,17 @@ static void expr_toreg_nobranch(FuncState *fs, ExpDesc *e, BCReg reg)
     else
 #endif
       ins = BCINS_AD(BC_KNUM, reg, const_num(fs, e));
-#if LJ_HASFFI
   } else if (e->k == VKCDATA) {
-    fs->flags |= PROTO_FFI;
-    ins = BCINS_AD(BC_KCDATA, reg,
-		   const_gc(fs, obj2gco(cdataV(&e->u.nval)), LJ_TCDATA));
+    if (tvisi64(&e->u.nval)) {  /* boxed int64 literal (5.4 integer) */
+      ins = BCINS_AD(BC_KI64, reg,
+		     const_gc(fs, obj2gco(udataV(&e->u.nval)), LJ_TUDATA));
+#if LJ_HASFFI
+    } else {
+      fs->flags |= PROTO_FFI;
+      ins = BCINS_AD(BC_KCDATA, reg,
+		     const_gc(fs, obj2gco(cdataV(&e->u.nval)), LJ_TCDATA));
 #endif
+    }
   } else if (e->k == VRELOCABLE) {
     setbc_a(bcptr(fs, e), reg);
     goto noins;
@@ -2338,7 +2343,10 @@ static void expr_simple(LexState *ls, ExpDesc *v, int eflags)
 {
   switch (ls->tok) {
   case TK_number:
-    expr_init(v, (LJ_HASFFI && tviscdata(&ls->tokval)) ? VKCDATA : VKNUM, 0);
+    /* VKCDATA also carries a boxed int64 literal: neither is foldable, each
+    ** has its own load opcode. */
+    expr_init(v, (LJ_HASFFI && tviscdata(&ls->tokval)) ? VKCDATA :
+		 (tvisi64(&ls->tokval)) ? VKCDATA : VKNUM, 0);
     copyTV(ls->L, &v->u.nval, &ls->tokval);
     break;
   case TK_string:

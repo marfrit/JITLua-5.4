@@ -124,6 +124,7 @@
   /* Constant ops. */ \
   _(KSTR,	dst,	___,	str,	___) \
   _(KCDATA,	dst,	___,	cdata,	___) \
+  _(KI64,	dst,	___,	cdata,	___) \
   _(KSHORT,	dst,	___,	lits,	___) \
   _(KNUM,	dst,	___,	num,	___) \
   _(KPRI,	dst,	___,	pri,	___) \

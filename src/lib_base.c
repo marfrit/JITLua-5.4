@@ -210,6 +210,20 @@ LJLIB_CF(rawequal)		LJLIB_REC(.)
   return 1;
 }
 
+/* Lua 5.4: rawlen bypasses __len (tables and strings only). */
+LJLIB_CF(rawlen)
+{
+  TValue *o = lj_lib_checkany(L, 1);
+  if (tvisstr(o)) {
+    setintV(L->top-1, (int32_t)strV(o)->len);
+  } else if (tvistab(o)) {
+    setintV(L->top-1, (int32_t)lj_tab_len(tabV(o)));
+  } else {
+    lj_err_argtype(L, 1, "table or string");
+  }
+  return 1;
+}
+
 #if LJ_52
 LJLIB_CF(rawlen)		LJLIB_REC(.)
 {

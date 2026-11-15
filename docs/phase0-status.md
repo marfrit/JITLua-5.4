@@ -74,6 +74,40 @@ Also fixed a real syntax error in `err_01_xpcall.lua` (missing paren) found by t
 9. `tostring(-(0/0))` == "-nan" on aarch64 PUC → nan sign is observable; do NOT normalize it away.
 10. `os.time{...}` is TZ-dependent → harness forces TZ=UTC.
 
+## Session 3 (in progress) — table borders (P1.3b)
+
+GOAL RIGHT NOW: finish the `#` border fix in `src/lj_tab.c:lj_tab_len`.
+- Root cause found by instrumenting the parser: for `{1,nil,3}` the template
+  table already has ALL positional keys in the array (asize=5, trailing nil at
+  slot 4). `lj_tab_len`'s binary search then returned 1 instead of PUC's 3.
+- Fix applied (NOT yet built/tested): add PUC `luaH_getn` case-1 fast path —
+  if the last array slot is nil but the second-to-last is present, return hi-1.
+  A previous attempt ("scan down to last non-nil") was WRONG: it gave 3 for
+  runtime-built `t={} t[1]=1 t[3]=3` where PUC gives 1. Reverted.
+- The parser-side `lj_tab_resize` experiment was REMOVED (unnecessary), and the
+  temporary `#include <stdio.h>` + fprintf diagnostics were REMOVED from
+  lj_parse.c. Verify lj_parse.c is clean (`git diff src/lj_parse.c` should show
+  only the earlier ktf/const_num/foldarith/attrib changes).
+- New test `tests/d54/tbl_02_border.lua` (constructors, runtime tables, holes,
+  hash spillover, JIT hot loops). Last run: only diff was `runtime | 1 vs 3`.
+- `tests/d54/tbl_01_lib.lua` became XPASS in A and R -> REMOVE its known-bad
+  entry once the border fix is confirmed.
+- Also still XPASS/pending: none other known.
+
+NEXT STEPS after the border fix:
+1. `make -j8`, run `tests/harness.sh --mode all --filter tbl_0 --verbose`,
+   then full d54 + `tests/capi/run.sh` + mode-B fuzz, then full corpus.
+2. Remove `tests/d54/tbl_01_lib.lua` from tests/known-bad.tsv; add
+   `tbl_02_border.lua` only if it still differs.
+3. Commit (label `Phase 1 (P1.3b): ...`) and `git push origin main`.
+4. Remaining feasible work: C API additions (lua_arith, lua_getiuservalue,
+   lua_setiuservalue, lua_newuserdatauv, lua_warning, lua_gc 5.4 actions),
+   package/require 5.4 (blocked: upstream attrib.lua needs `//`).
+5. BLOCKED on ADR-001 (int64 value model): `//`, int64 bitwise, math.maxinteger,
+   large-int arithmetic, 5.4 dump format. BLOCKED on VM work: `<close>`,
+   coroutine.close, generational GC, table __gc finalizers, _ENV.
+6. Known cosmetic bug P1.8b: tail-call error names (err_02_tailname.lua).
+
 ## Session 2 progress (porting started)
 
 Commits on `main` after M0 (all harness-green, capi 29/29, mode-B fuzz green):

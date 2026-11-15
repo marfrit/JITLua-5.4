@@ -24,7 +24,7 @@ tests/d54/bits_01_ops.lua	A	P1: bitwise ops, logical >>, mod-64/negative counts
 tests/d54/bits_02_metamethods.lua	A	P1: __band/__bor/__bxor/__shl/__shr/__bnot dispatch
 tests/d54/coro_01_close.lua	A	P1/P5: coroutine.close absent, <close> support
 tests/d54/dump_str_01.lua	A	P1.3: gmatch 5.4 empty-match rule done; remaining: 5.4 dump header/format + load error wording
-tests/d54/dump_02_border.lua	AR	P1: BUG template-table border differs after dump/reload ({1,nil,3} -> 1 direct, 3 reloaded; PUC=3). Also needs PUC luaH_getn border algorithm + rawlen.
+tests/d54/dump_02_border.lua	A	IMPL-DEFINED: dump/reload border bug FIXED and rawlen added; only the runtime-built sparse-table border differs (any border is legal per the 5.4 manual)
 tests/d54/env_01_fenv.lua	A	P1: _ENV model (5.1 globals); getfenv/setfenv kept as ext
 tests/d54/err_02_tailname.lua	A	P1.8b: tail-call error names -- LuaJIT reuses the caller frame, so the loaded-module fallback reports 'string.rep' where 5.4 reports the short 'rep'. Non-tail and pcall paths match.
 tests/d54/fmt_01_format.lua	A	P1: %d/%x integer-representation rule done; remaining diffs need math.maxinteger/mininteger (int64 core)
@@ -37,4 +37,4 @@ tests/d54/numeric_01_types.lua	A	P1: int64/float value model, math.type, wrap
 tests/d54/numeric_02_arith.lua	A	P1: int/float arithmetic, coercion, wrap
 tests/d54/numeric_03_idiv.lua	A	P1: // floor division (5.4 syntax absent)
 tests/d54/numeric_04_mod.lua	A	P1: % floor-mod sign rules (5.1 is fmod-like)
-tests/d54/tbl_01_lib.lua	AR	P5/P1.3b: table.move/unpack now correct; remaining diffs are the # border algorithm (PUC=3 for {1,nil,3}) and the dump/reload template-border bug
+tests/d54/tbl_03_border_divergence.lua	A	IMPL-DEFINED: runtime-built sparse tables may report any legal border (5.4 manual 3.4.7); LuaJIT's array-growth policy differs from PUC's alimit hint

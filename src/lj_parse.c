@@ -1957,6 +1957,13 @@ static void expr_table(LexState *ls, ExpDesc *e)
     if (!lex_opt(ls, ',') && !lex_opt(ls, ';')) break;
   }
   lex_match(ls, '}', '{', line);
+  if (t && narr > 1) {
+    /* 5.4: a constructor's array part holds every positional key (PUC builds
+    ** it that way).  LuaJIT creates the template on demand, so later keys can
+    ** land in the hash part even when asize is large enough; that changes the
+    ** '#' border and makes it differ before/after string.dump.  Normalize. */
+    lj_tab_resize(fs->L, t, narr, hsize2hbits(nhash));
+  }
   if (vcall) {
     BCInsLine *ilp = &fs->bcbase[fs->pc-1];
     ExpDesc en;

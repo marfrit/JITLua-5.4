@@ -658,13 +658,20 @@ MSize LJ_FASTCALL lj_tab_len(GCtab *t)
   if (hi) hi--;
   /* In a growing array the last array element is very likely nil. */
   if (hi > 0 && LJ_LIKELY(tvisnil(arrayslot(t, hi)))) {
+    /* Lua 5.4 (PUC luaH_getn case 1): if the element before the last is
+    ** present, it is a border -- trailing nils must not shrink it
+    ** (e.g. {1,nil,3} has border 3, not 1). */
+    if (hi >= 2 && !tvisnil(arrayslot(t, hi-1)))
+      return (MSize)(hi-1);
     /* Binary search to find a non-nil to nil transition in the array. */
-    size_t lo = 0;
-    while (hi - lo > 1) {
-      size_t mid = (lo+hi) >> 1;
-      if (tvisnil(arrayslot(t, mid))) hi = mid; else lo = mid;
+    {
+      size_t lo = 0;
+      while (hi - lo > 1) {
+	size_t mid = (lo+hi) >> 1;
+	if (tvisnil(arrayslot(t, mid))) hi = mid; else lo = mid;
+      }
+      return (MSize)lo;
     }
-    return (MSize)lo;
   }
   /* Without a hash part, there's an implicit nil after the last element. */
   return t->hmask ? tab_len_slow(t, hi) : (MSize)hi;

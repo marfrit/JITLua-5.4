@@ -30,9 +30,6 @@ tests/d54/gc_01_tbc_gc.lua	A	P1/P4: <close>/__close, generational GC options
 tests/d54/lex_01_literals.lua	A	P1: 5.4 literal classification (int vs float, overflow)
 tests/d54/math_os_01.lua	A	P1/P5: math.type/tointeger/ult done; remaining: math.maxinteger/mininteger (int64 core), math.random(1,2^62)
 tests/d54/math_02_random.lua	A	P5.5 done: xoshiro256** sequence matches PUC for every seeded call; only math.random(0) still returns a float -- needs a 64-bit integer in the value model (ADR-001)
-tests/d54/meta_01_matrix.lua	A	P1: int/float arithmetic + metamethod operand matrix
-tests/d54/meta_02_compare_len.lua	A	P1: exact int/float compare, __len any value, __pairs
-tests/d54/numeric_01_types.lua	A	ADR-001b step 1 done: maxinteger/mininteger exist as boxes; arithmetic on them (wrap, mixed, unary minus) is step 3
-tests/d54/numeric_02_arith.lua	A	P1: int/float arithmetic, coercion, wrap
-tests/d54/numeric_04_mod.lua	A	P1: % floor-mod sign rules (5.1 is fmod-like)
+tests/d54/meta_01_matrix.lua	A	P1: remaining 5.4 arithmetic-error wording (type-first / "attempt to add a 'string' with a 'table'")
+tests/d54/numeric_02_arith.lua	A	P1: remaining 5.4 coercion-failure wording ("attempt to add a 'string' with a 'number'")
 tests/d54/tbl_03_border_divergence.lua	A	IMPL-DEFINED: runtime-built sparse tables may report any legal border (5.4 manual 3.4.7); LuaJIT's array-growth policy differs from PUC's alimit hint

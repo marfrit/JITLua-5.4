@@ -332,9 +332,9 @@
 |  add CARG1, BASE, RA, lsl #3
 |   mov CARG2, RC
 |  bl extern lj_i64_numeq
-|  cmn CRET1, #1			// -1: not numeric, use the normal path
+|  cmn CRET1w, #1			// -1 (32-bit C int): not numeric, normal path
 |  beq >9
-|  cmp CRET1, #1			// 1 = equal, 0 = unequal
+|  cmp CRET1w, #1			// 1 = equal, 0 = unequal
 ||if (vk) {
 |  csel PC, RB, PC, eq
 ||} else {
@@ -342,6 +342,12 @@
 ||}
 |  ins_next
 |9:
+|  // A C call clobbers CARG1/CARG3/RB: reload for the normal path.
+|  ldrh RBw, [PC, #(OFS_RD-4)]
+|   add RB, PC, RB, lsl #2
+|    sub RB, RB, #0x20000
+|  ldr CARG1, [BASE, RA, lsl #3]
+|  ldr CARG3, [RC]
 |.endmacro
 |.macro checknum, reg, target
 |  cmp TISNUMhi, reg, lsr #32

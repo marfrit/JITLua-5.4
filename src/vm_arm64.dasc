@@ -297,6 +297,14 @@
 |  cbnz TMP0, target		// not int32-proven: use the C helper instead
 |.endif
 |.endmacro
+|.macro checkintw, reg, fptarget, i64target
+|  cmp TISNUMhi, reg, lsr #32
+|  bne fptarget			// not an inline integer: FP variant handles floats
+|.if DUALNUM
+|  ubfx TMP0, reg, #32, #15	// widened 47-bit inline integer?
+|  cbnz TMP0, i64target		// exact 64-bit semantics via the C helper
+|.endif
+|.endmacro
 |.macro checknum, reg, target
 |  cmp TISNUMhi, reg, lsr #32
 |  bls target

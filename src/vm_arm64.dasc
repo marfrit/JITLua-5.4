@@ -297,13 +297,10 @@
 |  cbnz TMP0, target		// not int32-proven: use the C helper instead
 |.endif
 |.endmacro
-|.macro checkintw, reg, fptarget, i64target	// fptarget unused (kept for clarity)
+|.macro checkintw, reg, fptarget, i64target
 |  cmp TISNUMhi, reg, lsr #32
-|  bne i64target		// widened int or double: C helper decides, exact 5.4
-|.if DUALNUM
-|  ubfx TMP0, reg, #32, #15	// widened 47-bit inline integer?
-|  cbnz TMP0, i64target		// exact 64-bit semantics via the C helper
-|.endif
+|  bhi i64target		// widened 47-bit int or GC object (box): C helper
+|  blo fptarget		// lower tag range: double, keep the FP fast path
 |.endmacro
 |.macro checknum, reg, target
 |  cmp TISNUMhi, reg, lsr #32
@@ -2860,9 +2857,20 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |4:
     |  ins_next
     |
-    |7:  // Widened inline integer: exact 64-bit semantics via the C helper.
-    |  add CARG3, BASE, RB, lsl #3
-    |   add CARG4, BASE, RC, lsl #3
+    |7:  // Widened integer / box / double: exact via the C helper (vk-aware).
+    ||switch (vk) {
+    ||case 0:
+    |   add CARG3, BASE, RB, lsl #3
+    |    add CARG4, KBASE, RC, lsl #3
+    ||  break;
+    ||case 1:
+    |   add CARG3, KBASE, RC, lsl #3
+    |    add CARG4, BASE, RB, lsl #3
+    ||  break;
+    ||default:
+    |   add CARG3, BASE, RB, lsl #3
+    |    add CARG4, BASE, RC, lsl #3
+    ||}
     |    add CARG2, BASE, RA, lsl #3
     |.if "intins" == "adds"
     |   mov CARG5, #I64_ADD
@@ -2903,9 +2911,20 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |.endif
     |  str FARG1, [BASE, RA, lsl #3]
     |  ins_next
-    |6:  // Widened inline integer: exact 64-bit semantics via the C helper.
-    |  add CARG3, BASE, RB, lsl #3
-    |   add CARG4, BASE, RC, lsl #3
+    |6:  // Widened integer / box / double: exact via the C helper (vk-aware).
+    ||switch (vk) {
+    ||case 0:
+    |   add CARG3, BASE, RB, lsl #3
+    |    add CARG4, KBASE, RC, lsl #3
+    ||  break;
+    ||case 1:
+    |   add CARG3, KBASE, RC, lsl #3
+    |    add CARG4, BASE, RB, lsl #3
+    ||  break;
+    ||default:
+    |   add CARG3, BASE, RB, lsl #3
+    |    add CARG4, BASE, RC, lsl #3
+    ||}
     |    add CARG2, BASE, RA, lsl #3
     |.if "fpins" == "fpow"
     |   mov CARG5, #I64_POW

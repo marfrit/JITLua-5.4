@@ -173,10 +173,11 @@ static void i64_store(lua_State *L, TValue *ra, int64_t v)
 {
   if ((int64_t)(int32_t)v == v) {
     setintV(ra, (int32_t)v);
-#if 0 /* step-6 activation DISABLED (widened store; see docs): with it on, B1/B2 checksums are wrong
-       ** (-4587520 vs 343592796160): some op still truncates a widened value.
-       ** Bisect with tests/bench/b1_fnv.lua; see docs/phase0-status.md. */
-  } else if (i47_fits(v)) {
+#if LJ_GC64 /* step-6 activation. The widened inline form is distinguishable
+       ** from an int32 only while payload bits 32..46 are nonzero: values in
+       **[2^31, 2^32) encode as p=0 and would read back as the signed int32 of
+       ** their low word, so they stay boxed (narrow band, documented). */
+  } else if (i47_fits(v) && (((uint64_t)v >> 32) & 0x7fffu) != 0) {
     setint47V(ra, v);
 #endif
   } else {

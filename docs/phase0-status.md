@@ -508,3 +508,30 @@ from a tiny C patch or a `-e` script with `tostring`+`string.format("%x")` on
 internals; (2) fix the tag test accordingly; (3) route BC_ISEQV to
 lj_obj_equal when a box is present; (4) then enable, gate both boxes, bench.
 Activation back to #if 0 so the tree behaves like the last green gate.
+
+## Session 19 — STEP 2 DONE: 47-bit inline integers enabled, checksums exact
+
+Three real fixes:
+1. vm_arm64 `checkintw` + labels >7 (add/sub/mul/mod) and >6 (div/pow) call
+   `lj_i64_arith`; the operand loader is vk-aware (case 0/1 use KBASE for the
+   constant side -- the first version always used BASE and read a stack slot).
+   Operand routing: `cmp TISNUMhi; bhi ->helper` (widened int / GC object) and
+   `blo ->FP` (double keeps the fast path).
+2. `i64_store`: widened inline only while payload bits 32..46 are nonzero.
+   Values in [2^31, 2^32) encode with p=0 and would read back as the signed
+   int32 of their low word (measured: 2147549175 came back as -2147418121).
+   That narrow band stays boxed.
+3. (earlier) exact equality vs any number, for-loop bounds.
+Result: b1 = 343592796160 and b2 = 4047905256 on arm64 AND x64 (x64 did not
+need the asm patch: its checkint already routes non-int32 to the FP label but
+x64's int path evidently widens correctly -- verified by checksum).
+Gates: both boxes GREEN (A+B 47 PASS/0 FAIL/17 XFAIL, opt 128, R 32, capi 34,
+i64 14/14).
+Bench (arm-box, median): ours JIT b1 6858 / b2 2279 / b2b 251 / b3 46.3;
+ours -joff 6821 / 2282 / 269 / 3990; stock FFI 15.8 / 819 / 141 / 44.9;
+PUC 277 / 543 / 173 / 284. So b2 2.8x and b2b 1.8x vs FFI, b1 434x -- all
+values now go through the C helper in the interpreter, which is exactly what
+step 3 (IRT_I64 + allocation sinking) has to fix.
+OPEN DIVERGENCE: b3_int32 sum differs between ours JIT (1232839951),
+ours -joff (1196193376 == PUC) and stock (1303583832): the JIT narrows
+int32 arithmetic without the widened/overflow guard. Step-3 scope.

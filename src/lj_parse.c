@@ -1295,6 +1295,7 @@ static MSize gola_new(LexState *ls, GCstr *name, uint8_t info, BCPos pc)
   /* NOBARRIER: name is anchored in fs->kt and ls->vstack is not a GCobj. */
   setgcref(ls->vstack[vtop].name, obj2gco(name));
   ls->vstack[vtop].startpc = pc;
+  ls->vstack[vtop].line = ls->linenumber;
   ls->vstack[vtop].slot = (uint8_t)fs->nactvar;
   ls->vstack[vtop].info = info;
   ls->vtop = vtop+1;
@@ -1349,7 +1350,8 @@ static void gola_resolve(LexState *ls, FuncScope *bl, MSize idx)
 	  lj_lex_error(ls, 0, LJ_ERR_XCSCOPE, strdata(name));
 	} else {
 	  lj_lex_error(ls, 0, LJ_ERR_XGSCOPE,
-		       strdata(strref(vg->name)), strdata(name));
+		       strdata(strref(vg->name)), (int)ls->linenumber,
+		       strdata(name));
 	}
       }
       gola_patch(ls, vg, vl);
@@ -1388,7 +1390,8 @@ static void gola_fixup(LexState *ls, FuncScope *bl)
 	  else if (name == NAME_CONT)
 	    lj_lex_error(ls, 0, LJ_ERR_XCONT);
 	  else
-	    lj_lex_error(ls, 0, LJ_ERR_XLUNDEF, strdata(name));
+	    lj_lex_error(ls, 0, LJ_ERR_XLUNDEF, strdata(name),
+			 (int)ls->linenumber);
 	}
       }
     }
@@ -2753,8 +2756,11 @@ static void parse_label(LexState *ls)
   fs->bl->flags |= FSCOPE_GOLA;
   lj_lex_next(ls);  /* Skip '::'. */
   name = lex_str(ls);
-  if (gola_findlabel(ls, name))
-    lj_lex_error(ls, 0, LJ_ERR_XLDUP, strdata(name));
+  {
+    VarInfo *vl = gola_findlabel(ls, name);
+    if (vl)
+      lj_lex_error(ls, 0, LJ_ERR_XLDUP, strdata(name), (int)vl->line);
+  }
   idx = gola_new(ls, name, VSTACK_LABEL, fs->pc);
   lex_check(ls, TK_label);
   /* Recursively parse trailing statements: labels and ';'. */

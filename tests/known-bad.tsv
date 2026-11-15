@@ -11,7 +11,7 @@ tests/corpus/puc54/closure.lua	B	PERF: JIT-on side exceeds 60s while JIT-off fin
 tests/corpus/puc54/constructs.lua	A	P1: 5.4 syntax/semantics (const/close, numerics)
 tests/corpus/puc54/db.lua	A	P5: debug library 5.4 (info fields, hooks)
 tests/corpus/puc54/files.lua	A	P5: io library 5.4 exactness
-tests/corpus/puc54/goto.lua	A	P1: goto/label 5.4 scoping rules
+tests/corpus/puc54/goto.lua	A	P1.5: goto rules/messages done; test needs <close> attributives
 tests/corpus/puc54/heavy.lua	A	PERF: reference exceeds 60s (triage; raise timeout)
 tests/corpus/puc54/literals.lua	A	P1: 5.4 scanner (int/float literals, hex floats)
 tests/corpus/puc54/main.lua	A	P5: standalone interpreter semantics (progname, arg)
@@ -30,7 +30,6 @@ tests/d54/env_01_fenv.lua	A	P1: _ENV model (5.1 globals); getfenv/setfenv kept a
 tests/d54/err_01_xpcall.lua	A	P1: error(level)/non-string error object semantics
 tests/d54/fmt_01_format.lua	A	P1: %d/%x integer-representation rule done; remaining diffs need math.maxinteger/mininteger (int64 core)
 tests/d54/gc_01_tbc_gc.lua	A	P1/P4: <close>/__close, generational GC options
-tests/d54/goto_01_labels.lua	A	P1: goto/label 5.4 scoping rules
 tests/d54/lex_01_literals.lua	A	P1: 5.4 literal classification (int vs float, overflow)
 tests/d54/math_os_01.lua	A	P1/P5: math.type/tointeger/ult, maxinteger, random, os.time
 tests/d54/meta_01_matrix.lua	A	P1: int/float arithmetic + metamethod operand matrix

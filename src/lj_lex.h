@@ -52,6 +52,7 @@ typedef struct VarInfo {
   GCRef name;		/* Local variable name or goto/label name. */
   BCPos startpc;	/* First point where the local variable is active. */
   BCPos endpc;		/* First point where the local variable is dead. */
+  BCLine line;		/* Definition line (labels: for 5.4 duplicate diagnostics). */
   uint8_t slot;		/* Variable slot. */
   uint8_t info;		/* Variable/goto/label info. */
   VarIndex prev;	/* Previous entry in variable hash chain. */

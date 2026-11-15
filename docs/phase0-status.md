@@ -442,3 +442,25 @@ These are the candidates for B1's wrong checksum (b1 uses `h ~ byte`, `* prime`,
 int-vs-box comparison inside the *fold/guard* path or the 0xffff mask path on
 a box).
 Activation stays OFF again after the bisect job (tree green).
+
+## Session 16 — for-loop and inline-vs-box equality fixed; FNV checksum still wrong
+
+Fixed and in the tree: `lj_obj_equal` compares a boxed/widened integer against
+any number by exact value (5.4); `lj_meta_for` converts widened inline or boxed
+int64 loop bounds to exactly-representable floats BEFORE the number checks (a
+box previously raised "'for' initial value must be a number"; widened bounds
+truncated to their low words, `for i=a,a+2` returned 3 iterations of 3).
+Verified: `for` over 1<<40 bounds iterates correctly; `(a~1)==(1099511627776~1)`
+true; box arithmetic prints exact.
+
+Still wrong: with activation ON, `tests/bench/b1_fnv.lua` gives checksum
+-4587520 instead of 343592796160. All individual ops were correct in probes
+(xor/and/mul/add/shl/shr/concat on 1<<40). The FNV loop mixes a *boxed literal*
+as the starting h (0xcbf29ce484222325 is a box, literals never become inline)
+with widened results: suspects are (a) `h & 0xffff` where h is widened and the
+mask path routes via lj_meta_bitop -> check the BC_BAND asm `checkint` target
+on both operands, (b) `cs = cs + small` where cs widened, (c) the initial
+`h ~ byte` with a box lhs through the FFI-vs-5.4 branch in lj_meta_bitop.
+Bisect plan: instrument b1 with a per-iteration `print(h, math.type(h))` for
+the first 3 iterations and compare against PUC 5.4.7; then toggle one op at a
+time (replace `&`/`+` with explicit helper calls) to isolate.

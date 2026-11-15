@@ -7,6 +7,7 @@
 #define LUA_CORE
 
 #include "lj_obj.h"
+#include "lj_i64.h"
 
 /* Object type names. */
 LJ_DATADEF const char *const lj_obj_typename[] = {  /* ORDER LUA_T */
@@ -22,6 +23,17 @@ LJ_DATADEF const char *const lj_obj_itypename[] = {  /* ORDER LJ_T */
 /* Compare two objects without calling metamethods. */
 int LJ_FASTCALL lj_obj_equal(cTValue *o1, cTValue *o2)
 {
+  /* ADR-001b: a boxed int64 or a widened 47-bit inline integer compares by
+  ** exact value against any number (5.4), not by pointer/word. */
+  {
+    int res;
+    if ((tvisi64(o1) || tvisi64(o2) ||
+#if LJ_GC64
+	 tvisi47w(o1) || tvisi47w(o2) ||
+#endif
+	 0) && lj_i64_compare(o1, o2, 0, &res))
+      return res;
+  }
   if (itype(o1) == itype(o2)) {
     if (tvispri(o1))
       return 1;

@@ -577,6 +577,19 @@ void lj_meta_call(lua_State *L, TValue *func, TValue *top)
 /* Helper for FORI. Coercion. */
 void LJ_FASTCALL lj_meta_for(lua_State *L, TValue *o)
 {
+  /* ADR-001b: widened 47-bit inline or boxed int64 bounds are numbers for 5.4;
+  ** they cannot narrow to int32, so convert them to exactly-representable
+  ** floats here (47 bits fit a double exactly; larger boxes are rounded, a
+  ** documented limitation) BEFORE the number checks below. */
+  {
+    ptrdiff_t i;
+    for (i = 0; i <= 2; i++) {
+      if (tvisi47w(o+i))
+	setnumV(o+i, (lua_Number)intV47(o+i));
+      else if (tvisi64(o+i))
+	setnumV(o+i, (lua_Number)i64V(o+i));
+    }
+  }
   if (!lj_strscan_numberobj(o)) lj_err_msg(L, LJ_ERR_FORINIT);
   if (!lj_strscan_numberobj(o+1)) lj_err_msg(L, LJ_ERR_FORLIM);
   if (!lj_strscan_numberobj(o+2)) lj_err_msg(L, LJ_ERR_FORSTEP);

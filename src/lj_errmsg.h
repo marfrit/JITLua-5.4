@@ -153,6 +153,7 @@ ERRDEF(XCLOSE,	"to-be-closed variables are not supported yet")
 ERRDEF(OSDATEFMT,	"invalid conversion specifier " LUA_QS)
 ERRDEF(IOOPENF,	"cannot open file " LUA_QS " (%s)")
 ERRDEF(NOLITERAL,	"value has no literal form")
+ERRDEF(UPVIDX,	"invalid upvalue index")
 ERRDEF(XLINEDIR,	"malformed line number directive")
 
 /* Bytecode reader errors. */

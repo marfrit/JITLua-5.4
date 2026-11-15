@@ -6,8 +6,7 @@ tests/corpus/puc54/attrib.lua	A	P5: package/require/searchers 5.4 semantics
 tests/corpus/puc54/big.lua	A	P1: numeric model + coroutine yield assertions
 tests/corpus/puc54/bitwise.lua	A	P1: bitwise operators absent (5.4 syntax)
 tests/corpus/puc54/calls.lua	A	PERF: our side exceeds 60s (triage; raise timeout)
-tests/corpus/puc54/closure.lua	A	P5: debug.upvalueid/upvaluejoin 5.4 index semantics
-tests/corpus/puc54/closure.lua	B	PERF: JIT-on side exceeds 60s while JIT-off finishes (triage)
+tests/corpus/puc54/closure.lua	B	PERF: JIT-on side exceeds 60s while JIT-off finishes (mode A now passes; triage the slowdown)
 tests/corpus/puc54/constructs.lua	A	P1: 5.4 syntax/semantics (const/close, numerics)
 tests/corpus/puc54/db.lua	A	P5: debug library 5.4 (info fields, hooks)
 tests/corpus/puc54/files.lua	A	P5: io library 5.4 exactness

@@ -292,6 +292,10 @@
 |.macro checkint, reg, target
 |  cmp TISNUMhi, reg, lsr #32
 |  bne target
+|.if DUALNUM
+|  ubfx TMP0, reg, #32, #15	// widened 47-bit inline uses payload bits 32..46
+|  cbnz TMP0, target		// not int32-proven: use the C helper instead
+|.endif
 |.endmacro
 |.macro checknum, reg, target
 |  cmp TISNUMhi, reg, lsr #32

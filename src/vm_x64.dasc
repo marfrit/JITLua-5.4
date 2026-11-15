@@ -302,7 +302,15 @@
 |  cmp ITYPEd, LJ_TISNUM
 |  jump target
 |.endmacro
-|.macro checkint, reg, target; checknumx reg, target, jne; .endmacro
+|.macro checkint, reg, target
+|  checknumx reg, target, jne
+|.if DUALNUM
+|  mov ITYPE, reg		// widened 47-bit inline uses payload bits 32..46
+|  shr ITYPE, 32
+|  and ITYPE, 0x7fff
+|  jnz target			// not int32-proven: use the C helper instead
+|.endif
+|.endmacro
 |.macro checkinttp, src, target; checknumx src, target, jne; .endmacro
 |.macro checknum, reg, target; checknumx reg, target, jae; .endmacro
 |.macro checknumtp, src, target; checknumx src, target, jae; .endmacro

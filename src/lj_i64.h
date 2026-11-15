@@ -39,6 +39,9 @@ LJ_FUNC int LJ_FASTCALL lj_i64_isnum(cTValue *o);
 ** Returns 0 if the object is neither. */
 LJ_FUNC int LJ_FASTCALL lj_i64_getint(cTValue *o, int64_t *p);
 
+/* Exact numeric equality for VM equality fast paths (-1: not handled). */
+LJ_FUNC int LJ_FASTCALL lj_i64_numeq(cTValue *a, cTValue *b);
+
 /* 5.4 arithmetic for operands where an int32/int64 integer is involved.
 ** Returns 1 if the result was stored in *ra, 0 if the caller must use the
 ** generic path (string coercion, metamethods, errors). */

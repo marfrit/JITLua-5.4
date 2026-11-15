@@ -12,6 +12,7 @@
 #include "lj_obj.h"
 #include "lj_gc.h"
 #include "lj_err.h"
+#include "lj_i64.h"
 #include "lj_debug.h"
 #include "lj_str.h"
 #include "lj_tab.h"
@@ -604,6 +605,10 @@ LUA_API lua_Integer lua_tointegerx(lua_State *L, int idx, int *ok)
     }
     n = numV(&tmp);
   }
+  if (!(n >= -9223372036854775808.0 && n < 9223372036854775808.0)) {
+    if (ok) *ok = 0;  /* out of integer range: conversion fails (5.4) */
+    return 0;
+  }
   if (ok) *ok = 1;
   return lj_num2int_type(n, lua_Integer);
 }
@@ -795,7 +800,7 @@ LUA_API void lua_pushnumber(lua_State *L, lua_Number n)
 
 LUA_API void lua_pushinteger(lua_State *L, lua_Integer n)
 {
-  setintptrV(L->top, n);
+  lj_i64_toTValue(L, L->top, (int64_t)n);  /* exact: inline or interned box */
   incr_top(L);
 }
 

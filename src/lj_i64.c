@@ -280,13 +280,18 @@ int LJ_FASTCALL lj_i64_arith(lua_State *L, TValue *ra, cTValue *rb,
     case I64_BXOR: i64_store(L, ra, (int64_t)((uint64_t)a ^ (uint64_t)b)); break;
     case I64_SHL: i64_store(L, ra, i64_shift(a, b, 0)); break;
     case I64_SHR: i64_store(L, ra, i64_shift(a, b, 1)); break;
+    case I64_UNM: i64_store(L, ra, (int64_t)((uint64_t)0 - (uint64_t)a)); break;
+    case I64_BNOT: i64_store(L, ra, (int64_t)(~(uint64_t)a)); break;
     default: return 0;
     }
     return 1;
   }
-  /* Mixed or float: numeric comparison semantics need both to be numbers. */
-  if (tvisnumber(rb) && tvisnumber(rc)) {
-    i64_floatop(L, ra, numberVnum(rb), numberVnum(rc), op);
+  /* Mixed or float: an int64 (inline or boxed) is converted to a double, as
+  ** Lua 5.4 does for integer/float arithmetic. */
+  if ((tvisnumber(rb) || ia) && (tvisnumber(rc) || ib)) {
+    lua_Number x = ia ? (lua_Number)a : numberVnum(rb);
+    lua_Number y = ib ? (lua_Number)b : numberVnum(rc);
+    i64_floatop(L, ra, x, y, op);
     return 1;
   }
   return 0;  /* Let the caller handle strings, metamethods and errors. */
@@ -313,6 +318,21 @@ int LJ_FASTCALL lj_i64_unop(lua_State *L, TValue *ra, cTValue *rb, I64Op op)
     return 0;  /* bnot of a float: let the caller raise */
   }
   return 0;
+}
+
+/* Exact numeric equality for VM fast paths: -1 = not handled (non-numeric),
+** 0 = unequal, 1 = equal. Boxed/widened integers compare by value, including
+** against floats (long double is exact for int64 on x64/arm64). */
+int LJ_FASTCALL lj_i64_numeq(cTValue *a, cTValue *b)
+{
+  int64_t ia, ib;
+  int ka = lj_i64_getint(a, &ia), kb = lj_i64_getint(b, &ib);
+  if (ka && kb) return ia == ib;
+  if (ka && tvisnum(b))
+    return (long double)ia == (long double)numberVnum(b);
+  if (kb && tvisnum(a))
+    return (long double)numberVnum(a) == (long double)ib;
+  return -1;
 }
 
 int LJ_FASTCALL lj_i64_compare(cTValue *a, cTValue *b, int op, int *res)

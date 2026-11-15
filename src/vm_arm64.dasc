@@ -299,8 +299,49 @@
 |.endmacro
 |.macro checkintw, reg, fptarget, i64target
 |  cmp TISNUMhi, reg, lsr #32
-|  bhi i64target		// widened 47-bit int or GC object (box): C helper
-|  blo fptarget		// lower tag range: double, keep the FP fast path
+|  beq >9			// plain int32: fast path
+|  lsr TMP0, reg, #48		// upper 16 bits of the tag word
+|  movz TMP1, #0xfff9		// LJ_TISNUM/UDATA family (ints, boxes)
+|  cmp TMP0, TMP1
+|  bne >8
+|  b i64target
+|8:
+|  movz TMP1, #0xfffa		// GC tags above: strings, tables, functions
+||switch (vk) {
+||case 0:
+|  bhs ->vmeta_arith_vn
+||  break;
+||case 1:
+|  bhs ->vmeta_arith_nv
+||  break;
+||default:
+|  bhs ->vmeta_arith_vv
+||}
+|  b fptarget			// otherwise a double
+|9:
+|.endmacro
+|.macro eqbox  // exact int64/box numeric equality in the ISEQ* fast paths
+|  lsr TMP0, CARG1, #48
+|   movz TMP1, #0xfff9
+|  cmp TMP0, TMP1
+|   lsr TMP2, CARG3, #48
+|  beq >8
+|  cmp TMP2, TMP1
+|  bne >9
+|8:
+|  add CARG1, BASE, RA, lsl #3
+|   mov CARG2, RC
+|  bl extern lj_i64_numeq
+|  cmn CRET1, #1			// -1: not numeric, use the normal path
+|  beq >9
+|  cmp CRET1, #1			// 1 = equal, 0 = unequal
+||if (vk) {
+|  csel PC, RB, PC, eq
+||} else {
+|  csel PC, RB, PC, ne
+||}
+|  ins_next
+|9:
 |.endmacro
 |.macro checknum, reg, target
 |  cmp TISNUMhi, reg, lsr #32
@@ -893,6 +934,7 @@ static void build_subroutines(BuildCtx *ctx)
   |  add CARG3, BASE, RB, lsl #3
   |   add CARG4, BASE, RC, lsl #3
   |1:
+  |  ubfx RA, INS, #8, #8	// RA may have been clobbered by a C helper call
   |  uxtb CARG5w, INSw
   |   add CARG2, BASE, RA, lsl #3
   |    str BASE, L->base
@@ -2480,6 +2522,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |    add PC, PC, #4
     |    add RB, PC, RB, lsl #2
     |    sub RB, RB, #0x20000
+    |  eqbox
     |  asr ITYPE, CARG3, #47
     |  cmn ITYPE, #-LJ_TISNUM
     if (vk) {
@@ -2569,6 +2612,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |    add PC, PC, #4
     |    add RB, PC, RB, lsl #2
     |    sub RB, RB, #0x20000
+    |  eqbox
     if (vk) {
       |->BC_ISEQN_Z:
     } else {

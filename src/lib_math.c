@@ -24,10 +24,17 @@
 
 #define LJLIB_MODULE_math
 
-LJLIB_ASM(math_abs)		LJLIB_REC(.)
+/* Lua 5.4: math.abs keeps integer values exact (mininteger stays mininteger). */
+LJLIB_CF(math_abs)
 {
-  lj_lib_checknumber(L, 1);
-  return FFH_RETRY;
+  TValue *o = L->base;
+  int64_t v;
+  if (L->top > o && (tvisint(o) || tvisi64(o)) && lj_i64_getint(o, &v)) {
+    lj_i64_toTValue(L, L->top-1, v < 0 ? (int64_t)((uint64_t)0 - (uint64_t)v) : v);
+  } else {
+    setnumV(L->top-1, fabs(lj_lib_checknum(L, 1)));
+  }
+  return 1;
 }
 /* Lua 5.4: floor/ceil return an integer when the result has an exact integer
 ** representation, otherwise the float. (C form: the asm fast function always
@@ -99,7 +106,25 @@ LJLIB_ASM(math_atan2)		LJLIB_REC(.)
   return FFH_RETRY;
 }
 LJLIB_ASM_(math_pow)		LJLIB_REC(.)
-LJLIB_ASM_(math_fmod)
+/* Lua 5.4: math.fmod returns an integer for two integer arguments (C fmod
+** semantics: the result takes the sign of the dividend), a float otherwise. */
+LJLIB_CF(math_fmod)
+{
+  TValue *a = L->base, *b = L->base+1;
+  if (L->top > b && (tvisint(a) || tvisi64(a)) && (tvisint(b) || tvisi64(b))) {
+    int64_t x, y;
+    if (lj_i64_getint(a, &x) && lj_i64_getint(b, &y)) {
+      if (y == 0) lj_err_msg(L, LJ_ERR_MODZ);
+      lj_i64_toTValue(L, L->top-1, (int64_t)(x % y));
+      return 1;
+    }
+  }
+  {
+    lua_Number x = lj_lib_checknum(L, 1), y = lj_lib_checknum(L, 2);
+    setnumV(L->top-1, fmod(x, y));
+  }
+  return 1;
+}
 
 LJLIB_ASM(math_ldexp)		LJLIB_REC(.)
 {

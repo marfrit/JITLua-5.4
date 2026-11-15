@@ -207,12 +207,24 @@ TValue *lj_meta_tset(lua_State *L, cTValue *o, cTValue *k)
 
 static cTValue *str2num(cTValue *o, TValue *n)
 {
-  if (tvisnum(o))
-    return o;
-  else if (tvisint(o))
-    return (setnumV(n, (lua_Number)(tvisi47w(o) ? intV47(o) : intV(o))), n);
-  else if (tvisstr(o) && lj_strscan_num(strV(o), n))
-    return n;
+  if (tvisnum(o) || tvisint(o) || tvisi64(o))
+    return o;  /* Floats and 5.4 integers (inline, widened, boxed) stay as-is. */
+  else if (tvisstr(o)) {
+    const char *p = strdata(strV(o)), *e = p + strV(o)->len;
+    int floaty = 0;
+    for (; p < e; p++)
+      if (*p == '.' || *p == 'e' || *p == 'E' || *p == 'p' || *p == 'P')
+	floaty = 1;
+#if LJ_DUALNUM
+    /* 5.4: integer-syntax strings stay integers, decimal/exponent strings
+    ** are floats ("1e2" * 2 is 200.0, "10" + 5 is 15). */
+    if (floaty ? lj_strscan_num(strV(o), n) : lj_strscan_number(strV(o), n))
+#else
+    if (lj_strscan_num(strV(o), n))
+#endif
+      return n;
+    return NULL;
+  }
   else
     return NULL;
 }
@@ -236,12 +248,31 @@ TValue *lj_meta_arith(lua_State *L, TValue *ra, cTValue *rb, cTValue *rc,
     }
   }
   if ((b = str2num(rb, &tempb)) != NULL &&
-      (c = str2num(rc, &tempc)) != NULL) {  /* Try coercion first. */
+      (c = str2num(rc, &tempc)) != NULL) {
+    /* Lua 5.4: a coerced string keeps its integer form when both operands
+    ** are integers, so "3" + 3 is 3, not 3.0. */
+    if (mm < MM__MAX && lj_i64_op_from_mm(mm) != I64__MAX &&
+	(tvisint(b) || tvisi64(b)) && (tvisint(c) || tvisi64(c)) &&
+	lj_i64_arith(L, ra, b, c, lj_i64_op_from_mm(mm)))
+      return NULL;
     if (mm == MM_idiv) {  /* no IR op for idiv: floor, as 5.4 does */
-      setnumV(ra, lj_vm_floor(numV(b) / numV(c)));
+      setnumV(ra, lj_vm_floor(numberVnum(b) / numberVnum(c)));
       return NULL;
     }
-    setnumV(ra, lj_vm_foldarith(numV(b), numV(c), (int)mm-MM_add));
+    {
+      lua_Number x = numberVnum(b), y = numberVnum(c), r;
+      switch (mm) {
+      case MM_add: r = x + y; break;
+      case MM_sub: r = x - y; break;
+      case MM_mul: r = x * y; break;
+      case MM_div: r = x / y; break;
+      case MM_mod: r = (y == 0) ? x / y * 0 : x - lj_vm_floor(x / y) * y; break;
+      case MM_pow: r = lj_vm_foldarith(x, y, (int)MM_pow - (int)MM_add); break;
+      case MM_idiv: r = lj_vm_floor(x / y); break;
+      default: r = x; break;
+      }
+      setnumV(ra, r);
+    }
     return NULL;
   } else {
     cTValue *mo = lj_meta_lookup(L, rb, mm);

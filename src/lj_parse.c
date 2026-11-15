@@ -25,6 +25,7 @@
 #include "lj_strfmt.h"
 #include "lj_lex.h"
 #include "lj_parse.h"
+#include "lj_i64.h"
 #include "lj_vm.h"
 #include "lj_vmevent.h"
 
@@ -1123,6 +1124,16 @@ static void bcemit_unop(FuncState *fs, BCOp op, ExpDesc *e)
     lj_assertFS(op == BC_UNM || op == BC_LEN || op == BC_BNOT, "bad unop %d", op);
     if (!expr_hasjump(e)) {
       if (op == BC_UNM) {  /* Constant-fold negations. */
+	if (tvisi64(&e->u.nval)) {  /* Boxed 5.4 integer: exact negation. */
+	  int64_t v = (int64_t)((uint64_t)0 - (uint64_t)i64V(&e->u.nval));
+	  if ((int64_t)(int32_t)v == v) {
+	    setintV(&e->u.nval, (int32_t)v);
+	    e->k = VKNUM;
+	  } else {
+	    setudataV(fs->L, &e->u.nval, lj_i64_box(fs->L, v));
+	  }
+	  return;
+	}
 #if LJ_HASFFI
 	if (e->k == VKCDATA) {  /* Fold in-place since cdata is not interned. */
 	  GCcdata *cd = cdataV(&e->u.nval);

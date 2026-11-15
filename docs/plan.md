@@ -7,6 +7,19 @@ the change is committed with a phase-labeled message.**
 
 Legend: `[x]` done · `[~]` in progress · `[ ]` open · `(dep: …)` blocking dependency.
 
+## Status snapshot (see docs/phase0-status.md for the session log)
+Verification: d54 **PASS 71 / XFAIL 19 / FAIL 0** (30 files); full corpus
+**PASS 115 / XFAIL 36 / SKIP 12 / TIMEOUT 2 / FAIL 0**; C API harness **34/34**;
+mode-B differential fuzz green at opt levels 0–3 with GC pressure.
+Done: Phase 0 (harness/fuzzers/CI), and large parts of Phase 1 (lexer/scanner
+int-float split, parser float constants + `<const>` + goto diagnostics, table
+borders, `__len`/`__pairs`/`__name`, error messages, C API) and Phase 5 (utf8,
+string.pack, `%q`, gmatch, os/io, debug upvalues, math.type/tointeger/ult).
+**Critical blocker: ADR-001 (int64 value model).** Everything numeric beyond
+int32+double — `//`, int64 bitwise, math.maxinteger, exact large-int
+arithmetic/compare, 5.4 dump format — depends on it. Also open: `<close>` /
+coroutine.close, generational GC + table `__gc`, `_ENV`, and UBSan cleanliness.
+
 ---
 
 ## ADR-001 — value model (the critical architectural decision)

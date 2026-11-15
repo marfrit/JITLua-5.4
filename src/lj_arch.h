@@ -726,8 +726,9 @@ extern void *LJ_WIN_LOADLIBA(const char *path);
 #define LJ_UNWIND_JIT		0
 #endif
 
-/* Compatibility with Lua 5.1 vs. 5.2. */
-#ifdef LUAJIT_ENABLE_LUA52COMPAT
+/* Lua 5.4 target: the 5.2-compat feature set (_ENV, __pairs, goto) is the
+** required baseline. Kept overridable for a 5.1-style build. */
+#ifndef LUAJIT_DISABLE_LUA52COMPAT
 #define LJ_52			1
 #else
 #define LJ_52			0

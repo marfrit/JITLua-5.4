@@ -234,19 +234,6 @@ LJLIB_CF(rawlen)
   return 1;
 }
 
-#if LJ_52
-LJLIB_CF(rawlen)		LJLIB_REC(.)
-{
-  cTValue *o = L->base;
-  int32_t len;
-  if (L->top > o && tvisstr(o))
-    len = (int32_t)strV(o)->len;
-  else
-    len = (int32_t)lj_tab_len(lj_lib_checktab(L, 1));
-  setintV(L->top-1, len);
-  return 1;
-}
-#endif
 
 LJLIB_CF(unpack)		LJLIB_REC(.)
 {
@@ -407,6 +394,16 @@ static int load_aux(lua_State *L, int status, int envarg)
       GCtab *t = tabV(L->base+envarg-1);
       setgcref(fn->c.env, obj2gco(t));
       lj_gc_objbarrier(L, fn, t);
+      {  /* Lua 5.4: expose the chunk environment as _ENV inside the chunk.
+	** LuaJIT resolves globals through the function env, so the alias is
+	** materialised in the table (only when absent). */
+	GCstr *envname = lj_str_newlit(L, "_ENV");
+	cTValue *old = lj_tab_getstr(t, envname);
+	if (!old || tvisnil(old)) {
+	  settabV(L, lj_tab_setstr(L, t, envname), t);
+	  lj_gc_objbarrier(L, t, t);
+	}
+      }
     }
     return 1;
   } else {
@@ -768,6 +765,10 @@ LUALIB_API int luaopen_base(lua_State *L)
   /* NOBARRIER: Table and value are the same. */
   GCtab *env = tabref(L->env);
   settabV(L, lj_tab_setstr(L, env, lj_str_newlit(L, "_G")), env);
+  /* Lua 5.4 exposes the chunk environment as _ENV. LuaJIT resolves globals
+  ** through the function env; the global _ENV alias is the practical subset
+  ** (assignment to _ENV does not retarget the function env yet). */
+  settabV(L, lj_tab_setstr(L, env, lj_str_newlit(L, "_ENV")), env);
   lua_pushliteral(L, LUA_VERSION);  /* top-3. */
   newproxy_weaktable(L);  /* top-2. */
   LJ_LIB_REG(L, "_G", base);

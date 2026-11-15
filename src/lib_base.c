@@ -345,7 +345,9 @@ LJLIB_CF(error)
 {
   int32_t level = lj_lib_optint(L, 2, 1);
   lua_settop(L, 1);
-  if (lua_isstring(L, 1) && level > 0) {
+  /* 5.4: only actual strings get a position prefix (lua_isstring would also
+  ** accept numbers, but error(42) must keep 42 as the error object). */
+  if (lua_type(L, 1) == LUA_TSTRING && level > 0) {
     luaL_where(L, level);
     lua_pushvalue(L, 1);
     lua_concat(L, 2);

@@ -533,6 +533,7 @@ LJLIB_NOREG LJLIB_CF(string_gmatch_aux)
   const char *s = strdata(str);
   TValue *tvpos = lj_lib_upvalue(L, 3);
   const char *src = s + tvpos->u32.lo;
+  uint32_t last = tvpos->u32.hi;  /* 5.4: end of previous match (or none). */
   MatchState ms;
   ms.L = L;
   ms.src_init = s;
@@ -541,10 +542,12 @@ LJLIB_NOREG LJLIB_CF(string_gmatch_aux)
   for (; src <= ms.src_end; src++) {
     const char *e;
     ms.level = ms.depth = 0;
-    if ((e = match(&ms, src, p)) != NULL) {
-      int32_t pos = (int32_t)(e - s);
-      if (e == src) pos++;  /* Ensure progress for empty match. */
-      tvpos->u32.lo = (uint32_t)pos;
+    if ((e = match(&ms, src, p)) != NULL && (uint32_t)(e - s) != last) {
+      /* 5.4 skips a match ending where the previous one ended; this replaces
+      ** the 5.1 "advance one byte on empty match" rule. */
+      uint32_t pos = (uint32_t)(e - s);
+      tvpos->u32.hi = pos;
+      tvpos->u32.lo = pos;
       return push_captures(&ms, src, e);
     }
   }
@@ -557,6 +560,7 @@ LJLIB_CF(string_gmatch)
   lj_lib_checkstr(L, 2);
   L->top = L->base+3;
   (L->top-1)->u64 = 0;
+  (L->top-1)->u32.hi = 0xFFFFFFFFu;  /* lastmatch = none */
   lj_lib_pushcc(L, lj_cf_string_gmatch_aux, FF_string_gmatch_aux, 3);
   return 1;
 }

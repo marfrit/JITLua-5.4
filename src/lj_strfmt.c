@@ -358,6 +358,14 @@ SBuf *lj_strfmt_putfnum_int(SBuf *sb, SFormat sf, lua_Number n)
     return lj_strfmt_putfxint(sb, sf, (uint64_t)k);
 }
 
+/* 5.4: %d/%i/%u/%x/%X/%o require an exact integer representation. */
+static void strfmt_checkint(lua_State *L, int arg, lua_Number n)
+{
+  int64_t k = lj_num2i64(n);
+  if ((lua_Number)k != n)
+    lj_err_arg(L, arg, LJ_ERR_NUMNOINT);
+}
+
 /* Add number formatted as unsigned integer to buffer. */
 SBuf *lj_strfmt_putfnum_uint(SBuf *sb, SFormat sf, lua_Number n)
 {
@@ -401,7 +409,11 @@ int lj_strfmt_putarg(lua_State *L, SBuf *sb, int arg, int retry)
 	  }
 	}
 #endif
-	lj_strfmt_putfnum_int(sb, sf, lj_lib_checknum(L, arg));
+	{
+	  lua_Number n = lj_lib_checknum(L, arg);
+	  strfmt_checkint(L, arg, n);
+	  lj_strfmt_putfnum_int(sb, sf, n);
+	}
 	break;
       case STRFMT_UINT:
 	if (tvisint(o)) {
@@ -417,7 +429,11 @@ int lj_strfmt_putarg(lua_State *L, SBuf *sb, int arg, int retry)
 	  }
 	}
 #endif
-	lj_strfmt_putfnum_uint(sb, sf, lj_lib_checknum(L, arg));
+	{
+	  lua_Number n = lj_lib_checknum(L, arg);
+	  strfmt_checkint(L, arg, n);
+	  lj_strfmt_putfnum_uint(sb, sf, n);
+	}
 	break;
       case STRFMT_NUM:
 	lj_strfmt_putfnum(sb, sf, lj_lib_checknum(L, arg));

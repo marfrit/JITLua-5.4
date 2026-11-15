@@ -199,6 +199,9 @@ ERRDEF(BUFFER_EOB,	"unexpected end of buffer")
 ERRDEF(BUFFER_LEFTOV,	"left-over data in buffer")
 #endif
 
+/* Lua 5.4 number conversion errors. */
+ERRDEF(NUMNOINT,	"number has no integer representation")
+
 #undef ERRDEF
 
 /* Detecting unused error messages:

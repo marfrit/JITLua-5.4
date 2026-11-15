@@ -28,7 +28,7 @@ tests/d54/dump_str_01.lua	A	P1: 5.4 dump header/strip flag; string lib deltas
 tests/d54/dump_02_border.lua	AR	P1: BUG template-table border differs after dump/reload ({1,nil,3} -> 1 direct, 3 reloaded; PUC=3). Also needs PUC luaH_getn border algorithm + rawlen.
 tests/d54/env_01_fenv.lua	A	P1: _ENV model (5.1 globals); getfenv/setfenv kept as ext
 tests/d54/err_01_xpcall.lua	A	P1: error(level)/non-string error object semantics
-tests/d54/fmt_01_format.lua	A	P1/P5: string.format 5.4 (%d float rule, %a, %q)
+tests/d54/fmt_01_format.lua	A	P1: %d/%x integer-representation rule done; remaining diffs need math.maxinteger/mininteger (int64 core)
 tests/d54/gc_01_tbc_gc.lua	A	P1/P4: <close>/__close, generational GC options
 tests/d54/goto_01_labels.lua	A	P1: goto/label 5.4 scoping rules
 tests/d54/lex_01_literals.lua	A	P1: 5.4 literal classification (int vs float, overflow)
@@ -39,5 +39,4 @@ tests/d54/numeric_01_types.lua	A	P1: int64/float value model, math.type, wrap
 tests/d54/numeric_02_arith.lua	A	P1: int/float arithmetic, coercion, wrap
 tests/d54/numeric_03_idiv.lua	A	P1: // floor division (5.4 syntax absent)
 tests/d54/numeric_04_mod.lua	A	P1: % floor-mod sign rules (5.1 is fmod-like)
-tests/d54/str_02_pack.lua	A	P1.8: pack/unpack/packsize implemented and correct; only library function-name resolution in error messages differs ('?' vs 'string.pack')
 tests/d54/tbl_01_lib.lua	AR	P5/P1.3b: table.move/unpack now correct; remaining diffs are the # border algorithm (PUC=3 for {1,nil,3}) and the dump/reload template-border bug

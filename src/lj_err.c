@@ -10,6 +10,7 @@
 #include "lj_err.h"
 #include "lj_debug.h"
 #include "lj_str.h"
+#include "lj_tab.h"
 #include "lj_func.h"
 #include "lj_state.h"
 #include "lj_frame.h"
@@ -1055,12 +1056,63 @@ LJ_NOINLINE void lj_err_caller(lua_State *L, ErrMsg em)
   lj_err_callermsg(L, err2msg(em));
 }
 
+/* Search loaded modules for a function value, like Lua 5.4's
+** pushglobalfuncname/findfield.  Used when the caller's bytecode gives no
+** name (e.g. pcall(string.format, ...)).  Returns "lib.name" in buf or NULL.
+*/
+static const char *err_funcname_loaded(lua_State *L, GCfunc *fn,
+				       char *buf, MSize bufsz)
+{
+  cTValue *tv;
+  GCtab *loaded;
+  TValue k[2], k2[2];
+  if (!tvistab(registry(L))) return NULL;
+  tv = lj_tab_getstr(tabV(registry(L)), lj_str_newz(L, "_LOADED"));
+  if (!tv || !tvistab(tv)) return NULL;
+  loaded = tabV(tv);
+  setnilV(&k[0]);
+  while (lj_tab_next(loaded, &k[0], k) > 0) {
+    GCstr *libname;
+    GCtab *lib;
+    if (!tvisstr(&k[0]) || !tvistab(&k[1])) continue;
+    libname = strV(&k[0]);
+    lib = tabV(&k[1]);
+    setnilV(&k2[0]);
+    while (lj_tab_next(lib, &k2[0], k2) > 0) {
+      if (tvisstr(&k2[0]) && tvisfunc(&k2[1]) && funcV(&k2[1]) == fn) {
+	GCstr *fname = strV(&k2[0]);
+	MSize nlen = libname->len, flen = fname->len;
+	int skipg = (nlen == 2 && !memcmp(strdata(libname), "_G", 2));
+	MSize need = (skipg ? 0 : nlen+1) + flen;
+	if (need < bufsz) {
+	  MSize ofs = 0;
+	  if (!skipg) {
+	    memcpy(buf, strdata(libname), nlen);
+	    buf[nlen] = '.';
+	    ofs = nlen+1;
+	  }
+	  memcpy(buf+ofs, strdata(fname), flen);
+	  buf[need] = '\0';
+	  return buf;
+	}
+      }
+    }
+  }
+  return NULL;
+}
+
 /* Argument error message. */
 LJ_NORET LJ_NOINLINE static void err_argmsg(lua_State *L, int narg,
 					    const char *msg)
 {
   const char *fname = "?";
   const char *ftype = lj_debug_funcname(L, L->base - 1, &fname);
+  char namebuf[128];
+  if (!ftype) {  /* No name from the caller's code: search loaded modules. */
+    const char *n = err_funcname_loaded(L, curr_func(L), namebuf,
+					sizeof(namebuf));
+    if (n) { fname = n; ftype = "global"; }
+  }
   if (narg < 0 && narg > LUA_REGISTRYINDEX)
     narg = (int)(L->top - L->base) + narg + 1;
   if (ftype && ftype[3] == 'h' && --narg == 0)  /* Check for "method". */

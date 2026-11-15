@@ -366,3 +366,27 @@ encode consistently, so NUMX must stay odd):
   reachable in the hash (use-after-free).
 - Free the hash table on state close next to where g->str.tab is freed.
 Bundled with this step: the B2/B2b/B1 benchmark rerun and the ADR table.
+
+## Session 12 (compaction point) — resume instructions for step 2
+
+State: order step 1 done (`fbfc4886`). Step 6 sub-step 1 done (`bab4faad`):
+47-bit primitives exist (lj_obj.h: LJ_I47_MIN/MAX, i47_fits, setint47V,
+intV47, tvisi47w), lj_i64_getint reads widened, formatting + numeric coercion
+use exact values. NO widened value is stored yet, so the tree is green.
+
+RESUME ORDER (do NOT activate widening before 1 and 2 are in):
+1. VM checkint gains a range test (header arm64 first, then x64): payload bits
+   32..46 must be the sign extension of bit 31 (it low 15 bits == 0 or 0x7fff).
+   Widened operand or overflow -> route to lj_i64_arith / lj_meta_bitop /
+   lj_meta_arith, never the 32-bit asm path.
+2. lj_tab: widened integer keys need a 64-bit path (lj_tab_getint64 /
+   setint64; hash key encoding must not truncate; Node key compare exact).
+3. ACTIVATION: lj_i64_store stores widened inline (setint47V) when the result
+   fits 47 bits instead of int32-or-box; also let arithmetic results go inline.
+4. JIT recorder: NYI for tvisi47w (recorder currently rejects boxes; add the
+   widened predicate in sload/constify as well).
+5. Gate both boxes (`arm-box -t 1200 sh tests/ci-box.sh`, `build-box ...`) and
+   bench (`arm-box -t 1800 sh tests/bench/run.sh`); targets: B2b no boxes,
+   B3 no regression.
+Then step 3 (IRT_I64 + sinking, target B1 <= 1.5x stock FFI).
+Full audit list and encoding derivation: docs/adr-001b-boxed-i64.md.

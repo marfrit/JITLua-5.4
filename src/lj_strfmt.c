@@ -413,6 +413,10 @@ int lj_strfmt_putarg(lua_State *L, SBuf *sb, int arg, int retry)
 	lj_err_arg(L, arg, LJ_ERR_NOVAL);
       switch (STRFMT_TYPE(sf)) {
       case STRFMT_INT:
+	if (tvisi64(o)) {
+	  lj_strfmt_putfxint(sb, sf, (uint64_t)i64V(o));
+	  break;
+	}
 	if (tvisint(o)) {
 	  int32_t k = intV(o);
 	  if (sf == STRFMT_INT)
@@ -437,6 +441,10 @@ int lj_strfmt_putarg(lua_State *L, SBuf *sb, int arg, int retry)
 	}
 	break;
       case STRFMT_UINT:
+	if (tvisi64(o)) {
+	  lj_strfmt_putfxint(sb, sf, (uint64_t)i64V(o));
+	  break;
+	}
 	if (tvisint(o)) {
 	  lj_strfmt_putfxint(sb, sf, intV(o));
 	  break;
@@ -546,9 +554,20 @@ GCstr * LJ_FASTCALL lj_strfmt_int(lua_State *L, int32_t k)
   return lj_str_new(L, buf, len);
 }
 
+/* Boxed int64 (ADR-001b): decimal representation, exactly like a 64-bit %d. */
+GCstr * LJ_FASTCALL lj_strfmt_i64(lua_State *L, int64_t k)
+{
+  char buf[STRFMT_MAXBUF_XINT];
+  SBuf tmp;
+  tmp.b = tmp.w = tmp.e = buf;
+  (void)lj_strfmt_putfxint(&tmp, STRFMT_D, (uint64_t)k);
+  return lj_str_new(L, buf, (MSize)(tmp.w - buf));
+}
+
 /* Convert integer or number to string. */
 GCstr * LJ_FASTCALL lj_strfmt_number(lua_State *L, cTValue *o)
 {
+  if (tvisi64(o)) return lj_strfmt_i64(L, i64V(o));
   return tvisint(o) ? lj_strfmt_int(L, intV(o)) : lj_strfmt_num(L, o);
 }
 
@@ -569,6 +588,8 @@ GCstr * LJ_FASTCALL lj_strfmt_obj(lua_State *L, cTValue *o)
     return strV(o);
   } else if (tvisnumber(o)) {
     return lj_strfmt_number(L, o);
+  } else if (tvisi64(o)) {
+    return lj_strfmt_i64(L, i64V(o));
   } else if (tvisnil(o)) {
     return lj_str_newlit(L, "nil");
   } else if (tvisfalse(o)) {

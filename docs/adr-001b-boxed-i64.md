@@ -1,7 +1,33 @@
 # ADR-001b — boxed, interned int64 (spike; decision belongs to Markus)
 
-Status: **proposed spike**, ADR-001 (16-byte `TValue`) demoted to documented fallback.
-Second opinion: `ANSWER-from-His.md` (His, 2026-11-15). My original analysis: `docs/plan.md` ADR-001.
+Status: **spike step 1 landed** (C-side box + intern + C display paths, verified by
+a C test); Lua-visible use is blocked by step 2/3. ADR-001 (16-byte `TValue`)
+demoted to documented fallback. Second opinion: `ANSWER-from-His.md` (His, plus
+Markus addenda 1 and 2).
+
+## Measured findings (this session)
+
+1. **A new GC tag is unsafe on GC64** (the analysis below assumed one; measurement
+   refuted it). Adding `LJ_TI64 = ~13` and moving `LJ_TNUMX` to `~14` broke
+   agreement between the C side and the interpreter: `math.type(3)` answered
+   *float* in a freshly built VM, and the harness hung. Cause: the GC64 tag
+   encoding is 17 bits wide and the VM's form (`(LJ_TISNUM>>1)&0xffff` in
+   `vm_*.dasc` `init_constants`) drops the tag's bit 0, while C's `setitype()`
+   keeps it. `~13` has bit 0 = 0 (today, works); `~14` and `~13`-as-I64 have
+   bit 0 = 1 (diverge). So the box must not use a new tag.
+2. **Chosen representation: a private `udtype`.** Box = an interned `GCudata`
+   with `udtype = UDTYPE_I64BOX` holding one `int64_t`; `tvisi64()` is
+   `tvistudata && udtype == UDTYPE_I64BOX`. No new GC plumbing.
+3. **A userdata's `env` must never be NULL**: `gc_mark()` marks it
+   unconditionally; passing NULL crashed during collect. The box uses globals.
+4. **Interning** lives in a registry-anchored table keyed by the 8 raw bytes of
+   the value. Pointer equality == value equality (raw compare, table keys and
+   same-type GC-pointer compares stay correct without new code).
+5. **Lua-visible use crashes the interpreter's fast formatting path**: pushing
+   a box as `math.maxinteger` segfaults in the VM on `print(math.maxinteger)`
+   (C `lj_strfmt_obj`/`%d` handle it; the print fast function does not). That is
+   the evidence Markus asked for: boxing does not stay out of the fast paths —
+   step 2 must teach print/format, arithmetic dispatch and compares the box.
 
 ## Decision to be made (Markus)
 
@@ -48,7 +74,15 @@ every arithmetic fast path, go back to A with the measured diff as evidence.
   which stays correct. Later `IRT_I64` + reuse of the existing 64-bit-cdata sinking
   (`lj_opt_sink.c`, `lj_crecord.c`) for performance.
 
-## Tag space (the open point from His's note) — analysed
+## Tag space — refuted by measurement
+
+The pre-spike analysis below is kept for the record, but finding 1 above refutes
+it: a new GC tag cannot be represented consistently on GC64 at all, so the box
+uses a private udtype instead. The analysis still explains why the 16-byte
+fallback is expensive (`tvisgcv` contiguity, `itype2irt` mapping, NUMX-derived
+arrays).
+
+## Tag space (original analysis)
 
 Current tags (`lj_obj.h`): `LJ_TNIL ~0 … LJ_TSTR ~4, UPVAL ~5, THREAD ~6, PROTO ~7, FUNC ~8,
 TRACE ~9, CDATA ~10, TAB ~11, UDATA ~12, NUMX ~13`.
@@ -83,7 +117,24 @@ Net: one new tag `LJ_TI64 = ~13`, `LJ_TNUMX = ~14`, explicit `itype2irt` case, n
 
 ## Verification
 
-Every step: `arm-box -t 1200 sh tests/ci-box.sh` (fresh copy, clean build: modes A+B over
-`tests/d54`, mode B at opt levels 0–3, mode R, C API, short GC fuzz). The three spike tests are the
-acceptance criterion, not "it compiles". x64 confirmation runs on `build-box` when the card window on
-dirac is clear.
+Each step: `arm-box -t 1200 sh tests/ci-box.sh`. Step 1 verified: modes A+B
+42 PASS / 0 FAIL, opt levels 0–3 124 PASS, mode R 31 PASS, C API 34/34 plus the
+new box test 7/7, short GC fuzz 160/160.
+
+## Step 6 (documented refinement, NOT part of the spike): 47-bit inline integers
+
+Markus's addendum 2 points at CogVM/Spur: SmallIntegers up to 61 bits live inside
+the tagged word and only larger values become heap objects; make the unboxed
+range as wide as the tag scheme allows.
+
+For LuaJIT GC64 the `TValue` has a 47-bit payload under a 17-bit itag, so
+integers could live inline up to signed 47 bits; only true 64-bit values
+(hashes, 64-bit masks, PRNG state) would box. 47 bits cover ms timestamps
+(~41 bits), file offsets and almost every counter.
+
+Cost: the overflow check moves from the native 32-bit overflow flag to a 64-bit
+operation plus a 47-bit range check (sign-extend and compare), so every VM fast
+path and the JIT's integer guards change. Non-GC64 targets stay int32.
+
+`tests/bench/b2b_ms64.lua` measures exactly this window. The spike itself stays
+int32-inline; 47-bit is decided after the numbers.

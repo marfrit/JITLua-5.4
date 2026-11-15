@@ -121,3 +121,29 @@ What would favour 16 bytes:
 - or B2 allocates per element and is slower than PUC-Lua.
 
 B3 must not regress against today's main.
+
+## Addendum 2 (Markus, 11:47): prior art from CogVM/Spur, widen the immediate range
+
+Spur, the memory model of Squeak/Pharo's Cog VM, solved exactly this problem:
+- SmallIntegers up to 61 bits live inside the tagged 64-bit word, and the Cog JIT does their arithmetic inline
+  with an overflow check;
+- only beyond that does it fall back to LargeInteger heap objects.
+
+That is the boxed model proposed above. The lesson: **make the unboxed range as wide as the tag scheme allows**,
+not as wide as is convenient.
+
+For LuaJIT GC64:
+- **The idea:** a TValue carries a 47-bit payload under the 17-bit itag. Integers could live inline up to signed
+  47 bits instead of int32, and only true 64-bit values would be boxed.
+- **What 47 bits cover:** ms timestamps (~41 bits), file offsets, almost every counter.
+- **What still boxes:** hashes, 64-bit masks, PRNG state.
+- **Cost:** the overflow check moves from the native 32-bit overflow flag to a 64-bit op plus a 47-bit range check
+  (sign-extend and compare), so the VM fast paths and the JIT's integer guards change. Non-GC64 targets would
+  stay int32.
+
+**Not part of the spike.** First prove that boxing works at all (steps 1-3 plus the benchmark gate). Record
+"47-bit immediates" in the ADR as a documented refinement (step 6). Benchmark B2 (a table of 64-bit values) and a
+variant with ms-timestamp-sized values (~2^41) show what it would buy. Decide after measuring.
+
+Coroutines: no prior art needed. LuaJIT 2.1 already yields across pcall and metamethods. The 5.4 delta is
+`coroutine.close` together with `<close>` variables, i.e. cleanup on abort: diligent work, not architecture.

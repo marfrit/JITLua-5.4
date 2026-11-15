@@ -9,4 +9,7 @@ CC=${CC:-gcc}
 [ -x "$SRC/luajit" ] || (cd "$ROOT" && make -j"$(nproc)")
 "$CC" -O2 -g -I"$SRC" "$ROOT/tests/capi/test_capi.c" -o "$OUT/test_capi" \
   "$SRC/libluajit.a" -lm -ldl
+"$CC" -O2 -g -I"$SRC" "$ROOT/tests/capi/test_i64.c" -o "$OUT/test_i64" \
+  "$SRC/libluajit.a" -lm -ldl
 "$OUT/test_capi"
+"$OUT/test_i64"

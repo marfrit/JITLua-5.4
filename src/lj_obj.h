@@ -336,10 +336,21 @@ enum {
   UDTYPE_IO_FILE,	/* I/O library FILE. */
   UDTYPE_FFI_CLIB,	/* FFI C library namespace. */
   UDTYPE_BUFFER,	/* String buffer. */
+  UDTYPE_I64BOX,	/* Boxed interned 64-bit integer (ADR-001b). Not user-visible. */
   UDTYPE__MAX
 };
 
 #define uddata(u)	((void *)((u)+1))
+
+/* -- Boxed 64-bit integers (ADR-001b) ------------------------------------ */
+/* A Lua 5.4 integer outside int32 is an immutable, interned GCudata holding
+** one int64_t. Interning makes pointer equality == value equality, so raw
+** comparison, table keys and the existing same-type GC-pointer compares stay
+** correct without new compare code on the fast paths. A private udtype marks
+** the object, so no new GC tag is needed (the GC64 tag encoding cannot host a
+** new tag: the VM's 17-bit form drops the tag's bit 0). */
+#define tvisi64(o)	(tvisudata(o) && udataV(o)->udtype == UDTYPE_I64BOX)
+#define i64V(o)		check_exp(tvisi64(o), *(int64_t *)uddata(udataV(o)))
 #define sizeudata(u)	(sizeof(struct GCudata)+(u)->len)
 
 /* -- C data object ------------------------------------------------------- */

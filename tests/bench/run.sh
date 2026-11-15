@@ -44,7 +44,7 @@ median() { # read numbers on stdin, print the median
 run_arm() { # label, command prefix...
   label=$1; shift
   printf '\narm %s\n' "$label"
-  for b in b1_fnv b2_table64 b3_int32; do
+  for b in b1_fnv b2_table64 b2b_ms64 b3_int32; do
     vals=""
     i=0
     rest=""

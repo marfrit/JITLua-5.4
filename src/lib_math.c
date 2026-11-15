@@ -18,6 +18,7 @@
 #include "lj_lib.h"
 #include "lj_vm.h"
 #include "lj_prng.h"
+#include "lj_i64.h"
 
 /* ------------------------------------------------------------------------ */
 
@@ -235,6 +236,8 @@ LJLIB_CF(math_type)
   luaL_checkany(L, 1);
   if (tvisint(o))
     lua_pushstring(L, "integer");
+  else if (tvisi64(o))
+    lua_pushstring(L, "integer");  /* ADR-001b: boxed int64 is an integer */
   else if (tvisnum(o))
     lua_pushstring(L, "float");
   else
@@ -279,6 +282,12 @@ LUALIB_API int luaopen_math(lua_State *L)
   RandState *rs = (RandState *)lua_newuserdata(L, sizeof(RandState));
   rand_setseed(rs, (uint64_t)time(NULL), (uint64_t)(size_t)L);
   LJ_LIB_REG(L, LUA_MATHLIBNAME, math);
+  /* 5.4 math.maxinteger/mininteger need a 64-bit integer that Lua code can
+  ** see. lj_i64_box() provides it (ADR-001b, C-test verified), but pushing it
+  ** as a library constant crashes the interpreter's fast print/format path:
+  ** measured this session (segfault in the VM for print(math.maxinteger)).
+  ** Step 2 (parser/VM) must teach that path the box first, so the constants
+  ** stay out until then. */
   return 1;
 }
 

@@ -390,3 +390,17 @@ RESUME ORDER (do NOT activate widening before 1 and 2 are in):
    B3 no regression.
 Then step 3 (IRT_I64 + sinking, target B1 <= 1.5x stock FFI).
 Full audit list and encoding derivation: docs/adr-001b-boxed-i64.md.
+
+## Session 13 — step 6 activation attempt found a bug; left DISABLED
+
+Kept (inert, green): VM checkint range test (arm64 ubfx+cbnz, x64 mov/shr/and/
+jnz), lj_tab widened-key normalisation (widened int key -> exact float key,
+passthrough in lj_tab_get/set/keyindex), lua_tointegerx reads widened.
+Activation (lj_i64_store storing setint47V) is wrapped in `#if 0` with a
+comment: with it on, `local y = (1<<40) + (1<<32) print(y)` printed **257** --
+the payload's high field -- while `x==y`, `x<y`, `math.type(y)` and compare
+paths were correct. Reproduce on a FRESH box (make clean; always rebuild -- a
+copied stale src/luajit otherwise runs) and bisect: likely a consumer that
+prints the high field (check lj_strfmt_number vs wstrnum branch), or an
+encoding read path (intV47) confusion. Fix, then enable, then gate both boxes
++ bench (targets B2b no boxes, B3 no regression), commit, send claude.

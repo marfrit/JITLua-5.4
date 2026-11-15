@@ -405,9 +405,19 @@ cTValue *lj_tab_get(lua_State *L, GCtab *t, cTValue *key)
     if (tv)
       return tv;
   } else if (tvisint(key)) {
-    cTValue *tv = lj_tab_getint(t, intV(key));
-    if (tv)
-      return tv;
+    if (!tvisi47w(key)) {
+      cTValue *tv = lj_tab_getint(t, intV(key));
+      if (tv)
+	return tv;
+    } else {
+      /* ADR-001b step 6: a widened 47-bit integer key is exactly representable
+      ** as a float, and 5.4 makes integral float keys and integer keys the
+      ** same key -- so normalise it and use the numeric path. */
+      TValue tmp;
+      setnumV(&tmp, (lua_Number)intV47(key));
+      key = &tmp;
+      goto genlookup;
+    }
   } else if (tvisnum(key)) {
     int64_t i64;
     int32_t k;
@@ -540,7 +550,14 @@ TValue *lj_tab_set(lua_State *L, GCtab *t, cTValue *key)
   if (tvisstr(key)) {
     return lj_tab_setstr(L, t, strV(key));
   } else if (tvisint(key)) {
-    return lj_tab_setint(L, t, intV(key));
+    if (!tvisi47w(key))
+      return lj_tab_setint(L, t, intV(key));
+    /* widen as an exact float key, as in lj_tab_get() */
+    {
+      TValue tmp;
+      setnumV(&tmp, (lua_Number)intV47(key));
+      key = &tmp;
+    }
   } else if (tvisnum(key)) {
     int64_t i64;
     int32_t k;
@@ -575,9 +592,9 @@ uint32_t LJ_FASTCALL lj_tab_keyindex(GCtab *t, cTValue *key)
   TValue tmp;
   if (tvisint(key)) {
     int32_t k = intV(key);
-    if ((uint32_t)k < t->asize)
+    if (!tvisi47w(key) && (uint32_t)k < t->asize)
       return (uint32_t)k + 1;
-    setnumV(&tmp, (lua_Number)k);
+    setnumV(&tmp, (lua_Number)(tvisi47w(key) ? intV47(key) : (int64_t)k));
     key = &tmp;
   } else if (tvisnum(key)) {
     int64_t i64;

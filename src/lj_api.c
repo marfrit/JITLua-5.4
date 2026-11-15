@@ -583,6 +583,11 @@ LUA_API lua_Integer lua_tointegerx(lua_State *L, int idx, int *ok)
   if (LJ_LIKELY(tvisint(o))) {
     if (ok) *ok = 1;
     return intV(o);
+#if LJ_GC64
+  } else if (tvisi47w(o)) {  /* ADR-001b step 6: widened 47-bit inline */
+    if (ok) *ok = 1;
+    return (lua_Integer)intV47(o);
+#endif
   } else if (tvisi64(o)) {  /* ADR-001b: exact 64-bit integer */
     if (ok) *ok = 1;
     return (lua_Integer)i64V(o);

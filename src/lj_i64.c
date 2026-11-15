@@ -173,6 +173,12 @@ static void i64_store(lua_State *L, TValue *ra, int64_t v)
 {
   if ((int64_t)(int32_t)v == v) {
     setintV(ra, (int32_t)v);
+#if 0 /* ADR-001b step 6 activation DISABLED: printing a widened value showed
+       ** 257 (the payload's high field) -- reproduce on a fresh box before
+       ** enabling, see docs/phase0-status.md. */
+  } else if (i47_fits(v)) {
+    setint47V(ra, v);
+#endif
   } else {
     ptrdiff_t ofs = ra - L->base;
     GCudata *ud = lj_i64_box(L, v);

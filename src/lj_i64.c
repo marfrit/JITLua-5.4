@@ -43,6 +43,12 @@ int LJ_FASTCALL lj_i64_isnum(cTValue *o)
 
 int LJ_FASTCALL lj_i64_getint(cTValue *o, int64_t *p)
 {
+#if LJ_GC64
+  if (tvisi47w(o)) {  /* widened 47-bit inline integer (step 6) */
+    *p = intV47(o);
+    return 1;
+  }
+#endif
   if (tvisint(o)) {
     *p = (int64_t)intV(o);
     return 1;
@@ -50,12 +56,6 @@ int LJ_FASTCALL lj_i64_getint(cTValue *o, int64_t *p)
     *p = i64V(o);
     return 1;
   }
-#if LJ_GC64
-  else if (tvisi47w(o)) {  /* widened 47-bit inline integer (step 6) */
-    *p = intV47(o);
-    return 1;
-  }
-#endif
   return 0;
 }
 
@@ -173,9 +173,9 @@ static void i64_store(lua_State *L, TValue *ra, int64_t v)
 {
   if ((int64_t)(int32_t)v == v) {
     setintV(ra, (int32_t)v);
-#if 0 /* ADR-001b step 6 activation DISABLED: printing a widened value showed
-       ** 257 (the payload's high field) -- reproduce on a fresh box before
-       ** enabling, see docs/phase0-status.md. */
+#if 0 /* step-6 activation DISABLED: with it on, B1/B2 checksums are wrong
+       ** (-4587520 vs 343592796160): some op still truncates a widened value.
+       ** Bisect with tests/bench/b1_fnv.lua; see docs/phase0-status.md. */
   } else if (i47_fits(v)) {
     setint47V(ra, v);
 #endif

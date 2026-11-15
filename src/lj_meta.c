@@ -498,7 +498,11 @@ TValue *lj_meta_comp(lua_State *L, cTValue *o1, cTValue *o2, int op)
 {
   /* ADR-001b: comparisons involving a boxed int64 are numeric comparisons
   ** (5.4: int/float comparison is exact), never metamethod dispatch. */
-  if (tvisi64(o1) || tvisi64(o2)) {
+  if (tvisi64(o1) || tvisi64(o2) ||
+#if LJ_GC64
+      tvisi47w(o1) || tvisi47w(o2) ||
+#endif
+      0) {
     int res;
     if (lj_i64_compare(o1, o2, op & 2 ? 2 : 1, &res))
       return (TValue *)(intptr_t)(res ^ (op & 1));

@@ -404,3 +404,21 @@ copied stale src/luajit otherwise runs) and bisect: likely a consumer that
 prints the high field (check lj_strfmt_number vs wstrnum branch), or an
 encoding read path (intV47) confusion. Fix, then enable, then gate both boxes
 + bench (targets B2b no boxes, B3 no regression), commit, send claude.
+
+## Session 14 — widened getint/tab fixes landed; activation still OFF
+
+Fixed and kept: `lj_i64_getint` checks tvisi47w BEFORE plain int32 (it was
+truncating widened values to their low word — the 257/0 symptom); lj_tab_get/
+set declare `TValue tmp` at function scope so a normalised key outlives the
+branch (dangling pointer previously); lj_meta_comp treats widened operands as
+numeric comparisons. Boxed-int64 *keys* stay pointer keys (an attempted
+exact-double normalisation crashed; documented limitation: box key != float
+key for exact values, 5.4 divergence to fix later).
+Activation (lj_i64_store storing setint47V) is again `#if 0`: with it on,
+B1/B2 checksums were wrong (-4587520 vs 343592796160) while b2b improved to
+278.8 ms / 79 MB. So one op path still truncates a widened value; bisect with
+`tests/bench/b1_fnv.lua` (FNV = xor + multiply loop) -- check BC_BSHL/BSHR
+vmeta route, BC_BAND/BOR/BXOR asm checkint route, mul/add overflow route, and
+`lj_meta_cat`/for-loop setup (`lj_meta.c:584` intV on widened?).
+Arm gate after disabling: FAIL 0, XFAIL 17, i64 OK. x64 gate run hit the box
+job timeout (124, inconclusive) -> re-run.

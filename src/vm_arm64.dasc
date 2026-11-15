@@ -2953,8 +2953,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  ins_arithload CARG1, CARG2
     |  checkintw CARG1, >5, >6	// widened inline int: exact 64-bit helper
     |   checkintw CARG2, >5, >6
-    |  ins_arithload FARG1, FARG2
     |5:  // FP variant.
+    |  ins_arithload FARG1, FARG2
     |  ins_arithfallback ins_arithcheck_num
     |.if "fpins" == "fpow"
     |  bl extern pow

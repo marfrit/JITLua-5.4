@@ -22,6 +22,7 @@
 #include "lj_buf.h"
 #include "lj_str.h"
 #include "lj_tab.h"
+#include "lj_func.h"
 #include "lj_meta.h"
 #include "lj_state.h"
 #include "lj_frame.h"

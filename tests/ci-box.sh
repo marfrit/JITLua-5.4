@@ -1,0 +1,49 @@
+#!/bin/sh
+# One-shot verification for a clean, possibly offline machine (build box).
+#
+#   build-box -t 3600 tests/ci-box.sh              # x64 build box (born)
+#   sh tests/ci-box.sh                             # here (aarch64)
+#
+# Builds our LuaJIT, builds the PUC-Lua 5.4.7 reference from the vendored
+# tarball (tests/ref/dist, no network needed), then runs the differential
+# harness for the port corpus in modes A and B at several JIT opt levels,
+# plus the C API harness. Prints a compact report; artifacts stay local.
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$ROOT"
+NPROC=$(nproc 2>/dev/null || echo 4)
+OUT=${CI_BOX_OUT:-/tmp/ci-box}
+
+say() { printf '\n=== %s ===\n' "$*"; }
+
+say "machine"
+uname -m
+echo "nproc $NPROC"
+
+say "build LuaJIT"
+make clean >/dev/null 2>&1 || true
+make -j"$NPROC" >"$OUT-build.log" 2>&1 || { tail -30 "$OUT-build.log"; exit 1; }
+./src/luajit -v | head -1
+
+say "build reference (PUC-Lua 5.4.7, vendored tarball)"
+if [ ! -x tests/ref/bin/lua54ref ]; then
+  tests/ref/fetch-ref.sh >"$OUT-ref.log" 2>&1 || { tail -30 "$OUT-ref.log"; exit 1; }
+fi
+tests/ref/bin/lua54ref -v | head -1
+
+say "harness: modes A+B (port corpus)"
+tests/harness.sh --mode both --corpus tests/d54 --timeout 120 | tail -12
+
+say "harness: mode B at opt levels 0..3"
+tests/harness.sh --mode B --opt-levels 0,1,2,3 --corpus tests/d54 --timeout 120 | tail -12
+
+say "harness: dump/reload (mode R)"
+tests/harness.sh --mode R --corpus tests/d54 --timeout 120 | tail -12
+
+say "C API"
+tests/capi/run.sh | tail -3
+
+say "fuzz: mode B, 40 programs x opt levels 0-3, GC pressure"
+python3 tests/fuzz/fuzz.py --seed 1 --count 40 --mode B --opt-levels 0,1,2,3 --gc | tail -6
+
+say "done"

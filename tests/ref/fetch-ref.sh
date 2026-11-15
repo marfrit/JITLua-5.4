@@ -26,6 +26,16 @@ done
 mkdir -p "$CACHE" "$HERE/bin" "$HERE/src"
 cd "$CACHE"
 
+# Prefer the vendored tarball (tests/ref/dist): build boxes have no network.
+if [ -f "$HERE/dist/$LUA_TARBALL" ]; then
+  got=$(sha256sum "$HERE/dist/$LUA_TARBALL" | cut -d' ' -f1)
+  if [ "$got" != "$LUA_SHA256" ]; then
+    echo "CHECKSUM MISMATCH for vendored tests/ref/dist/$LUA_TARBALL" >&2
+    exit 1
+  fi
+  cp "$HERE/dist/$LUA_TARBALL" "$LUA_TARBALL"
+fi
+
 fetch() { # url sha256 file
   if [ -f "$3" ] && [ "$(sha256sum "$3" | cut -d' ' -f1)" = "$2" ]; then
     echo "cached: $3"

@@ -74,6 +74,26 @@ Also fixed a real syntax error in `err_01_xpcall.lua` (missing paren) found by t
 9. `tostring(-(0/0))` == "-nan" on aarch64 PUC → nan sign is observable; do NOT normalize it away.
 10. `os.time{...}` is TZ-dependent → harness forces TZ=UTC.
 
+## Session 7 — REQUIRED WORKFLOW CHANGE (external guard) + amd64 box
+
+An external guard now REFUSES local builds: `make` on pica prints
+"make is not allowed on this host (dcw2). Run: bash -lc \"dirac-gate build\"" and
+exits 97 (wrapper at ~/.local/bin/make; comment cites Markus "Do not build
+locally"). So **nothing may be compiled or tested on pica any more**. All
+verification must go to the boxes:
+- `arm-box` = escher, aarch64 (works; proven this session)
+- `build-box` = `build@born.fritz.box`, **x86_64** (new from outside; restricted
+  key that only runs build-box). Currently blocked: a card measurement window
+  on dirac (`~/wp/window.lock`, started 08:31 UTC, ~80 min) -> exit 75 "try
+  later". Re-run after ~09:51 UTC.
+- Both copy the tree (no .git) into a fresh dir, run, delete; only stdout comes
+  back. Memory cap 8G. Keep jobs small.
+Consequence: verify with `arm-box -t 1200 sh tests/ci-box.sh` (or `build-box …`).
+`tests/ci-box.sh` + vendored `tests/ref/dist/lua-5.4.7.tar.gz` make that
+self-contained and offline-capable (commit `50dee122`).
+Also note: `~/.gitconfig` lost user.name/user.email during this session; this
+repo sets the identity locally now.
+
 ## Session 6 — sanitizer build state (IMPORTANT)
 
 - Fixed a latent parallel-build race: `src/Makefile` now has

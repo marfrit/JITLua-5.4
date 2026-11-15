@@ -3485,26 +3485,9 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  ins_arithpre movsd, xmm1
     |  jmp ->BC_MODVN_Z			// Avoid 3 copies. It's slow anyway.
     break;
-  case BC_IDIV:  // Lua 5.4 floor division: C helper, reached through lj_meta_arith
-    |  movzx RBd, PC_RB
-    |  movzx RCd, PC_RC
-    |  movzx RAd, PC_RA
-    |  lea RC, [BASE+RC*8]
-    |  lea RB, [BASE+RB*8]
-    |  lea RA, [BASE+RA*8]
-    |  mov CARG3, RB
-    |  mov CARG4, RC
-    |  movzx CARG5d, PC_OP
-    |  mov CARG2, RA
-    |  mov SAVE_PC, PC
-    |  mov L:CARG1, SAVE_L
-    |  mov L:CARG1->base, BASE
-    |  mov L:RB, L:CARG1
-    |  call extern lj_meta_arith	// NULL (handled) or TValue * (metamethod)
-    |  mov BASE, L:RB->base
-    |  test RC, RC
-    |  jz ->cont_nop
-    |  jmp ->vmeta_binop
+  case BC_IDIV:  // Lua 5.4 floor division: lj_meta_arith -> C helper
+    |  movzx RAd, PC_RA	// dst index; vvo decodes the B/C operand slots
+    |  jmp ->vmeta_arith_vvo
     break;
 
   case BC_POW:

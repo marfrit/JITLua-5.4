@@ -227,14 +227,19 @@ TValue *lj_meta_arith(lua_State *L, TValue *ra, cTValue *rb, cTValue *rc,
   ** int32 overflow that landed here, is handled by the C helper. */
   if (mm < MM__MAX) {
     I64Op iop = lj_i64_op_from_mm(mm);
-    if (iop != I64__MAX && (tvisi64(rb) || tvisi64(rc) ||
-			   (tvisint(rb) && tvisint(rc)))) {
+    if (iop != I64__MAX &&
+	(tvisi64(rb) || tvisi64(rc) || tvisint(rb) || tvisint(rc) ||
+	 tvisnum(rb) || tvisnum(rc))) {
       if (lj_i64_arith(L, ra, rb, rc, iop))
 	return NULL;  /* Handled. */
     }
   }
   if ((b = str2num(rb, &tempb)) != NULL &&
       (c = str2num(rc, &tempc)) != NULL) {  /* Try coercion first. */
+    if (mm == MM_idiv) {  /* no IR op for idiv: floor, as 5.4 does */
+      setnumV(ra, lj_vm_floor(numV(b) / numV(c)));
+      return NULL;
+    }
     setnumV(ra, lj_vm_foldarith(numV(b), numV(c), (int)mm-MM_add));
     return NULL;
   } else {

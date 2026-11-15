@@ -107,7 +107,14 @@ XCFLAGS=
 # dual-number (2) mode. Uncomment one of these lines to override the
 # default mode. Please see LJ_ARCH_NUMMODE in lj_arch.h for details.
 #XCFLAGS+= -DLUAJIT_NUMMODE=1
-#XCFLAGS+= -DLUAJIT_NUMMODE=2
+#
+# LuaJIT-5.4 port: Lua 5.4 has two number types, so dual-number mode is
+# required on EVERY target. x64/x86 default to single-number mode
+# (LJ_ARCH_NUMMODE == LJ_NUMMODE_SINGLE_DUAL in lj_arch.h) and would otherwise
+# have no integer type at all -- math.type(3) would answer "float" and the
+# whole 5.4 int/float model would be missing there. No target in this tree is
+# LJ_NUMMODE_SINGLE, so forcing 2 is always legal.
+XCFLAGS+= -DLUAJIT_NUMMODE=2
 #
 # Disable LJ_GC64 mode for x64.
 #XCFLAGS+= -DLUAJIT_DISABLE_GC64

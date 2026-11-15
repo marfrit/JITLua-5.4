@@ -4,6 +4,7 @@
 */
 
 #include <math.h>
+#include <time.h>
 
 #define lib_math_c
 #define LUA_LIB
@@ -101,94 +102,126 @@ LJLIB_PUSH(1e310) LJLIB_SET(huge)
 
 /* ------------------------------------------------------------------------ */
 
-/* This implements a Tausworthe PRNG with period 2^223. Based on:
-**   Tables of maximally-equidistributed combined LFSR generators,
-**   Pierre L'Ecuyer, 1991, table 3, 1st entry.
-** Full-period ME-CF generator with L=64, J=4, k=223, N1=49.
+/* Lua 5.4 math.random: the reference uses 'xoshiro256**' (PUC-Lua 5.4
+** lmathlib.c). LuaJIT's own PRNG (lj_prng.c, Tausworthe) stays for internal
+** use; this library-local state reproduces the 5.4 sequence bit-for-bit, so a
+** seeded program yields the same numbers as PUC-Lua with the same seed.
 */
+typedef struct RandState {
+  uint64_t s[4];
+} RandState;
 
-/* Union needed for bit-pattern conversion between uint64_t and double. */
-typedef union { uint64_t u64; double d; } U64double;
+#define ROTL64(x, n)	(((x) << (n)) | ((x) >> (64 - (n))))
+#define TRIM64(x)	((x) & 0xffffffffffffffffu)
 
-/* PRNG seeding function. */
-static void random_seed(PRNGState *rs, double d)
+static uint64_t rand_next(RandState *rs)
 {
-  uint32_t r = 0x11090601;  /* 64-k[i] as four 8 bit constants. */
-  int i;
-  for (i = 0; i < 4; i++) {
-    U64double u;
-    uint32_t m = 1u << (r&255);
-    r >>= 8;
-    u.d = d = d * 3.14159265358979323846 + 2.7182818284590452354;
-    if (u.u64 < m) u.u64 += m;  /* Ensure k[i] MSB of u[i] are non-zero. */
-    rs->u[i] = u.u64;
-  }
-  for (i = 0; i < 10; i++)
-    (void)lj_prng_u64(rs);
+  uint64_t s0 = rs->s[0], s1 = rs->s[1];
+  uint64_t s2 = rs->s[2] ^ s0;
+  uint64_t s3 = rs->s[3] ^ s1;
+  uint64_t res = ROTL64(s1 * 5, 7) * 9;
+  rs->s[0] = s0 ^ s3;
+  rs->s[1] = s1 ^ s2;
+  rs->s[2] = s2 ^ (s1 << 17);
+  rs->s[3] = ROTL64(s3, 45);
+  return res;
 }
 
-/* PRNG extract function. */
-LJLIB_PUSH(top-2)  /* Upvalue holds userdata with PRNGState. */
+/* Float in [0,1) from the top 53 bits, like 5.4's I2d (FIGS = 53). */
+static lua_Number rand_2d(uint64_t x)
+{
+  int64_t sx = (int64_t)(TRIM64(x) >> 11);
+  lua_Number res = (lua_Number)sx * (0.5 / ((uint64_t)1 << 52));
+  if (sx < 0) res += 1.0;  /* correct the two's complement */
+  return res;
+}
+
+static void rand_setseed(RandState *rs, uint64_t n1, uint64_t n2)
+{
+  int i;
+  rs->s[0] = n1;
+  rs->s[1] = 0xff;  /* avoid an all-zero state */
+  rs->s[2] = n2;
+  rs->s[3] = 0;
+  for (i = 0; i < 16; i++) (void)rand_next(rs);  /* spread the seed */
+}
+
+/* Project a value into [0, n] without bias (5.4's project()). */
+static uint64_t rand_project(uint64_t ran, uint64_t n, RandState *rs)
+{
+  if ((n & (n + 1)) == 0)  /* n+1 is a power of 2: no bias */
+    return ran & n;
+  {
+    uint64_t lim = n;
+    lim |= (lim >> 1); lim |= (lim >> 2); lim |= (lim >> 4);
+    lim |= (lim >> 8); lim |= (lim >> 16); lim |= (lim >> 32);
+    while ((ran &= lim) > n)
+      ran = TRIM64(rand_next(rs));  /* outside [0..n]? try again */
+    return ran;
+  }
+}
+
+/* Push a 64-bit unsigned as an integer where the int32 value model allows.
+** Wider results are pushed as a float instead of silently truncating until
+** ADR-001 is decided. */
+static void rand_pushuint(lua_State *L, uint64_t v)
+{
+  if (v <= 0x7fffffffu)
+    setintV(L->top++, (int32_t)v);
+  else
+    setnumV(L->top++, (lua_Number)v);
+}
+
+LJLIB_PUSH(top-2)  /* Upvalue holds userdata with RandState. */
 LJLIB_CF(math_random)		LJLIB_REC(.)
 {
   int n = (int)(L->top - L->base);
-  PRNGState *rs = (PRNGState *)(uddata(udataV(lj_lib_upvalue(L, 1))));
-  U64double u;
-  double d;
-  u.u64 = lj_prng_u64d(rs);
-  d = u.d - 1.0;
-  if (n > 0) {
-#if LJ_DUALNUM
-    int isint = 1;
-    double r1;
-    lj_lib_checknumber(L, 1);
-    if (tvisint(L->base)) {
-      r1 = (lua_Number)intV(L->base);
-    } else {
-      isint = 0;
-      r1 = numV(L->base);
-    }
-#else
-    double r1 = lj_lib_checknum(L, 1);
-#endif
-    if (n == 1) {
-      d = lj_vm_floor(d*r1) + 1.0;  /* d is an int in range [1, r1] */
-    } else {
-#if LJ_DUALNUM
-      double r2;
-      lj_lib_checknumber(L, 2);
-      if (tvisint(L->base+1)) {
-	r2 = (lua_Number)intV(L->base+1);
-      } else {
-	isint = 0;
-	r2 = numV(L->base+1);
-      }
-#else
-      double r2 = lj_lib_checknum(L, 2);
-#endif
-      d = lj_vm_floor(d*(r2-r1+1.0)) + r1;  /* d is an int in range [r1, r2] */
-    }
-#if LJ_DUALNUM
-    if (isint) {
-      setintV(L->top-1, lj_num2int(d));
+  RandState *rs = (RandState *)(uddata(udataV(lj_lib_upvalue(L, 1))));
+  uint64_t rv = rand_next(rs);
+  lua_Integer low, up;
+  uint64_t p;
+  switch (n) {
+  case 0:
+    setnumV(L->top++, rand_2d(rv));  /* float in [0,1) */
+    return 1;
+  case 1:
+    low = 1;
+    up = luaL_checkinteger(L, 1);
+    if (up == 0) {  /* math.random(0): a full-range random integer */
+      rand_pushuint(L, TRIM64(rv));
       return 1;
     }
-#endif
-  }  /* else: d is a double in range [0, 1] */
-  setnumV(L->top++, d);
+    break;
+  case 2:
+    low = luaL_checkinteger(L, 1);
+    up = luaL_checkinteger(L, 2);
+    break;
+  default:
+    return luaL_error(L, "wrong number of arguments");
+  }
+  luaL_argcheck(L, low <= up, 1, "interval is empty");
+  p = rand_project(TRIM64(rv), (uint64_t)up - (uint64_t)low, rs);
+  rand_pushuint(L, p + (uint64_t)low);  /* integer in [low, up] */
   return 1;
 }
 
-/* PRNG seed function. */
-LJLIB_PUSH(top-2)  /* Upvalue holds userdata with PRNGState. */
+/* 5.4 math.randomseed returns the two seeds it used. */
+LJLIB_PUSH(top-2)  /* Upvalue holds userdata with RandState. */
 LJLIB_CF(math_randomseed)
 {
-  PRNGState *rs = (PRNGState *)(uddata(udataV(lj_lib_upvalue(L, 1))));
-  if (L->base != L->top)
-    random_seed(rs, lj_lib_checknum(L, 1));
-  else if (!lj_prng_seed_secure(rs))
-    lj_err_caller(L, LJ_ERR_PRNGSD);
-  return 0;
+  RandState *rs = (RandState *)(uddata(udataV(lj_lib_upvalue(L, 1))));
+  uint64_t n1, n2;
+  if (L->base == L->top) {  /* "random" seed: time and an address */
+    n1 = (uint64_t)time(NULL);
+    n2 = (uint64_t)(size_t)L;
+  } else {
+    n1 = (uint64_t)luaL_checkinteger(L, 1);
+    n2 = (uint64_t)luaL_optinteger(L, 2, 0);
+  }
+  rand_setseed(rs, n1, n2);
+  rand_pushuint(L, n1);
+  rand_pushuint(L, n2);
+  return 2;
 }
 
 /* -- Lua 5.4 additions (MISSION P5.5) ------------------------------------
@@ -242,8 +275,9 @@ LJLIB_CF(math_ult)
 
 LUALIB_API int luaopen_math(lua_State *L)
 {
-  PRNGState *rs = (PRNGState *)lua_newuserdata(L, sizeof(PRNGState));
-  lj_prng_seed_fixed(rs);
+  /* 5.4 random state: seed it like the reference (time + address). */
+  RandState *rs = (RandState *)lua_newuserdata(L, sizeof(RandState));
+  rand_setseed(rs, (uint64_t)time(NULL), (uint64_t)(size_t)L);
   LJ_LIB_REG(L, LUA_MATHLIBNAME, math);
   return 1;
 }

@@ -24,6 +24,9 @@ say "build LuaJIT"
 make clean >/dev/null 2>&1 || true
 make -j"$NPROC" >"$OUT-build.log" 2>&1 || { tail -30 "$OUT-build.log"; exit 1; }
 ./src/luajit -v | head -1
+# 5.4 needs two number types: check the number model explicitly, because
+# x64/x86 default to single-number mode unless LUAJIT_NUMMODE=2 is set.
+./src/luajit -joff -e 'print("nummodel: math.type(3) = " .. tostring(math.type(3)) .. " (must be integer)")'
 
 say "build reference (PUC-Lua 5.4.7, vendored tarball)"
 if [ ! -x tests/ref/bin/lua54ref ]; then

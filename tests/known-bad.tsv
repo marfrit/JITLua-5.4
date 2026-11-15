@@ -30,7 +30,8 @@ tests/d54/err_02_tailname.lua	A	P1.8b: tail-call error names -- LuaJIT reuses th
 tests/d54/fmt_01_format.lua	A	P1: %d/%x integer-representation rule done; remaining diffs need math.maxinteger/mininteger (int64 core)
 tests/d54/gc_01_tbc_gc.lua	A	P1/P4: <close>/__close, generational GC options
 tests/d54/lex_01_literals.lua	A	P1: 5.4 literal classification (int vs float, overflow)
-tests/d54/math_os_01.lua	A	P1/P5: math.type/tointeger/ult, maxinteger, random, os.time
+tests/d54/math_os_01.lua	A	P1/P5: math.type/tointeger/ult done; remaining: math.maxinteger/mininteger (int64 core), math.random(1,2^62)
+tests/d54/math_02_random.lua	A	P5.5 done: xoshiro256** sequence matches PUC for every seeded call; only math.random(0) still returns a float -- needs a 64-bit integer in the value model (ADR-001)
 tests/d54/meta_01_matrix.lua	A	P1: int/float arithmetic + metamethod operand matrix
 tests/d54/meta_02_compare_len.lua	A	P1: exact int/float compare, __len any value, __pairs
 tests/d54/numeric_01_types.lua	A	P1: int64/float value model, math.type, wrap

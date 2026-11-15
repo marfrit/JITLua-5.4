@@ -223,3 +223,98 @@ because the recorder is NYI on boxes.
 Interpretation: the remaining memory cost is inherent to one-object-per-value,
 i.e. the 47-bit inline-integer step (step 6 / order step 2) is what actually
 reaches the B2/B2b targets; step 5 then fixes B1 compute.
+
+## Step 6 moved forward: 47-bit inline integers on GC64 — DESIGN (order step 2)
+
+Owner decision (Markus): the int fast path and its overflow checks move from
+int32 to **signed 47-bit on GC64**; non-GC64 targets stay int32. Cog/Spur
+precedent: SmallIntegers inline as wide as the tag word allows, LargeInteger
+objects only beyond.
+
+### Encoding (derived from the actual GC64 scheme, measured)
+
+`TValue` on GC64: `it64 = i | (it << 32)`, `itype(o) = (uint32_t)(it64 >> 47)`,
+tag read is sign-extended: `itype == 0xFFFFFF00 | (tag & 0x1FFFF)` when the
+NaN-box high bits are all ones. Payload bits 0..46 are free; bits 47..63 hold
+the 17-bit tag. Critically, the VM's TISNUM constant is derived as
+`((LJ_TISNUM>>1)&0xffff)<<48`, which is consistent with the C encoding only for
+tags whose value has bit 0 = 0 — consequently **LJ_TNUMX must stay odd** (it is
+~13 today; ~14 broke VM/C agreement and hung the harness; a new GC tag would
+force NUMX even unless a second spare tag is added).
+
+Signed 47-bit inline integer encoding (`LJ_I47`):
+
+    o->i  = (uint32_t)v;                         /* payload bits 0..31 */
+    o->it = ((uint32_t)(LJ_TISNUM & 0x1FFFF) << 15) |
+            ((uint32_t)(((uint64_t)v >> 32) & 0x7FFF));
+
+Read back (`intV47`):
+
+    uint64_t u = o->u64 & 0x7FFFFFFFFFFF;         /* bits 0..46 */
+    int64_t  v = (int64_t)(u << 17) >> 17;        /* sign-extend bit 46 */
+
+Range: `LJ_I47_MIN = -((int64_t)1 << 46)`, `LJ_I47_MAX = (1 << 46) - 1`
+(±7.04e13; ms timestamps at ~1.7e12 fit; file offsets fit; 64-bit hashes,
+64-bit masks and PRNG state do not).
+
+Invariant: a value is inline iff it fits signed 47 bits; everything wider is a
+boxed interned int64 (unchanged representation). `setintV(int32)` keeps the
+current encoding path (payload wholly in the low word) — the widened form must
+be distinguishable from it, which it is: bits 32..46 nonzero (or a sign
+extension differing from int32) means widened.
+
+### Range test for the fast paths
+
+Every asm/C site that reads an inline integer and truncates to 32 bits must
+first prove "fits int32". Cheap test on the encoded word: the high payload
+bits are the sign extension of bit 31, i.e.
+`(it & 0x7FFF) == 0x7fff` for negative int32 values and `== 0` for positive.
+So per operand: `ands`/`cmp` of `(it & 0x7fff)` against 0 or 0x7fff — two
+instructions; branch to the C helper when widened.
+
+### Migration order (green after each sub-step)
+
+1. C primitives (this sub-step), unused at first: `LJ_I47_MIN/MAX`,
+   `setint64V` widened encoding, `intV47`, `i47_fits`, `tvisi47` predicate;
+   keep `intV` as the int32 accessor and add `i64V`-like extraction
+   (`lj_i64_getint` already returns exact int64 for int32 AND box — extend it
+   to the widened inline form). No call sites change: tree stays green.
+2. C call-site audit: every `intV(o)`/`setintV` use must either be provably
+   int32 (constants, indices, lengths) or move to the exact accessor. Grep
+   list: `intV(` in lj_*.c, lauxlib/lua_api/parse/strfmt/bcwrite/serialize.
+   Gate: full harness both boxes.
+3. VM fast paths, arm64 first then x64: checkint gains the range test; on a
+   widened operand or an overflow, the arith cases route to `lj_i64_arith`
+   (already written) which now stores inline when the result fits 47 bits.
+   Same for bitwise (the helper already computes int64; only its store rule
+   changes) and MOD/IDIV.
+4. JIT int guards: IRT_INT currently means int32. Decision needed (see below):
+   either (a) treat IRT_INT as "int32-proven" and keep recorder NYI when a
+   value may be widened, or (b) widen IRT_INT to 47-bit with new guard forms.
+   Proposed: (a) first — recorder checks the widened-range bit and aborts,
+   correctness kept, B3 unaffected because int32 range values are proven.
+5. Bench: B2b must show no boxes; B3 no regression; B2 memory becomes ~16-32
+   B/value ONLY for values ≤47 bits, larger values still box.
+
+### Design decision to put to Markus/Claude (if it becomes blocking)
+
+The JIT's integer type: LuaJIT's IR has `IRT_INT` (32-bit) and IRT_I64. With
+47-bit inline values, a trace that guards "is inline integer" can still read a
+value beyond 32 bits. Option (a) (IRT_INT = proven int32, recorder NYI when a
+widened value appears) is the low-risk staging; option (b) widens IRT_INT and
+every arithmetic encoding/guard. Plan: implement (a) inside step 6, and only
+revisit (b) if the B1/B2 numbers after step 3 demand it.
+
+### What a fresh context must know
+
+- Repo `/home/mfritsche/src/LuaJIT-5.4`, branch main; bare origin
+  `~/src/git/LuaJIT-5.4.git`. Local builds are REFUSED on pica (external guard);
+  verify only via `arm-box -t 1200 sh tests/ci-box.sh` (aarch64 escher) and
+  `build-box -t 1200 sh tests/ci-box.sh` (x86_64 born). Both do a fresh copy +
+  clean build; always include `make clean` in ad-hoc box jobs — a copied
+  `src/luajit` from pica is a foreign-arch stale binary otherwise.
+- Benchmark gate: `arm-box -t 1800 sh tests/bench/run.sh` (four arms, median of
+  3; prints B1, B2, B2b, B3; "unsupported"/"FAILED" lines mean the model lacks
+  something). Current numbers are in the table above.
+- After each step: gate both boxes, commit+push, `send claude` the benchmark
+  table (His relays to Markus), continue.

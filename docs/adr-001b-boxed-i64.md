@@ -318,3 +318,40 @@ revisit (b) if the B1/B2 numbers after step 3 demand it.
   something). Current numbers are in the table above.
 - After each step: gate both boxes, commit+push, `send claude` the benchmark
   table (His relays to Markus), continue.
+
+### Sub-step 1 landed (green, inert): primitives + first consumers
+
+Committed: `LJ_I47_MIN/MAX`, `i47_fits`, `setint47V` (widened encoding),
+`intV47`, `tvisi47w` in lj_obj.h; `lj_i64_getint` reads the widened form;
+formatting and numeric coercion (`lj_strfmt` wstrnum/%d/%x/%q/number,
+`lj_meta` number coercion + concat) use the exact value for widened ints.
+Nothing stores a widened integer yet, so the tree stays green (both boxes
+compile; harness unchanged).
+
+### AUDIT LIST for sub-step 2b (widened values become reachable)
+
+Every site where a widened inline integer can arrive and `intV()` would
+truncate to 32 bits. Measured in this tree (~100 `intV(` sites):
+- `lj_tab.c:408,543,577` (int key lookup/set), `lj_tab_getint/lj_tab_setint`
+  take int32: widened keys need a 64-bit hash-part path.
+- `lj_strfmt.c` done; `lj_meta.c:315,320,323,338` legacy 32-bit bitop path
+  (dead after our rewrite except non-FFI builds), `lj_meta.c:584-597` (for-loop
+  preparation: intV on start/stop/step).
+- `lj_bcwrite.c`/`lj_bcread.c` int constants (KFOLD/KNUM narrow path).
+- `lj_api.c` (lua_tointegerx/lua_pushinteger/lua_objlen), `lib_base.c` (optint,
+  tonumber base, select, rawlen), `lib_string.c` (indices/lengths are
+  int32-bounded by API), `lib_table.c`, `lib_math.c`, `lib_bit.c` (tobit),
+  `lib_ffi.c`, `lj_carith.c`, `lj_cconv.c`, `lj_debug.c` (line numbers),
+  `lj_serialize.c`, `lj_asm.c`, `lj_buf.c`.
+- VM fast paths: `checkint` (tag test) must gain the range test
+  (`(it & 0x7fff)` == 0 or 0x7fff); arithmetic/bitwise/MOD/IDIV route widened
+  operands to `lj_i64_arith`; `lj_i64_store` should store widened inline when
+  the result fits 47 bits (setint47V) instead of int32-or-box.
+- Comparison/equality: `lj_obj_equal` (pointer/interned path unchanged),
+  `lj_meta_comp` (box-aware already), VM `BC_ISEQ*` int-int compare must use
+  exact values; `lj_meta_less`? not present.
+- JIT recorder: `IRT_INT` remains "proven int32"; the recorder must abort
+  (NYI/BADTYPE) when a `tvisi47w` value appears in a slot or constify path.
+Rule for the audit: integer values that are *indices/lengths/lines* stay
+int32-bounded by the language or the API; anything that can be a user value
+uses the exact reader.

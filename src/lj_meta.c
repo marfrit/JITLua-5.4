@@ -184,6 +184,7 @@ TValue *lj_meta_tset(lua_State *L, cTValue *o, cTValue *k)
 	if (tv != niltv(L))
 	  return (TValue *)tv;
 	if (tvisnil(k)) lj_err_msg(L, LJ_ERR_NILIDX);
+	else if (tvisi47w(k)) { setnumV(&tmp, (lua_Number)intV47(k)); k = &tmp; }
 	else if (tvisint(k)) { setnumV(&tmp, (lua_Number)intV(k)); k = &tmp; }
 	else if (tvisnum(k) && tvisnan(k)) lj_err_msg(L, LJ_ERR_NANIDX);
 	return lj_tab_newkey(L, t, k);
@@ -209,7 +210,7 @@ static cTValue *str2num(cTValue *o, TValue *n)
   if (tvisnum(o))
     return o;
   else if (tvisint(o))
-    return (setnumV(n, (lua_Number)intV(o)), n);
+    return (setnumV(n, (lua_Number)(tvisi47w(o) ? intV47(o) : intV(o))), n);
   else if (tvisstr(o) && lj_strscan_num(strV(o), n))
     return n;
   else
@@ -406,7 +407,8 @@ TValue *lj_meta_cat(lua_State *L, TValue *top, int left)
 	  SBufExt *sbx = bufV(o);
 	  lj_buf_putmem(sb, sbx->r, sbufxlen(sbx));
 	} else if (tvisint(o)) {
-	  lj_strfmt_putint(sb, intV(o));
+	  if (tvisi47w(o)) lj_strfmt_putfxint(sb, STRFMT_D, (uint64_t)intV47(o));
+	  else lj_strfmt_putint(sb, intV(o));
 	} else {
 	  lj_strfmt_putfnumstr(sb, numV(o));
 	}

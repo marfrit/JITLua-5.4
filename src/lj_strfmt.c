@@ -171,6 +171,8 @@ const char *lj_strfmt_wstrnum(lua_State *L, cTValue *o, MSize *lenp)
     SBufExt *sbx = bufV(o);
     *lenp = sbufxlen(sbx);
     return sbx->r ? sbx->r : "";
+  } else if (tvisi47w(o)) {  /* widened 47-bit inline integer */
+    sb = lj_strfmt_putfxint(lj_buf_tmp_(L), STRFMT_D, (uint64_t)intV47(o));
   } else if (tvisint(o)) {
     sb = lj_strfmt_putint(lj_buf_tmp_(L), intV(o));
   } else if (tvisi64(o)) {
@@ -420,6 +422,10 @@ int lj_strfmt_putarg(lua_State *L, SBuf *sb, int arg, int retry)
 	  lj_strfmt_putfxint(sb, sf, (uint64_t)i64V(o));
 	  break;
 	}
+	if (tvisi47w(o)) {
+	  lj_strfmt_putfxint(sb, sf, (uint64_t)intV47(o));
+	  break;
+	}
 	if (tvisint(o)) {
 	  int32_t k = intV(o);
 	  if (sf == STRFMT_INT)
@@ -446,6 +452,10 @@ int lj_strfmt_putarg(lua_State *L, SBuf *sb, int arg, int retry)
       case STRFMT_UINT:
 	if (tvisi64(o)) {
 	  lj_strfmt_putfxint(sb, sf, (uint64_t)i64V(o));
+	  break;
+	}
+	if (tvisi47w(o)) {
+	  lj_strfmt_putfxint(sb, sf, (uint64_t)intV47(o));
 	  break;
 	}
 	if (tvisint(o)) {
@@ -476,7 +486,9 @@ int lj_strfmt_putarg(lua_State *L, SBuf *sb, int arg, int retry)
 	cTValue *mo;
 	if ((sf & STRFMT_T_QUOTED) && !tvisstr(o) && !tvisbuf(o)) {
 	  /* 5.4: %q renders numbers, nil and booleans as readable literals. */
-	  if (tvisint(o)) {
+	  if (tvisi47w(o)) {
+	    sb = lj_strfmt_putfxint(sb, STRFMT_D, (uint64_t)intV47(o));
+	  } else if (tvisint(o)) {
 	    sb = lj_strfmt_putint(sb, intV(o));
 	    break;
 	  } else if (tvisnum(o)) {
@@ -584,6 +596,7 @@ GCstr * LJ_FASTCALL lj_strfmt_i64(lua_State *L, int64_t k)
 GCstr * LJ_FASTCALL lj_strfmt_number(lua_State *L, cTValue *o)
 {
   if (tvisi64(o)) return lj_strfmt_i64(L, i64V(o));
+  if (tvisi47w(o)) return lj_strfmt_i64(L, intV47(o));
   return tvisint(o) ? lj_strfmt_int(L, intV(o)) : lj_strfmt_num(L, o);
 }
 

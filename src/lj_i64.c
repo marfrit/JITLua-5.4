@@ -50,6 +50,12 @@ int LJ_FASTCALL lj_i64_getint(cTValue *o, int64_t *p)
     *p = i64V(o);
     return 1;
   }
+#if LJ_GC64
+  else if (tvisi47w(o)) {  /* widened 47-bit inline integer (step 6) */
+    *p = intV47(o);
+    return 1;
+  }
+#endif
   return 0;
 }
 

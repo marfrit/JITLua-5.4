@@ -974,6 +974,46 @@ static LJ_AINLINE void setintV(TValue *o, int32_t i)
   o->n = (lua_Number)i;
 #endif
 }
+/* -- 47-bit inline integers on GC64 (ADR-001b step 6) --------------------- */
+/* Signed 47-bit range: the GC64 NaN-box leaves bits 0..46 for the payload. */
+#define LJ_I47_MIN	((int64_t)(-((uint64_t)1 << 46)))
+#define LJ_I47_MAX	((int64_t)(((uint64_t)1 << 46) - 1))
+
+static LJ_AINLINE int i47_fits(int64_t v)
+{
+  return v >= LJ_I47_MIN && v <= LJ_I47_MAX;
+}
+
+/* Widened inline store: payload bits 0..31 in the low word, bits 32..46 in the
+** low 15 bits of the tag word, the 17-bit LJ_TISNUM tag above them. An int32
+** inline value keeps bits 0..14 of the tag word at zero, so the two forms are
+** distinguishable without a second tag (the GC64 tag encoding only keeps tags
+** with bit 0 = 0, which is why LJ_TNUMX must stay odd and no new tag is used). */
+static LJ_AINLINE void setint47V(TValue *o, int64_t v)
+{
+  lj_assertX(LJ_DUALNUM && LJ_GC64 && i47_fits(v), "bad 47-bit integer");
+  o->i = (uint32_t)(uint64_t)v;
+#if LJ_GC64
+  o->it = ((uint32_t)(LJ_TISNUM & 0x1FFFFu) << 15) |
+	  ((uint32_t)(((uint64_t)v >> 32) & 0x7fffu));
+#else
+  setitype(o, LJ_TISNUM);
+#endif
+}
+
+/* Exact value of any inline integer (int32 or widened 47-bit). */
+static LJ_AINLINE int64_t intV47(cTValue *o)
+{
+  uint64_t u = o->u64 & 0x7fffffffffffULL;
+  return (int64_t)(u << 17) >> 17;  /* sign-extend from bit 46 */
+}
+
+/* True if an inline integer uses the widened form (payload bits 32..46). */
+static LJ_AINLINE int tvisi47w(cTValue *o)
+{
+  return tvisint(o) && (o->it & 0x7fffu) != 0;
+}
+
 
 static LJ_AINLINE void setint64V(TValue *o, int64_t i)
 {

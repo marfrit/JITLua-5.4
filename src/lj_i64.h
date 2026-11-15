@@ -34,6 +34,10 @@ LJ_FUNC int LJ_FASTCALL lj_i64_getint(cTValue *o, int64_t *p);
 ** generic path (string coercion, metamethods, errors). */
 LJ_FUNC int LJ_FASTCALL lj_i64_arith(lua_State *L, TValue *ra,
 				     cTValue *rb, cTValue *rc, I64Op op);
+/* Bitwise operation (BC_BAND..BC_BSAR/BC_BNOT) with 5.4 64-bit semantics. */
+LJ_FUNC int LJ_FASTCALL lj_i64_bitop(lua_State *L, TValue *ra, cTValue *rb,
+				     cTValue *rc, BCReg op);
+
 /* Unary variant (unary minus, bnot). */
 LJ_FUNC int LJ_FASTCALL lj_i64_unop(lua_State *L, TValue *ra, cTValue *rb,
 				    I64Op op);

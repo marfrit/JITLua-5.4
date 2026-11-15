@@ -138,3 +138,24 @@ path and the JIT's integer guards change. Non-GC64 targets stay int32.
 
 `tests/bench/b2b_ms64.lua` measures exactly this window. The spike itself stays
 int32-inline; 47-bit is decided after the numbers.
+
+## Step 2-3 status (2026-11-15, later session)
+
+aarch64 is complete and green: `//` with its own BC_IDIV, MM_idiv, 5.4 int64
+wrap arithmetic, floor `//`/`%`, 64-bit shifts and bitwise ops through the C
+helper, floats with exact integer representation accepted, 5.4 error wording.
+tests/d54/numeric_03_idiv.lua and bits_01_ops.lua PASS in modes A, B and R
+(mode A identical to PUC 5.4.7). Gate: A+B 47 PASS / 0 FAIL / 17 XFAIL,
+opt 0-3 128 PASS, R 32 PASS, C API 34/34 + i64 14/14.
+
+x64 (born) is NOT complete. Shifts work, but a runtime BC_IDIV (`local a=7
+local b=2; a//b`) yields a value whose printed type is "table": the destination
+slot receives the box with a GC pointer but a tag that decodes as ~11, i.e. the
+udata tag is not encoded consistently on x64 -- or the destination slot pointer
+is off by one. Reproductions:
+  x64: local a=7 local b=2 print(a//b)          -> "table: 0x..."
+  x64: local a=math.mininteger local b=-1 print(a//b==math.mininteger) -> false
+Note: the *constant-folded* `7//2` path works on both boxes (PASS), so this is
+specifically the runtime BC_IDIV store on x64. Also already measured: GC64 tag
+encoding preserves only tags with bit 0 = 0, so LJ_TNUMX must stay odd (~13) --
+~14 broke VM/C agreement and was reverted.

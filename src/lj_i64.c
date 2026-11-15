@@ -77,19 +77,27 @@ GCudata *lj_i64_box(lua_State *L, int64_t v)
 
 void lj_i64_push(lua_State *L, int64_t v)
 {
-  setudataV(L, L->top, lj_i64_box(L, v));
+  ptrdiff_t ofs = L->top - L->base;  /* the box allocation may move the stack */
+  GCudata *ud = lj_i64_box(L, v);
+  setudataV(L, L->base + ofs, ud);
   incr_top(L);
 }
 
 /* -- C semantics helper (ADR-001b steps 2-3) ------------------------------ */
 
-/* Store an integer result: int32 inline when it fits, otherwise boxed. */
+/* Store an integer result: int32 inline when it fits, otherwise boxed.
+** Boxing allocates and a GC allocation may grow (move) the Lua stack, which
+** would invalidate the destination pointer the VM handed us -- measured on x64.
+** Store through a base-relative offset instead. */
 static void i64_store(lua_State *L, TValue *ra, int64_t v)
 {
-  if ((int64_t)(int32_t)v == v)
+  if ((int64_t)(int32_t)v == v) {
     setintV(ra, (int32_t)v);
-  else
-    setudataV(L, ra, lj_i64_box(L, v));
+  } else {
+    ptrdiff_t ofs = ra - L->base;
+    GCudata *ud = lj_i64_box(L, v);
+    setudataV(L, L->base + ofs, ud);
+  }
 }
 
 /* Integer floor division: wraps like 5.4 (INT64_MIN // -1 == INT64_MIN). */

@@ -152,6 +152,7 @@ ERRDEF(XATTR,	"unknown attribute " LUA_QS)
 ERRDEF(XCLOSE,	"to-be-closed variables are not supported yet")
 ERRDEF(OSDATEFMT,	"invalid conversion specifier " LUA_QS)
 ERRDEF(IOOPENF,	"cannot open file " LUA_QS " (%s)")
+ERRDEF(NOLITERAL,	"value has no literal form")
 ERRDEF(XLINEDIR,	"malformed line number directive")
 
 /* Bytecode reader errors. */

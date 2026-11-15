@@ -463,6 +463,30 @@ int lj_strfmt_putarg(lua_State *L, SBuf *sb, int arg, int retry)
 	MSize len;
 	const char *s;
 	cTValue *mo;
+	if ((sf & STRFMT_T_QUOTED) && !tvisstr(o) && !tvisbuf(o)) {
+	  /* 5.4: %q renders numbers, nil and booleans as readable literals. */
+	  if (tvisint(o)) {
+	    sb = lj_strfmt_putint(sb, intV(o));
+	    break;
+	  } else if (tvisnum(o)) {
+	    if (o->u64 == U64x(7ff00000,00000000)) {
+	      sb = lj_buf_putmem(sb, "1e9999", 6);
+	    } else if (o->u64 == U64x(fff00000,00000000)) {
+	      sb = lj_buf_putmem(sb, "-1e9999", 7);
+	    } else if (tvisnan(o)) {
+	      sb = lj_buf_putmem(sb, "(0/0)", 5);
+	    } else {
+	      sb = lj_strfmt_putfnum(sb, STRFMT_A, numV(o));  /* exact hex float */
+	    }
+	    break;
+	  } else if (tvisnil(o) || tvisbool(o)) {
+	    GCstr *str = lj_strfmt_obj(L, o);
+	    sb = lj_buf_putmem(sb, strdata(str), str->len);
+	    break;
+	  } else {
+	    lj_err_arg(L, arg, LJ_ERR_NOLITERAL);
+	  }
+	}
 	if (LJ_UNLIKELY(!tvisstr(o) && !tvisbuf(o)) && retry >= 0 &&
 	    !tvisnil(mo = lj_meta_lookup(L, o, MM_tostring))) {
 	  /* Call __tostring metamethod once. */

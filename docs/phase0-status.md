@@ -591,3 +591,24 @@ the call and let the helper read it, or (b) give UCLO a literal list id
 instead of a pc tag (add a bytecode operand or a parallel table keyed by a
 pseudo level). Keep the parser bookkeeping and the proto map; only the VM
 hand-off needs rework. Error unwinding (lj_err_run) is still not wired.
+
+## Session 24 — <close> third attempt: pc hand-off works; the __close call context blocks
+
+Per-UCLO pc-tagged close lists now work: the VM captures the PC before the
+TARGET-encoding `sub PC, RC, #0x20000` (arm64) / before `branchPC` (x64); the C
+helper computes pos = pc - proto_bc(pt), and the recorded pairs match at
+pos == pair+1 (PC is "next PC"). Verified with a print-only stub: slots and
+pairs matched for scope exits, returns and break. Cancelling the real call
+crashes: invoking `__close` through `lua_call` from the UCLO C helper has no
+proper C frame (lua_call expects a cframe context; the VM opcode handler is not
+one). Options for the next attempt:
+(a) VM-side metamethod continuation: UCLO sets up the metamethod call like
+    vmeta_binop and continues at cont_nop, closing one variable per iteration
+    (state kept in a list index passed through L->top?),
+(b) parser-emitted close calls: a bytecode sequence that calls __close through
+    the normal call machinery, which needs a way to fetch the metamethod,
+(c) a C-side call with an explicitly constructed cframe (research whether
+    lj_vm_call accepts a synthetic FRAME_CP).
+The parser bookkeeping (active close stack, per-scope entry counts, return
+paths, proto pair map, dump refusal) is reverted again and ready to re-apply
+from this note. No new design question for Markus: (a) is the least invasive.

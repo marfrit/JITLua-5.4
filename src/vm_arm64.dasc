@@ -2965,6 +2965,14 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
 
   /* -- Constant ops ------------------------------------------------------ */
 
+  case BC_KI64:  // boxed int64 literal: KBASE holds the untagged GC pointer
+    |  mvn RC, RC
+    |  ldr TMP0, [KBASE, RC, lsl #3]
+    |   movn TMP1, #~LJ_TUDATA
+    |  add TMP0, TMP0, TMP1, lsl #47
+    |  str TMP0, [BASE, RA, lsl #3]
+    |  ins_next
+    break;
   case BC_KSTR:
     |  // RA = dst, RC = str_const (~)
     |  mvn RC, RC

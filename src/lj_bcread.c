@@ -8,6 +8,7 @@
 
 #include "lj_obj.h"
 #include "lj_gc.h"
+#include "lj_i64.h"
 #include "lj_err.h"
 #include "lj_buf.h"
 #include "lj_str.h"
@@ -236,6 +237,10 @@ static void bcread_kgc(LexState *ls, GCproto *pt, MSize sizekgc)
       setgcref(*kr, obj2gco(lj_str_new(ls->L, p, len)));
     } else if (tp == BCDUMP_KGC_TAB) {
       setgcref(*kr, obj2gco(bcread_ktab(ls)));
+    } else if (tp == BCDUMP_KGC_I64BOX) {  /* ADR-001b boxed int64 constant */
+      uint64_t lo = bcread_uleb128(ls), hi = bcread_uleb128(ls);
+      int64_t v = (int64_t)(lo | (hi << 32));
+      setgcref(*kr, obj2gco(lj_i64_box(ls->L, v)));
 #if LJ_HASFFI
     } else if (tp != BCDUMP_KGC_CHILD) {
       CTypeID id = tp == BCDUMP_KGC_COMPLEX ? CTID_COMPLEX_DOUBLE :

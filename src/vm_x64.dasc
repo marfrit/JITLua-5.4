@@ -3610,6 +3610,13 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
 
   /* -- Constant ops ------------------------------------------------------ */
 
+  case BC_KI64:  // boxed int64 literal: KBASE holds the untagged GC pointer
+    |  ins_AND	// RA = dst, RD = k64 const (~)
+    |  mov RD, [KBASE+RD*8]
+    |  settp RD, LJ_TUDATA	// the box is a udata object (ADR-001b)
+    |  mov [BASE+RA*8], RD
+    |  ins_next
+    break;
   case BC_KSTR:
     |  ins_AND	// RA = dst, RD = str const (~)
     |  mov RD, [KBASE+RD*8]

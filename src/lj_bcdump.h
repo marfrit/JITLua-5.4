@@ -52,7 +52,7 @@
 /* Type codes for the GC constants of a prototype. Plus length for strings. */
 enum {
   BCDUMP_KGC_CHILD, BCDUMP_KGC_TAB, BCDUMP_KGC_I64, BCDUMP_KGC_U64,
-  BCDUMP_KGC_COMPLEX, BCDUMP_KGC_STR
+  BCDUMP_KGC_COMPLEX, BCDUMP_KGC_I64BOX, BCDUMP_KGC_STR
 };
 
 /* Type codes for the keys/values of a constant table. */

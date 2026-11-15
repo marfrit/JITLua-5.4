@@ -8,6 +8,10 @@ local function p(...)
   print(table.concat(t, " | "))
 end
 p("values", math.maxinteger, math.mininteger)
+p("literal", 0xcbf29ce484222325, math.type(0xcbf29ce484222325),
+  9223372036854775807, math.type(9223372036854775807),
+  9223372036854775808, math.type(9223372036854775808))
+p("literal ops", 0x100000001b3 & 0xffff, 9223372036854775807 // 1)
 p("math.type", math.type(math.maxinteger), math.type(math.mininteger))
 --! NOTE: math.maxinteger + 0.0 (int64 mixed arithmetic) is step 3, not here.
 p("tostring", tostring(math.maxinteger), tostring(math.mininteger))

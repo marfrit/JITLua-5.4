@@ -26,6 +26,7 @@
 #include "lj_char.h"
 #include "lj_strscan.h"
 #include "lj_strfmt.h"
+#include "lj_i64.h"
 
 /* Lua lexer token names. */
 static const char *const tokennames[] = {
@@ -114,15 +115,48 @@ static void lex_number(LexState *ls, TValue *tv)
   fmt = lj_strscan_scan((const uint8_t *)ls->sb.b, sbuflen(&ls->sb)-1, tv,
 	  (LJ_DUALNUM ? STRSCAN_OPT_TOINT : STRSCAN_OPT_TONUM) |
 	  (LJ_HASFFI ? (STRSCAN_OPT_LL|STRSCAN_OPT_IMAG) : 0));
+  /* Lua 5.4: a numeral without '.' or an exponent is an INTEGER literal, even
+  ** when it exceeds int32 (then it is boxed). The scanner keeps 64-bit
+  ** integers for the FFI/C paths only, so classify the plain integer form here:
+  ** decimal integers up to INT64_MAX, hex integers up to 16 digits (wrapping
+  ** modulo 2^64, as 5.4 does); everything else stays a float. */
+  if (fmt == STRSCAN_NUM) {
+    const char *p = ls->sb.b;
+    MSize n = sbuflen(&ls->sb) - 1, i = 0;
+    int hex = (n >= 2 && p[0] == '0' && (p[1] | 0x20) == 'x');
+    int ok = 1, ndig = 0;
+    uint64_t u = 0;
+    if (hex) i = 2;
+    for (; i < n; i++) {
+      int c = (int)(uint8_t)p[i];
+      uint64_t d;
+      if (hex) {
+	if (!lj_char_isxdigit(c)) { ok = 0; break; }
+	d = (uint64_t)(lj_char_isdigit(c) ? c - '0' : (c | 0x20) - 'a' + 10);
+	if (++ndig > 16) { ok = 0; break; }
+	u = (u << 4) | d;
+      } else {
+	if (!lj_char_isdigit(c)) { ok = 0; break; }
+	d = (uint64_t)(c - '0');
+	if (++ndig > 19) { ok = 0; break; }
+	if (u > (uint64_t)0x7fffffffffffffffULL / 10) { ok = 0; break; }
+	u = u * 10 + d;
+	if (u > (uint64_t)0x7fffffffffffffffULL) { ok = 0; break; }
+      }
+    }
+    if (ok && ndig > 0) {
+      setudataV(ls->L, tv, lj_i64_box(ls->L, (int64_t)u));
+      return;  /* boxed integer literal: nothing else to convert */
+    }
+  }
   if (LJ_DUALNUM && fmt == STRSCAN_INT) {
     setitype(tv, LJ_TISNUM);
   } else if (fmt == STRSCAN_I64 || fmt == STRSCAN_U64) {
     /* Lua 5.4: a pure integer literal that exceeds int32 is an integer (boxed
     ** interned int64), not a float and not an FFI cdata. */
-    extern GCudata *lj_i64_box(lua_State *L, int64_t v);
     setudataV(ls->L, tv, lj_i64_box(ls->L, (int64_t)tv->u64));
   } else if (fmt == STRSCAN_NUM) {
-    /* Already in correct format. */
+    /* Already in correct format (an int64 integer is already boxed above). */
 #if LJ_HASFFI
   } else if (fmt != STRSCAN_ERROR) {
     lua_State *L = ls->L;

@@ -225,6 +225,10 @@ static void bcwrite_kgc(BCWriteCtx *ctx, GCproto *pt)
 	tp = BCDUMP_KGC_COMPLEX;
       }
 #endif
+    } else if (o->gch.gct == ~LJ_TUDATA) {
+      /* ADR-001b: a boxed int64 literal constant. */
+      tp = BCDUMP_KGC_I64BOX;
+      need = 1+5+5;
     } else {
       lj_assertBCW(o->gch.gct == ~LJ_TTAB,
 		   "bad constant GC type %d", o->gch.gct);
@@ -240,6 +244,10 @@ static void bcwrite_kgc(BCWriteCtx *ctx, GCproto *pt)
     } else if (tp == BCDUMP_KGC_TAB) {
       bcwrite_ktab(ctx, p, gco2tab(o));
       continue;
+    } else if (tp == BCDUMP_KGC_I64BOX) {
+      int64_t v = *(int64_t *)uddata(gco2ud(o));
+      p = lj_strfmt_wuleb128(p, (uint32_t)v);
+      p = lj_strfmt_wuleb128(p, (uint32_t)((uint64_t)v >> 32));
 #if LJ_HASFFI
     } else if (tp != BCDUMP_KGC_CHILD) {
       cTValue *q = (TValue *)cdataptr(gco2cd(o));

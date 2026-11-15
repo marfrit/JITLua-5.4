@@ -150,6 +150,8 @@ ERRDEF(XCONSTA,	"attempt to assign to const variable " LUA_QS)
 ERRDEF(XCONSTR,	"attempt to re-declare const variable " LUA_QS)
 ERRDEF(XATTR,	"unknown attribute " LUA_QS)
 ERRDEF(XCLOSE,	"to-be-closed variables are not supported yet")
+ERRDEF(OSDATEFMT,	"invalid conversion specifier " LUA_QS)
+ERRDEF(IOOPENF,	"cannot open file " LUA_QS " (%s)")
 ERRDEF(XLINEDIR,	"malformed line number directive")
 
 /* Bytecode reader errors. */

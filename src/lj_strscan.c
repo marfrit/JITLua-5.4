@@ -503,10 +503,8 @@ StrScanFmt lj_strscan_scan(const uint8_t *p, MSize len, TValue *o,
       if ((opt & STRSCAN_OPT_TONUM)) {
 	o->n = neg ? -(double)x : (double)x;
 	return STRSCAN_NUM;
-      } else if (x == 0 && neg) {
-	o->n = -0.0;
-	return STRSCAN_NUM;
       } else {
+	/* 5.4: "-0" is the integer 0 (only "-0.0" is a negative zero float). */
 	o->i = neg ? (int32_t)(~x+1u) : (int32_t)x;
 	return STRSCAN_INT;
       }

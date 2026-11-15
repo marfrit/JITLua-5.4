@@ -303,6 +303,12 @@ LJLIB_ASM(tonumber)		LJLIB_REC(.)
       lj_err_arg(L, 2, LJ_ERR_BASERNG);
     while (lj_char_isspace((unsigned char)(*p))) p++;
     if (*p == '-') { p++; neg = 1; } else if (*p == '+') { p++; }
+    /* 5.4: with an explicit base, a "0x" prefix is not allowed (strtoull
+    ** would otherwise accept it for base 16). */
+    if (base == 16 && p[0] == '0' && (p[1] | 0x20) == 'x') {
+      setnilV(L->base-1-LJ_FR2);
+      return FFH_RES(1);
+    }
     if (lj_char_isalnum((unsigned char)(*p))) {
       ul = strtoull(p, &ep, base);
       if (p != ep) {

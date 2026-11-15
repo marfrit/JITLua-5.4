@@ -71,7 +71,8 @@ LJLIB_CF(os_rename)
 {
   const char *fromname = luaL_checkstring(L, 1);
   const char *toname = luaL_checkstring(L, 2);
-  return luaL_fileresult(L, rename(fromname, toname) == 0, fromname);
+  /* 5.4: no filename prefix in the error message for rename. */
+  return luaL_fileresult(L, rename(fromname, toname) == 0, NULL);
 }
 
 LJLIB_CF(os_tmpname)
@@ -168,6 +169,37 @@ static int getfield(lua_State *L, const char *key, int d)
   return res;
 }
 
+/* 5.4: validate strftime conversion specifiers (C99 + POSIX E/O modifiers). */
+#define LJ_STRFTIMEOPT1 "aAbBcCdDeFgGhHIjmMnprRStTuUVwWxXyYzZ%"
+#define LJ_STRFTIMEOPT2 "EcECExEXEyEY" "OdOeOHOIOmOMOSOuOUOVOwOWOy"
+
+static void os_checkdatefmt(lua_State *L, const char *s)
+{
+  const char *p;
+  for (p = s; *p; p++) {
+    char spec[4];
+    if (*p != '%') continue;
+    p++;
+    spec[0] = '%';
+    if (*p == '\0') {
+      spec[1] = '\0';
+      lj_err_argv(L, 1, LJ_ERR_OSDATEFMT, spec);
+    }
+    if (strchr(LJ_STRFTIMEOPT1, *p)) continue;
+    spec[1] = *p;
+    if ((*p == 'E' || *p == 'O') && p[1] != '\0') {
+      char two[3];
+      two[0] = p[0]; two[1] = p[1]; two[2] = '\0';
+      if (strstr(LJ_STRFTIMEOPT2, two)) { p++; continue; }
+      spec[2] = p[1];
+      spec[3] = '\0';
+      lj_err_argv(L, 1, LJ_ERR_OSDATEFMT, spec);
+    }
+    spec[2] = '\0';
+    lj_err_argv(L, 1, LJ_ERR_OSDATEFMT, spec);
+  }
+}
+
 LJLIB_CF(os_date)
 {
   const char *s = luaL_optstring(L, 1, "%c");
@@ -208,6 +240,7 @@ LJLIB_CF(os_date)
     SBuf *sb = &G(L)->tmpbuf;
     MSize sz = 0, retry = 4;
     const char *q;
+    os_checkdatefmt(L, s);
     for (q = s; *q; q++)
       sz += (*q == '%') ? 30 : 1;  /* Overflow doesn't matter. */
     setsbufL(sb, L);
@@ -249,7 +282,7 @@ LJLIB_CF(os_time)
   if (t == (time_t)(-1) && errno != 0)
     lua_pushnil(L);
   else
-    lua_pushnumber(L, (lua_Number)t);
+    lua_pushinteger(L, (lua_Integer)t);  /* 5.4: os.time returns an integer */
   return 1;
 }
 
@@ -257,7 +290,7 @@ LJLIB_CF(os_difftime)
 {
   lua_pushnumber(L,
     difftime(lj_num2int_type(luaL_checknumber(L, 1), time_t),
-	     lj_num2int_type(luaL_optnumber(L, 2, (lua_Number)0), time_t)));
+	     lj_num2int_type(luaL_checknumber(L, 2), time_t)));
   return 1;
 }
 

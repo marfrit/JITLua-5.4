@@ -87,7 +87,7 @@ static IOFileUD *io_file_open(lua_State *L, const char *mode)
   IOFileUD *iof = io_file_new(L);
   iof->fp = fopen(fname, mode);
   if (iof->fp == NULL)
-    luaL_argerror(L, 1, lj_strfmt_pushf(L, "%s: %s", fname, strerror(errno)));
+    lj_err_callerv(L, LJ_ERR_IOOPENF, fname, strerror(errno));  /* 5.4 wording */
   return iof;
 }
 
@@ -239,7 +239,8 @@ static int io_file_write(lua_State *L, IOFileUD *iof, int start)
       lj_err_argt(L, (int)(tv - L->base) + 1, LUA_TSTRING);
     status = status && (fwrite(p, 1, len, fp) == len);
   }
-  if (LJ_52 && status) {
+  /* 5.4: write returns the file handle (for chaining), not a boolean. */
+  if (status) {
     L->top = L->base+1;
     if (start == 0)
       setudataV(L, L->base, IOSTDF_UD(L, GCROOT_IO_OUTPUT));
@@ -409,12 +410,23 @@ LJLIB_PUSH(top-1) LJLIB_SET(__index)
 
 LJLIB_PUSH(top-2) LJLIB_SET(!)  /* Set environment. */
 
+/* 5.4: a mode must match [rwa] '+'? 'b'* . */
+static int io_checkmode(const char *mode)
+{
+  if (*mode == '\0' || !strchr("rwa", *mode)) return 0;
+  mode++;
+  if (*mode == '+') mode++;
+  return mode[strspn(mode, "b")] == '\0';
+}
+
 LJLIB_CF(io_open)
 {
   const char *fname = strdata(lj_lib_checkstr(L, 1));
   GCstr *s = lj_lib_optstr(L, 2);
   const char *mode = s ? strdata(s) : "r";
-  IOFileUD *iof = io_file_new(L);
+  IOFileUD *iof;
+  luaL_argcheck(L, io_checkmode(mode), 2, "invalid mode");
+  iof = io_file_new(L);
   iof->fp = fopen(fname, mode);
   return iof->fp != NULL ? 1 : luaL_fileresult(L, 0, fname);
 }

@@ -74,6 +74,52 @@ Also fixed a real syntax error in `err_01_xpcall.lua` (missing paren) found by t
 9. `tostring(-(0/0))` == "-nan" on aarch64 PUC → nan sign is observable; do NOT normalize it away.
 10. `os.time{...}` is TZ-dependent → harness forces TZ=UTC.
 
+## Session 2 progress (porting started)
+
+Commits on `main` after M0 (all harness-green, capi 29/29, mode-B fuzz green):
+- `95512f79` utf8 library (full 5.4), `\u{XXX}` up to 0x7FFFFFFF incl. surrogates,
+  NUL-aware string patterns (MatchState.p_end).
+- `3196b466` `%d/%i/%u/%x/%X/%o` require exact integer representation
+  (LJ_ERR_NUMNOINT); argument errors resolve library function names via the
+  loaded-module search (port of 5.4 pushglobalfuncname/findfield).
+- `956f9d5e` goto/label diagnostics match 5.4 exactly (VarInfo.line added).
+- `2fd8c417` `<const>` attributives (5.4 shadowing rules), 5.4 token-error
+  quoting (`<name>` unquoted). `<close>` parses but is rejected pending P1.5.
+- `1b639633` **int/float split**: scanner no longer narrows integral doubles;
+  parser keeps float constants in a dedicated bit-pattern-keyed table (`ktf`)
+  so 3 vs 3.0 vs -0.0 stay distinct; foldarith only narrows int-op-int and
+  never for `/` or `^`; JIT recorder no longer narrows float constants to KINT;
+  5.4 `.0` suffix for float rendering in tostring/concat/table.concat (interp
+  + JIT + lj_buf_put); math.type/tointeger/ult added.
+- `481da8c6` gmatch 5.4 lastmatch rule; error(obj) keeps non-string objects.
+
+Current d54 status: PASS 48, XFAIL 20, FAIL 0 (23 files).
+Full corpus: PASS ~90, XFAIL ~39, SKIP 12, TIMEOUT 2, FAIL 0.
+
+### Key gotchas learned
+- `lj_strfmt_putfnum` can REALLOCATE the buffer: never keep a `sb->w` pointer
+  across it (caused a segfault; use `sbuflen()` offsets).
+- LuaJIT's `luaL_openlibs` calls openers with 0 results, so a new library must
+  use `LJLIB_MODULE_x` + `LJLIB_CF` + `LJ_LIB_REG`, not `luaL_newlib`.
+- `lj_strscan_scan` returns an UNTAGGED payload; callers must `setitype`.
+- The parser's constant table is keyed by number, so integral doubles collide
+  with ints — hence the separate float table.
+- `-bl`/`-jv` report "jit.* modules not installed" in this build; use direct
+  experiments instead of bytecode dumps.
+
+### Still blocked on ADR-001 (int64 value model)
+math.maxinteger/mininteger, int64 bitwise semantics (mod-64 shifts, logical
+`>>`, negative counts), `//` (needs a new BC op + VM), exact large-int
+arithmetic/compare, `tonumber` of large ints, 5.4 dump format.
+
+### MISSION errata additions
+- M1 acceptance says "string.dump round-trips with PUC-Lua (normalized)".
+  LuaJIT's bytecode is structurally different from PUC's; full PUC bytecode
+  compatibility would mean rewriting the VM. Interpreted as: dump/reload must
+  round-trip within our own binary (mode R), which is what the harness checks.
+- LuaJIT 2.1 accepts `_` digit separators as an extension (5.4 rejects them).
+  Kept per MISSION §3 (extensions win); recorded as an intentional deviation.
+
 ## Phase 0 deliverable status (session 1)
 DONE:
 1. Harness (A/B/R) + pre-flight + known-bad + reports; full-corpus baseline recorded.

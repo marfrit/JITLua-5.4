@@ -551,3 +551,25 @@ State now: step 2 (47-bit inline enabled) is green on both boxes again; gates
 47 PASS / 0 FAIL / 17 XFAIL, opt 128, R 32, i64 14/14. Bench unchanged from
 e4fad1a4. The step-3 target (B1 <=1.5x stock FFI) remains out of reach until
 the PHI/allocator issue is solved; b99fe41d holds the full WIP for resume.
+
+## Session 22 — coroutine.close landed; <close> needs per-scope close state (parked)
+
+Landed and committed (12f39869): coroutine.close (5.4: suspended reset, dead
+with error -> false + error object, running/normal -> "cannot close a ..."
+error) and coroutine.running() now returns (thread, ismain) as 5.4 requires.
+
+<close> WIP analysed and reverted: parser accepts `<close>`, GCproto carries a
+per-function slot list (declaration order computed in FuncState, appended after
+varinfo, `sizetbc`), and VM UCLO calls `lj_tbc_close(L, level)` which runs the
+__close metamethod (new MM_close at the END of MMDEF so no arith ids shift;
+normal exit passes nil). Verified: `do local x <close> = obj end` closes in
+reverse declaration order, and `return`/`break` paths close too.
+Blocker: a static per-function slot list cannot express per-scope close state.
+Entries for inner-block variables stay in the list, slots are reused, and a
+sentinel written after a close does not survive slot reuse; the chunk then
+raises "variable got a non-closable value" on stale entries. PUC solves this
+with compile-time close lists plus runtime slot state (OP_CLOSE). Next attempt
+should: keep per-block close lists with a level per block (parse-time), so UCLO
+closes only the entries of the blocks being left, matching the level filter;
+cover the error-unwinding path in lj_err_run; and keep the sentinel only as a
+double-close guard.

@@ -139,10 +139,41 @@ static void test_isinteger(void)
   lua_close(L);
 }
 
+static void test_rotate(void)
+{
+  lua_State *L = newL();
+  /* [10,20,30] rotate(1,1) -> [30,10,20] */
+  lua_pushinteger(L, 10); lua_pushinteger(L, 20); lua_pushinteger(L, 30);
+  lua_rotate(L, 1, 1);
+  ok(lua_tointeger(L, 1) == 30 && lua_tointeger(L, 2) == 10 &&
+     lua_tointeger(L, 3) == 20, "rotate(1,1)");
+  lua_settop(L, 0);
+  /* rotate(1,-1) -> [20,30,10] */
+  lua_pushinteger(L, 10); lua_pushinteger(L, 20); lua_pushinteger(L, 30);
+  lua_rotate(L, 1, -1);
+  ok(lua_tointeger(L, 1) == 20 && lua_tointeger(L, 2) == 30 &&
+     lua_tointeger(L, 3) == 10, "rotate(1,-1)");
+  lua_settop(L, 0);
+  /* sub-range: [10,20,30,40] rotate(2,1) -> [10,40,20,30] */
+  lua_pushinteger(L, 10); lua_pushinteger(L, 20);
+  lua_pushinteger(L, 30); lua_pushinteger(L, 40);
+  lua_rotate(L, 2, 1);
+  ok(lua_tointeger(L, 1) == 10 && lua_tointeger(L, 2) == 40 &&
+     lua_tointeger(L, 3) == 20 && lua_tointeger(L, 4) == 30, "rotate(2,1)");
+  lua_settop(L, 0);
+  /* rotate by 0 and by count are identities */
+  lua_pushinteger(L, 1); lua_pushinteger(L, 2);
+  lua_rotate(L, 1, 0);
+  ok(lua_tointeger(L, 1) == 1 && lua_tointeger(L, 2) == 2, "rotate(1,0)");
+  lua_rotate(L, 1, 2);
+  ok(lua_tointeger(L, 1) == 1 && lua_tointeger(L, 2) == 2, "rotate(1,count)");
+  lua_close(L);
+}
+
 int main(void)
 {
   test_absindex(); test_getseti(); test_len(); test_compare();
-  test_stringtonumber(); test_getsubtable(); test_isinteger();
+  test_stringtonumber(); test_getsubtable(); test_isinteger(); test_rotate();
   printf("== capi: %d checks, %d failures ==\n", checks, failures);
   return failures ? 1 : 0;
 }

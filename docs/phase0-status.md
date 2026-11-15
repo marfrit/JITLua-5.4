@@ -74,6 +74,25 @@ Also fixed a real syntax error in `err_01_xpcall.lua` (missing paren) found by t
 9. `tostring(-(0/0))` == "-nan" on aarch64 PUC → nan sign is observable; do NOT normalize it away.
 10. `os.time{...}` is TZ-dependent → harness forces TZ=UTC.
 
+## Session 3 — DONE: table borders (P1.3b) + rawlen
+
+Committed `70501d91`. Two cooperating fixes:
+- `lj_parse.c:expr_table` normalizes the constructor template with
+  `lj_tab_resize(fs->L, t, narr, hsize2hbits(nhash))` when `t && narr > 1`
+  (unconditional-on-asize: keys can sit in the hash even when asize is big).
+- `lj_tab.c:lj_tab_len` adds PUC's case-1 fast path: last array slot nil but
+  second-to-last present -> return hi-1.
+- `lib_base.c` gains 5.4 `rawlen`.
+FIXED: the mode-R dump/reload border inconsistency. `#{1,nil,3}` == 3 like PUC.
+Remaining divergence is IMPLEMENTATION-DEFINED (runtime-built sparse tables:
+any border is legal per 5.4 manual 3.4.7) -> recorded in
+`tests/d54/tbl_03_border_divergence.lua`, known-bad, NOT hidden.
+d54: PASS 68, XFAIL 19, FAIL 0 (29 files). capi 29/29. Mode-B fuzz 320/320.
+
+NEXT: C API additions (P1.6): lua_arith, lua_getiuservalue/lua_setiuservalue,
+lua_newuserdatauv, lua_warning, lua_gc 5.4 actions, luaL_checkversion.
+Extend tests/capi/test_capi.c for each. Then package/require (blocked on `//`).
+
 ## Session 3 (in progress) — table borders (P1.3b)
 
 GOAL RIGHT NOW: finish the `#` border fix in `src/lj_tab.c:lj_tab_len`.

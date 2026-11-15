@@ -178,6 +178,31 @@ LUA_API void lua_insert(lua_State *L, int idx)
   copyTV(L, p, L->top);
 }
 
+/* Lua 5.4: rotate the range [idx, top] by n positions toward the top. */
+LUA_API void lua_rotate(lua_State *L, int idx, int n)
+{
+  TValue *p = index2adr_stack(L, idx);
+  TValue *t = L->top - 1;
+  ptrdiff_t count = t - p + 1;
+  ptrdiff_t k, i;
+  if (count <= 1) return;
+  if (n < 0) n += (int)count;
+  lj_checkapi(n >= 0 && n < (int)count, "invalid rotation %d", n);
+  k = count - n;  /* rotate toward the top == left-rotate by count-n */
+  for (i = 0; i < k/2; i++) {
+    TValue tmp;
+    copyTV(L, &tmp, p+i); copyTV(L, p+i, p+k-1-i); copyTV(L, p+k-1-i, &tmp);
+  }
+  for (i = 0; i < (count-k)/2; i++) {
+    TValue tmp;
+    copyTV(L, &tmp, p+k+i); copyTV(L, p+k+i, t-i); copyTV(L, t-i, &tmp);
+  }
+  for (i = 0; i < count/2; i++) {
+    TValue tmp;
+    copyTV(L, &tmp, p+i); copyTV(L, p+i, t-i); copyTV(L, t-i, &tmp);
+  }
+}
+
 static void copy_slot(lua_State *L, TValue *f, int idx)
 {
   if (idx == LUA_GLOBALSINDEX) {

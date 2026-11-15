@@ -29,8 +29,11 @@ make -j"$NPROC" >"$OUT-build.log" 2>&1 || { tail -30 "$OUT-build.log"; exit 1; }
 ./src/luajit -joff -e 'print("nummodel: math.type(3) = " .. tostring(math.type(3)) .. " (must be integer)")'
 
 say "build reference (PUC-Lua 5.4.7, vendored tarball)"
-if [ ! -x tests/ref/bin/lua54ref ]; then
-  tests/ref/fetch-ref.sh >"$OUT-ref.log" 2>&1 || { tail -30 "$OUT-ref.log"; exit 1; }
+# A copied tree can carry a reference binary built for another architecture
+# (e.g. aarch64 on the x64 box): always check that it actually runs.
+if ! tests/ref/bin/lua54ref -v >/dev/null 2>&1; then
+  rm -f tests/ref/bin/lua54ref tests/ref/bin/luac54ref
+  tests/ref/fetch-ref.sh --force >"$OUT-ref.log" 2>&1 || { tail -30 "$OUT-ref.log"; exit 1; }
 fi
 tests/ref/bin/lua54ref -v | head -1
 

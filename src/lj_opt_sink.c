@@ -107,15 +107,10 @@ static void sink_mark_ins(jit_State *J)
 	   (LJ_32 && ir+1 < irlast && (ir+1)->o == IR_HIOP &&
 	    !sink_checkphi(J, ir, (ir+1)->op2))))
 	irt_setmark(ir->t);  /* Mark ineligible allocation. */
-      /* fallthrough */
 #endif
+      /* fallthrough */
     case IR_USTORE:
       irt_setmark(IR(ir->op2)->t);  /* Mark stored value. */
-      break;
-    case IR_BOX:
-      if (irt_isphi(ir->t) && !sink_checkphi(J, ir, ir->op1))
-	irt_setmark(ir->t);  /* Mark ineligible allocation. */
-      irt_setmark(IR(ir->op1)->t);  /* Payload value. */
       break;
 #if LJ_HASFFI
     case IR_CALLXS:
@@ -127,7 +122,7 @@ static void sink_mark_ins(jit_State *J)
       IRIns *irl = IR(ir->op1), *irr = IR(ir->op2);
       irl->prev = irr->prev = 0;  /* Clear PHI value counts. */
       if (irl->o == irr->o &&
-	  (irl->o == IR_TNEW || irl->o == IR_TDUP || irl->o == IR_BOX ||
+	  (irl->o == IR_TNEW || irl->o == IR_TDUP ||
 	   (LJ_HASFFI && (irl->o == IR_CNEW || irl->o == IR_CNEWI))))
 	break;
       irt_setmark(irl->t);
@@ -201,7 +196,7 @@ static void sink_sweep_ins(jit_State *J)
 #if LJ_HASFFI
     case IR_CNEW: case IR_CNEWI:
 #endif
-    case IR_TNEW: case IR_TDUP: case IR_BOX:
+    case IR_TNEW: case IR_TDUP:
       if (!irt_ismarked(ir->t)) {
 	ir->t.irt &= ~IRT_GUARD;
 	ir->prev = REGSP(RID_SINK, 0);
@@ -214,7 +209,7 @@ static void sink_sweep_ins(jit_State *J)
     case IR_PHI: {
       IRIns *ira = IR(ir->op2);
       if (!irt_ismarked(ira->t) &&
-	  (ira->o == IR_TNEW || ira->o == IR_TDUP || ira->o == IR_BOX ||
+	  (ira->o == IR_TNEW || ira->o == IR_TDUP ||
 	   (LJ_HASFFI && (ira->o == IR_CNEW || ira->o == IR_CNEWI)))) {
 	ir->prev = REGSP(RID_SINK, 0);
       } else {
@@ -248,7 +243,6 @@ void lj_opt_sink(jit_State *J)
 			 JIT_F_OPT_DCE|JIT_F_OPT_CSE|JIT_F_OPT_FOLD);
   if ((J->flags & need) == need &&
       (J->chain[IR_TNEW] || J->chain[IR_TDUP] ||
-       J->chain[IR_BOX] ||
        (LJ_HASFFI && (J->chain[IR_CNEW] || J->chain[IR_CNEWI])))) {
     if (!J->loopref)
       sink_mark_snap(J, &J->cur.snap[J->cur.nsnap-1]);

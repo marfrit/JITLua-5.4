@@ -535,25 +535,3 @@ step 3 (IRT_I64 + allocation sinking) has to fix.
 OPEN DIVERGENCE: b3_int32 sum differs between ours JIT (1232839951),
 ours -joff (1196193376 == PUC) and stock (1303583832): the JIT narrows
 int32 arithmetic without the widened/overflow guard. Step-3 scope.
-
-## Session 20 — step 3 WIP: IRBOX + recorder, blocked on PHI handling
-
-Landed (builds, not yet gated): new IR op `IR_BOX` (`NW, ref`), IRCALL
-`lj_i64_box`, generic `asm_box` in lj_asm.c, sink/snap integration, recorder
-side: `sloadi64()` (box object kept as-is with udtype guard; widened inline
-becomes an I47 SLOAD + BOX), `rec_i64_payload`, `rec_i64_oper`,
-`rec_i64_arith` returning a BOX object, BC_KI64 constant case, exact
-comparisons NYI, relaxed rec_check_slots for widened-vs-box.
-Findings while testing `local s=1<<40; for i=1,300 do s=s+1 end`:
-- With slot TRefs as IRT_I64 PHIs the arithmetic ran but the exit snapshot
-  restored the wrong register (value 0 / garbage) -> I64 loop PHIs + snapshot
-  restore are not trustworthy in this tree.
-- With the BOX representation the value is correct (1099511628076) but the
-  trace aborts 5x with LJ_TRERR_NYICOAL (register coalescing too complex),
-  i.e. a loop-carried sunk-able allocation PHI plus I64 payload is what the
-  register allocator refuses.
-Open question for Claude: how to make a loop-carried widened integer fast --
-(a) repair I64 PHI + snapshot restore, or (b) keep the box PHI but avoid the
-per-iteration BOX allocation in the loop body (payload kept in the PHI as I64
-and the box only at exits), or (c) something else. All current step-3 edits are
-uncommitted in the tree (compile-clean, JIT results verified by hand).

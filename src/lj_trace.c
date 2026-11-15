@@ -37,9 +37,6 @@
 /* Synchronous abort with error message. */
 void lj_trace_err(jit_State *J, TraceError e)
 {
-#ifdef LJDBG_ABORT
-  { extern int printf(const char *, ...); printf("trace abort %d\n", (int)e); }
-#endif
   setnilV(&J->errinfo);  /* No error info. */
   setintV(J->L->top++, (int32_t)e);
   lj_err_throw(J->L, LUA_ERRRUN);
@@ -48,9 +45,6 @@ void lj_trace_err(jit_State *J, TraceError e)
 /* Synchronous abort with error message and error info. */
 void lj_trace_err_info(jit_State *J, TraceError e)
 {
-#ifdef LJDBG_ABORT
-  { extern int printf(const char *, ...); printf("trace abort_info %d\n", (int)e); }
-#endif
   setintV(J->L->top++, (int32_t)e);
   lj_err_throw(J->L, LUA_ERRRUN);
 }

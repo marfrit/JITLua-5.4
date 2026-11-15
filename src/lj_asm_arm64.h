@@ -1172,28 +1172,6 @@ static void asm_sload(ASMState *as, IRIns *ir)
 	     "bad parent SLOAD");  /* Handled by asm_head_side(). */
   lj_assertA(irt_isguard(t) || !(ir->op2 & IRSLOAD_TYPECHECK),
 	     "inconsistent SLOAD variant");
-  if ((ir->op2 & IRSLOAD_I47)) {  /* Widened 47-bit inline int as IRT_I64. */
-    lj_assertA(irt_isint64(t), "bad I47 SLOAD type");
-    dest = ra_dest(as, ir, RSET_GPR);
-    base = ra_alloc1(as, REF_BASE, rset_clear(allow, dest));
-    if ((ir->op2 & IRSLOAD_TYPECHECK)) {  /* Guard: the slot stays widened. */
-      Reg tmp = ra_scratch(as, rset_clear(allow, dest));
-      /* Executed order: asr47 -> cmp itype -> ubfx -> cmp payload -> decode. */
-      emit_dn(as, A64I_ASRx | A64F_IMMR(17), dest, dest);
-      emit_dn(as, A64I_LSLx | A64F_IMMR(63-17+1), dest, dest);  /* LSL by 17 */
-      asm_guardcc(as, CC_EQ);
-      emit_nm(as, A64I_CMPw, RID_ZERO, tmp);
-      emit_dn(as, A64I_UBFMx | A64F_IMMR(32) | A64F_IMMS(46), tmp, dest);
-      asm_guardcc(as, CC_NE);
-      emit_nm(as, A64I_CMPw, ra_allock(as, (int32_t)LJ_TISNUM, allow), tmp);
-      emit_dn(as, A64I_ASRx | A64F_IMMR(47), tmp, dest);
-    } else {
-      emit_dn(as, A64I_ASRx | A64F_IMMR(17), dest, dest);
-      emit_dn(as, A64I_LSLx | A64F_IMMR(63-17+1), dest, dest);  /* LSL by 17 */
-    }
-    emit_lso(as, A64I_LDRx, (dest & 31), base, ofs);
-    return;
-  }
   if ((ir->op2 & IRSLOAD_CONVERT) && irt_isguard(t) && irt_isint(t)) {
     dest = ra_scratch(as, RSET_FPR);
     asm_tointg(as, ir, dest);

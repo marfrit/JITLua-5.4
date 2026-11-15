@@ -19,7 +19,6 @@
 #include "lj_jit.h"
 #include "lj_iropt.h"
 #include "lj_trace.h"
-#include "lj_i64.h"
 #include "lj_snap.h"
 #include "lj_target.h"
 #if LJ_HASFFI
@@ -562,15 +561,13 @@ void lj_snap_replay(jit_State *J, GCtrace *T)
 	uint8_t m;
 	if (J->slot[snap_slot(sn)] != snap_slot(sn)) continue;
 	pass23 = 1;
-	lj_assertJ(ir->o == IR_TNEW || ir->o == IR_TDUP || ir->o == IR_BOX ||
+	lj_assertJ(ir->o == IR_TNEW || ir->o == IR_TDUP ||
 		   ir->o == IR_CNEW || ir->o == IR_CNEWI,
 		   "sunk parent IR %04d has bad op %d", refp - REF_BIAS, ir->o);
 	m = lj_ir_mode[ir->o];
 	if (irm_op1(m) == IRMref) snap_pref(J, T, map, nent, seen, ir->op1);
 	if (irm_op2(m) == IRMref) snap_pref(J, T, map, nent, seen, ir->op2);
-	if (ir->o == IR_BOX) {
-	  snap_pref(J, T, map, nent, seen, ir->op1);
-	} else if (LJ_HASFFI && ir->o == IR_CNEWI) {
+	if (LJ_HASFFI && ir->o == IR_CNEWI) {
 	  if (LJ_32 && refp+1 < T->nins && (ir+1)->o == IR_HIOP)
 	    snap_pref(J, T, map, nent, seen, (ir+1)->op2);
 	} else {
@@ -722,10 +719,6 @@ static void snap_restoreval(jit_State *J, GCtrace *T, ExitState *ex,
     int32_t *sps = &ex->spill[regsp_spill(rs)];
     if (irt_isinteger(t)) {
       setintV(o, *sps);
-#if LJ_GC64
-    } else if (irt_isint64(t)) {  /* 64-bit integer value (ADR-001b step 3). */
-      lj_i64_toTValue(J->L, o, *(int64_t *)sps);
-#endif
 #if !LJ_SOFTFP32
     } else if (irt_isnum(t)) {
       o->u64 = *(uint64_t *)sps;
@@ -749,13 +742,6 @@ static void snap_restoreval(jit_State *J, GCtrace *T, ExitState *ex,
       return;
     } else if (irt_isinteger(t)) {
       setintV(o, (int32_t)ex->gpr[r-RID_MIN_GPR]);
-#if LJ_GC64
-    } else if (irt_isint64(t)) {  /* 64-bit integer value (ADR-001b step 3). */
-#ifdef LJDBG_ABORT
-      { extern int printf(const char *, ...); printf("restore i64 ref=%d op=%d type=%d r=%x prev=%x reg=%d op1r=%x op2r=%x val=%lld\n", ref-REF_BIAS, ir->o, ir->t.irt, (unsigned)ir->r, (unsigned)rs, (int)r, (unsigned)T->ir[ir->op1].r, (unsigned)T->ir[ir->op2].r, (long long)ex->gpr[r-RID_MIN_GPR]); }
-#endif
-      lj_i64_toTValue(J->L, o, (int64_t)ex->gpr[r-RID_MIN_GPR]);
-#endif
 #if !LJ_SOFTFP
     } else if (irt_isnum(t)) {
       setnumV(o, ex->fpr[r-RID_MIN_FPR]);
@@ -848,15 +834,9 @@ static void snap_unsink(jit_State *J, GCtrace *T, ExitState *ex,
 			SnapNo snapno, BloomFilter rfilt,
 			IRIns *ir, TValue *o)
 {
-  lj_assertJ(ir->o == IR_TNEW || ir->o == IR_TDUP || ir->o == IR_BOX ||
+  lj_assertJ(ir->o == IR_TNEW || ir->o == IR_TDUP ||
 	     ir->o == IR_CNEW || ir->o == IR_CNEWI,
 	     "sunk allocation with bad op %d", ir->o);
-  if (ir->o == IR_BOX) {  /* Sunk int64 box: intern the payload at the exit. */
-    int64_t v;
-    snap_restoredata(J, T, ex, snapno, rfilt, ir->op1, &v, 8);
-    setudataV(J->L, o, lj_i64_box(J->L, v));
-    return;
-  }
 #if LJ_HASFFI
   if (ir->o == IR_CNEW || ir->o == IR_CNEWI) {
     CTState *cts = ctype_cts(J->L);

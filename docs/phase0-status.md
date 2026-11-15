@@ -339,3 +339,30 @@ NEXT (in this turn): add box-aware compare in lj_meta_comp (and lj_obj_equal
 already covers interned equality) so b2/b2b run; rerun bench; write the table
 into docs/adr-001b-boxed-i64.md; then Markus decides on step 5/47-bit with the
 numbers.
+
+## Session 11 — Markus decided the post-benchmark order (steps 1-3)
+
+Order (gate both boxes + bench table after EACH step, commit per step):
+1) dedicated int64 intern hash (open addressing keyed by value, weak entries
+   swept by GC like strings) -> target B2 memory ~16-32 B/value.
+2) 47-bit inline integers on GC64 (fast path + overflow checks int32 -> signed
+   47-bit; non-GC64 stays int32; VM per backend arm64 then x64; JIT int guards)
+   -> target B2b with no boxes, B3 no regression. This is ADR-001b step 6.
+3) step 5: IRT_I64 + allocation sinking reusing the FFI int64 machinery
+   (lj_crecord/lj_opt_sink) -> target B1 within ~1.5x of stock FFI.
+
+Step 1 design chosen (cheapest that gives real sweep hooks, WITHOUT a new GC
+tag -- a new tag would also have to shift LJ_TNUMX and only tags with bit 0 = 0
+encode consistently, so NUMX must stay odd):
+- Keep boxes as GCudata with UDTYPE_I64BOX.
+- Add an open-addressing hash (GCRef tab, mask, num) to global_State, appended
+  at the END (GG_* offsets used by the assembler stay valid).
+- Key = int64 value, mixed; probe linearly; NULL ref = empty; tombstones for
+  deletions (sentinel pointer) or backward-shift deletion.
+- lj_i64_box(): probe hash, return existing box, else allocate the udata and
+  insert; grow/rehash at ~75% load.
+- Sweep: in lj_gc.c's sweep loop, before freeing a GCudata whose udtype is
+  UDTYPE_I64BOX, call lj_i64_remove(g, ud). Otherwise freed boxes would stay
+  reachable in the hash (use-after-free).
+- Free the hash table on state close next to where g->str.tab is freed.
+Bundled with this step: the B2/B2b/B1 benchmark rerun and the ADR table.

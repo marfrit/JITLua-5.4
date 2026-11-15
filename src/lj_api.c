@@ -247,7 +247,7 @@ LUA_API void lua_pushvalue(lua_State *L, int idx)
 LUA_API int lua_type(lua_State *L, int idx)
 {
   cTValue *o = index2adr(L, idx);
-  if (tvisnumber(o)) {
+  if (tvisnumber(o) || tvisi64(o)) {  /* ADR-001b: boxed int64 is a number */
     return LUA_TNUMBER;
 #if LJ_64 && !LJ_GC64
   } else if (tvislightud(o)) {
@@ -295,7 +295,9 @@ LUA_API int lua_isnumber(lua_State *L, int idx)
 {
   cTValue *o = index2adr(L, idx);
   TValue tmp;
-  return (tvisnumber(o) || (tvisstr(o) && lj_strscan_number(strV(o), &tmp)));
+  /* ADR-001b: a boxed int64 is a number too. */
+  return (tvisnumber(o) || tvisi64(o) ||
+	  (tvisstr(o) && lj_strscan_number(strV(o), &tmp)));
 }
 
 LUA_API int lua_isstring(lua_State *L, int idx)
@@ -383,7 +385,7 @@ LUA_API int lua_absindex(lua_State *L, int idx)
 LUA_API int lua_isinteger(lua_State *L, int idx)
 {
   cTValue *o = index2adr(L, idx);
-  return tvisint(o);
+  return tvisint(o) || tvisi64(o);  /* ADR-001b: boxed int64 is an integer */
 }
 
 LUA_API void lua_geti(lua_State *L, int idx, lua_Integer n)
@@ -518,6 +520,9 @@ LUA_API lua_Number lua_tonumberx(lua_State *L, int idx, int *ok)
   if (LJ_LIKELY(tvisnumber(o))) {
     if (ok) *ok = 1;
     return numberVnum(o);
+  } else if (tvisi64(o)) {  /* ADR-001b: boxed int64 as a double */
+    if (ok) *ok = 1;
+    return (lua_Number)i64V(o);
   } else if (tvisstr(o) && lj_strscan_num(strV(o), &tmp)) {
     if (ok) *ok = 1;
     return numV(&tmp);
@@ -578,6 +583,9 @@ LUA_API lua_Integer lua_tointegerx(lua_State *L, int idx, int *ok)
   if (LJ_LIKELY(tvisint(o))) {
     if (ok) *ok = 1;
     return intV(o);
+  } else if (tvisi64(o)) {  /* ADR-001b: exact 64-bit integer */
+    if (ok) *ok = 1;
+    return (lua_Integer)i64V(o);
   } else if (LJ_LIKELY(tvisnum(o))) {
     n = numV(o);
   } else {
@@ -647,7 +655,7 @@ LUA_API const char *lua_tolstring(lua_State *L, int idx, size_t *len)
   GCstr *s;
   if (LJ_LIKELY(tvisstr(o))) {
     s = strV(o);
-  } else if (tvisnumber(o)) {
+  } else if (tvisnumber(o) || tvisi64(o)) {  /* ADR-001b: box converts */
     lj_gc_check(L);
     o = index2adr(L, idx);  /* GC may move the stack. */
     s = lj_strfmt_number(L, o);
@@ -745,7 +753,7 @@ LUA_API lua_CFunction lua_tocfunction(lua_State *L, int idx)
 LUA_API void *lua_touserdata(lua_State *L, int idx)
 {
   cTValue *o = index2adr(L, idx);
-  if (tvisudata(o))
+  if (tvisudata(o) && !tvisi64(o))  /* ADR-001b: a box is not userdata */
     return uddata(udataV(o));
   else if (tvislightud(o))
     return lightudV(G(L), o);

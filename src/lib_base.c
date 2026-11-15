@@ -68,8 +68,16 @@ LJLIB_PUSH("cdata")
 LJLIB_PUSH("table")
 LJLIB_PUSH(top-9)  /* userdata */
 LJLIB_PUSH("number")
-LJLIB_ASM_(type)		LJLIB_REC(.)
-/* Recycle the lj_lib_checkany(L, 1) from assert. */
+/* Lua 5.4 type(): a boxed 64-bit integer is a number (ADR-001b). The asm fast
+** function would report 'userdata' for the private udtype, and fixing that in
+** seven backends is unnecessary -- the C form is correct everywhere. */
+LJLIB_CF(type)
+{
+  cTValue *o = lj_lib_checkany(L, 1);
+  const char *tname = tvisi64(o) ? "number" : lj_typename(o);
+  setstrV(L, L->top-1, lj_str_newz(L, tname));
+  return 1;
+}
 
 /* -- Base library: iterators --------------------------------------------- */
 

@@ -5,6 +5,7 @@
 ** Build/run: tests/capi/run.sh (it also builds this file).
 */
 #include <stdio.h>
+#include <string.h>
 #include "lua.h"
 #include "lauxlib.h"
 #include "lualib.h"
@@ -50,6 +51,26 @@ int main(void)
     for (i = 0; i < 16; i++)
       if (lj_i64_box(L, 0x7fffffff00000000LL + i) != ref[i]) bad++;
     ok(bad == 0, "16 large values intern distinctly and reproducibly");
+  }
+
+  /* ADR-001b: a box must never look like userdata through the C API. */
+  {
+    int rc = luaL_dostring(L, "return math.maxinteger");
+    ok(rc == 0 && lua_gettop(L) >= 1, "maxinteger pushed");
+    if (rc == 0 && lua_gettop(L) >= 1) {
+      int okv = 0;
+      lua_Integer mi;
+      ok(lua_type(L, -1) == LUA_TNUMBER, "lua_type(maxinteger) == LUA_TNUMBER");
+      ok(lua_touserdata(L, -1) == NULL, "lua_touserdata(maxinteger) == NULL");
+      ok(lua_isnumber(L, -1) == 1, "lua_isnumber(maxinteger)");
+      ok(lua_isinteger(L, -1) == 1, "lua_isinteger(maxinteger)");
+      mi = lua_tointegerx(L, -1, &okv);
+      ok(okv == 1 && mi == (lua_Integer)9223372036854775807LL,
+	 "lua_tointegerx(maxinteger) is exact");
+      ok(strcmp(lua_tostring(L, -1), "9223372036854775807") == 0,
+	 "lua_tostring(maxinteger) is exact");
+    }
+    lua_settop(L, 0);
   }
 
   lua_close(L);

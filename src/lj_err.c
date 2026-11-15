@@ -970,6 +970,7 @@ LJ_NOINLINE void lj_err_lex(lua_State *L, GCstr *src, const char *tok,
 static const char *err_typename(lua_State *L, cTValue *o)
 {
   GCtab *mt = NULL;
+  if (tvisi64(o)) return "number";  /* ADR-001b: never report "userdata" */
   if (tvistab(o)) mt = tabref(tabV(o)->metatable);
   else if (tvisudata(o)) mt = tabref(udataV(o)->metatable);
   if (mt) {
@@ -1169,7 +1170,7 @@ LJ_NOINLINE void lj_err_argtype(lua_State *L, int narg, const char *xname)
     }
   } else {
     TValue *o = narg < 0 ? L->top + narg : L->base + narg-1;
-    tname = o < L->top ? lj_typename(o) : lj_obj_typename[0];
+    tname = o < L->top ? err_typename(L, o) : lj_obj_typename[0];
   }
   msg = lj_strfmt_pushf(L, err2msg(LJ_ERR_BADTYPE), xname, tname);
   err_argmsg(L, narg, msg);

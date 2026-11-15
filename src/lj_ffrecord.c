@@ -221,8 +221,8 @@ static void LJ_FASTCALL recff_type(jit_State *J, RecordFFData *rd)
 {
   /* Arguments already specialized. Result is a constant string. Neat, huh? */
   uint32_t t;
-  if (tvisnumber(&rd->argv[0]))
-    t = ~LJ_TNUMX;
+  if (tvisnumber(&rd->argv[0]) || tvisi64(&rd->argv[0]))
+    t = ~LJ_TNUMX;  /* ADR-001b: a boxed int64 is a number */
   else if (LJ_64 && !LJ_GC64 && tvislightud(&rd->argv[0]))
     t = ~LJ_TLIGHTUD;
   else
@@ -478,6 +478,12 @@ static int recff_metacall(jit_State *J, RecordFFData *rd, MMS mm)
 static void LJ_FASTCALL recff_tostring(jit_State *J, RecordFFData *rd)
 {
   TRef tr = J->base[0];
+  if (tvisi64(&rd->argv[0])) {
+    /* ADR-001b step 4: a runtime boxed int64 is NYI in the recorder; the
+    ** interpreter produces the exact decimal. */
+    recff_nyiu(J, rd);
+    return;
+  }
   if (tref_isstr(tr)) {
     /* Ignore __tostring in the string base metatable. */
     /* Pass on result in J->base[0]. */

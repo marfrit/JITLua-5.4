@@ -29,7 +29,6 @@ tests/d54/env_01_fenv.lua	A	P1: _ENV model (5.1 globals); getfenv/setfenv kept a
 tests/d54/err_02_tailname.lua	A	P1.8b: tail-call error names -- LuaJIT reuses the caller frame, so the loaded-module fallback reports 'string.rep' where 5.4 reports the short 'rep'. Non-tail and pcall paths match.
 tests/d54/gc_01_tbc_gc.lua	A	P1/P4: <close>/__close, generational GC options
 tests/d54/lex_01_literals.lua	A	P1: 5.4 literal classification (int vs float, overflow)
-tests/d54/i64_01_box.lua	B	ADR-001b step 4 OPEN: JIT-on segfaults when a traced loop calls tostring() on a boxed int64 (recorder NYI in sload/constify is not sufficient; remaining fast path to find). Modes A and R pass.
 tests/d54/math_os_01.lua	A	P1/P5: math.type/tointeger/ult done; remaining: math.maxinteger/mininteger (int64 core), math.random(1,2^62)
 tests/d54/math_02_random.lua	A	P5.5 done: xoshiro256** sequence matches PUC for every seeded call; only math.random(0) still returns a float -- needs a 64-bit integer in the value model (ADR-001)
 tests/d54/meta_01_matrix.lua	A	P1: int/float arithmetic + metamethod operand matrix

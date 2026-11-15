@@ -535,3 +535,19 @@ step 3 (IRT_I64 + allocation sinking) has to fix.
 OPEN DIVERGENCE: b3_int32 sum differs between ours JIT (1232839951),
 ours -joff (1196193376 == PUC) and stock (1303583832): the JIT narrows
 int32 arithmetic without the widened/overflow guard. Step-3 scope.
+
+## Session 21 — step 3 blocked on allocation PHIs; step 2 tree restored (a5b97b92)
+
+Step-3 WIP (b99fe41d) is reverted: the IR_BOX model is semantically correct
+(`local s=1<<40; for i=1,300 do s=s+1 end` -> 1099511628076) but the trace is
+rejected with LJ_TRERR_NYICOAL ("register coalescing too complex") on aarch64,
+with and without allocation sinking enabled. Adding the FLOAD(BOX, UDATA_I64)
+-> payload fold rule (Claude's item 1) and the gcstep/alloc lists did not fix
+it; removing the RID_RET hint for IR_BOX reduced the retries (5 -> 3) but the
+trace still fails. So a loop-carried int64 box PHI (allocation-type PHI) does
+not assemble in this tree as it stands, and the alternative raw IRT_I64 PHI
+restores a wrong register value at exits.
+State now: step 2 (47-bit inline enabled) is green on both boxes again; gates
+47 PASS / 0 FAIL / 17 XFAIL, opt 128, R 32, i64 14/14. Bench unchanged from
+e4fad1a4. The step-3 target (B1 <=1.5x stock FFI) remains out of reach until
+the PHI/allocator issue is solved; b99fe41d holds the full WIP for resume.

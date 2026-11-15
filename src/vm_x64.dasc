@@ -1681,7 +1681,7 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov [BASE-8], ITYPE
   |  mov RA, L:PC->top
   |  sub RA, 8
-  |  mov L:PC->top, RA			// Clear error from coroutine stack.
+  |  // Keep the error object below top for coroutine.close (5.4 returns it).
   |  // Copy error message.
   |  mov RD, [RA]
   |  mov [BASE], RD

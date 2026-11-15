@@ -1398,7 +1398,9 @@ static void build_subroutines(BuildCtx *ctx)
   |  ldr TMP0, [CARG4, #-8]!
   |   mov_false TMP1
   |    mov RC, #(2+1)*8
-  |  str CARG4, L:RA->top		// Remove error from coroutine stack.
+  |  add CARG4, CARG4, #8
+  |  str CARG4, L:RA->top		// Keep the error object below top for
+  |				// coroutine.close (5.4 returns it).
   |  str TMP0, [BASE]			// Copy error message.
   |  b <7
   |.else

@@ -555,6 +555,9 @@ static GCobj *io_std_new(lua_State *L, FILE *fp, const char *name)
 LUALIB_API int luaopen_io(lua_State *L)
 {
   LJ_LIB_REG(L, NULL, io_method);
+  /* 5.4: __name gives the type name used in error messages. */
+  lua_pushstring(L, LUA_FILEHANDLE);
+  lua_setfield(L, -2, "__name");
   copyTV(L, L->top, L->top-1); L->top++;
   lua_setfield(L, LUA_REGISTRYINDEX, LUA_FILEHANDLE);
   LJ_LIB_REG(L, LUA_IOLIBNAME, io);

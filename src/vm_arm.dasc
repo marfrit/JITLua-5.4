@@ -840,7 +840,7 @@ static void build_subroutines(BuildCtx *ctx)
   |  bl extern lj_meta_len		// (lua_State *L, TValue *o)
   |  // Returns NULL (retry) or TValue * (metamethod base).
   |  .IOS ldr BASE, L->base
-#if LJ_52
+#if 1  /* 5.4: __len applies to tables. */
   |  cmp CRET1, #0
   |  bne ->vmeta_binop			// Binop call for compatibility.
   |  ldr TAB:CARG1, [BASE, RC]
@@ -1146,12 +1146,12 @@ static void build_subroutines(BuildCtx *ctx)
   |
   |.ffunc_1 pairs
   |  checktab CARG2, ->fff_fallback
-#if LJ_52
+#if 1  /* 5.4: fall back to the C handler so __pairs is honored. */
   |  ldr TAB:RB, TAB:CARG1->metatable
 #endif
   |   ldrd CFUNC:CARG34, CFUNC:CARG3->upvalue[0]
   |    ldr PC, [BASE, FRAME_PC]
-#if LJ_52
+#if 1
   |  cmp TAB:RB, #0
   |  bne ->fff_fallback
 #endif
@@ -3172,7 +3172,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |   ins_next3
     |2:
     |  checktab CARG2, ->vmeta_len
-#if LJ_52
+#if 1  /* 5.4: check the table metatable for __len. */
     |  ldr TAB:CARG3, TAB:CARG1->metatable
     |  cmp TAB:CARG3, #0
     |  bne >9
@@ -3184,7 +3184,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  // Returns uint32_t (but less than 2^31).
     |  .IOS mov BASE, RC
     |  b <1
-#if LJ_52
+#if 1
     |9:
     |  ldrb CARG4, TAB:CARG3->nomm
     |  tst CARG4, #1<<MM_len

@@ -963,7 +963,7 @@ static void build_subroutines(BuildCtx *ctx)
   |
   |->vmeta_len:
   |  // CARG2 already set by BC_LEN.
-#if LJ_52
+#if 1  /* 5.4: __len applies to tables. */
   |  move MULTRES, CARG1
 #endif
   |  load_got lj_meta_len
@@ -972,7 +972,7 @@ static void build_subroutines(BuildCtx *ctx)
   |  call_intern lj_meta_len		// (lua_State *L, TValue *o)
   |.  move CARG1, L
   |  // Returns NULL (retry) or TValue * (metamethod base).
-#if LJ_52
+#if 1
   |  bnez CRET1, ->vmeta_binop		// Binop call for compatibility.
   |.  nop
   |  b ->BC_LEN_Z
@@ -1308,7 +1308,7 @@ static void build_subroutines(BuildCtx *ctx)
   |  li AT, LJ_TTAB
   |  bne SFARG1HI, AT, ->fff_fallback
   |.  lw PC, FRAME_PC(BASE)
-#if LJ_52
+#if 1  /* 5.4: fall back to the C handler so __pairs is honored. */
   |  lw TAB:TMP2, TAB:SFARG1LO->metatable
   |  lw TMP0, CFUNC:RB->upvalue[0].u32.hi
   |   lw TMP1, CFUNC:RB->upvalue[0].u32.lo
@@ -3622,7 +3622,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |2:
     |  bne TMP0, AT, ->vmeta_len
     |.  nop
-#if LJ_52
+#if 1  /* 5.4: check the table metatable for __len. */
     |  lw TAB:TMP2, TAB:CARG1->metatable
     |  bnez TAB:TMP2, >9
     |.  nop
@@ -3635,7 +3635,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  // Returns uint32_t (but less than 2^31).
     |  b <1
     |.  nop
-#if LJ_52
+#if 1
     |9:
     |  lbu TMP0, TAB:TMP2->nomm
     |  andi TMP0, TMP0, 1<<MM_len

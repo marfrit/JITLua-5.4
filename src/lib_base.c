@@ -88,7 +88,8 @@ static int ffh_pairs(lua_State *L, MMS mm)
 {
   TValue *o = lj_lib_checkany(L, 1);
   cTValue *mo = lj_meta_lookup(L, o, mm);
-  if ((LJ_52 || tviscdata(o)) && !tvisnil(mo)) {
+  /* 5.4 honors __pairs (and FFI cdata metamethods), but NOT __ipairs. */
+  if ((mm == MM_pairs || tviscdata(o)) && !tvisnil(mo)) {
     L->top = o+1;  /* Only keep one argument. */
     copyTV(L, L->base-1-LJ_FR2, mo);  /* Replace callable. */
     return FFH_TAILCALL;

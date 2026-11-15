@@ -74,6 +74,48 @@ Also fixed a real syntax error in `err_01_xpcall.lua` (missing paren) found by t
 9. `tostring(-(0/0))` == "-nan" on aarch64 PUC → nan sign is observable; do NOT normalize it away.
 10. `os.time{...}` is TZ-dependent → harness forces TZ=UTC.
 
+## Session 5 (in progress) — __len/__pairs + __name type names
+
+DONE (uncommitted): enabled the LJ_52-gated VM paths for 5.4 in ALL 7 backends
+(vm_arm64/x64/x86/arm/ppc/mips/mips64.dasc): BC_LEN metatable check + nomm
+label, vmeta_len save/NULL-retry, and the `pairs` fast-function metatable
+fallback. NOTE: DynASM never receives -D LJ_52, so those gates were always off;
+changed to `#if 1`. ipairs gates deliberately LEFT OFF (5.4 ignores __ipairs).
+C side: lj_meta.c lj_meta_len (no LJ_52 gate, mmcall passes o twice),
+lib_base.c ffh_pairs honors MM_pairs only (+cdata), lj_err.c err_typename()
+uses the metatable __name field (5.4 luaT_objtypename).
+Verified on arm64: #t with __len returns any value; __pairs honored; __ipairs
+ignored; JIT hot loops agree. Only ppc/mips/x86/arm assembly is UNTESTED locally.
+New test tests/d54/meta_03_len_pairs.lua. d54 PASS 70, 1 FAIL (meta_03 A) --
+CHECK THE REMAINING DIFF (was the FILE* vs userdata type name; __name added).
+
+NEXT: fix the last meta_03 diff, run capi+fuzz+full corpus, commit+push.
+Then: MISSION errata (__pairs DOES exist in 5.4.7), final docs/report.
+
+## Session 4 (in progress) — __len on tables + __pairs
+
+GOAL: make `#t` honor `__len` on TABLES (returning ANY value) and make `pairs()`
+honor `__pairs`, both matching PUC 5.4.7. Verified by probe:
+- PUC: `#setmetatable({},{__len=function() return 2.5 end})` -> 2.5; `"x"` -> "x".
+  LuaJIT: both -> 0 (metatable ignored for tables unless LJ_52).
+- PUC honors `__pairs` (probe gave 0 iterations); LuaJIT ignores it (2).
+  NOTE: MISSION 4.2 claim "__pairs/__ipairs do not exist" is WRONG for 5.4.7 --
+  __pairs IS honored. Record as errata. Check __ipairs separately.
+- Float `%` ALREADY matches PUC (floor-mod); numeric_04_mod.lua only fails
+  because the test file itself uses `//` (parse error) -- fix the test.
+- meta_02_compare_len.lua aborts early on math.maxinteger (nil); split the
+  __len/__pairs part into its own test.
+
+WHERE: gates are `#if LJ_52` in lib_base.c (lines ~86/91, 227, 608) and
+`lj_meta.c:lj_meta_len` (uses LJ_52 for the nomm cache and the mmcall arg).
+The VM's BC_LEN also has `#if LJ_52` metatable checks in vm_*.dasc -- changing
+those needs care (assembly). Prefer enabling the C paths; check whether the
+VM fast path bypasses __len for tables when LJ_52 is off.
+`LJ_52` is set by LUAJIT_ENABLE_LUA52COMPAT (lj_arch.h ~731).
+
+DONE THIS SESSION (committed+pushed): P1.3b table borders + rawlen (70501d91),
+lua_rotate + capi 34/34. Full corpus PASS 112, XFAIL 36, FAIL 0.
+
 ## Session 3 — DONE: table borders (P1.3b) + rawlen
 
 Committed `70501d91`. Two cooperating fixes:

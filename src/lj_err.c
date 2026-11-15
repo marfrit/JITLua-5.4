@@ -966,9 +966,22 @@ LJ_NOINLINE void lj_err_lex(lua_State *L, GCstr *src, const char *tok,
 }
 
 /* Typecheck error for operands. */
+/* 5.4: a metatable's __name field overrides the type name in errors. */
+static const char *err_typename(lua_State *L, cTValue *o)
+{
+  GCtab *mt = NULL;
+  if (tvistab(o)) mt = tabref(tabV(o)->metatable);
+  else if (tvisudata(o)) mt = tabref(udataV(o)->metatable);
+  if (mt) {
+    cTValue *tv = lj_tab_getstr(mt, lj_str_newlit(L, "__name"));
+    if (tv && tvisstr(tv)) return strVdata(tv);
+  }
+  return lj_typename(o);
+}
+
 LJ_NOINLINE void lj_err_optype(lua_State *L, cTValue *o, ErrMsg opm)
 {
-  const char *tname = lj_typename(o);
+  const char *tname = err_typename(L, o);
   const char *opname = err2msg(opm);
   if (curr_funcisL(L)) {
     GCproto *pt = curr_proto(L);

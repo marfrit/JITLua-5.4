@@ -173,7 +173,7 @@ static void i64_store(lua_State *L, TValue *ra, int64_t v)
 {
   if ((int64_t)(int32_t)v == v) {
     setintV(ra, (int32_t)v);
-#if 0 /* step-6 activation DISABLED: FNV/B1 checksum still -4587520: with it on, B1/B2 checksums are wrong
+#if 0 /* step-6 activation DISABLED (VM FP-path bug, see docs): with it on, B1/B2 checksums are wrong
        ** (-4587520 vs 343592796160): some op still truncates a widened value.
        ** Bisect with tests/bench/b1_fnv.lua; see docs/phase0-status.md. */
   } else if (i47_fits(v)) {

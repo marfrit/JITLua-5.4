@@ -464,3 +464,19 @@ on both operands, (b) `cs = cs + small` where cs widened, (c) the initial
 Bisect plan: instrument b1 with a per-iteration `print(h, math.type(h))` for
 the first 3 iterations and compare against PUC 5.4.7; then toggle one op at a
 time (replace `&`/`+` with explicit helper calls) to isolate.
+
+## Session 17 — decisive result: it is (a), the VM
+
+With activation ON, `tests/bench/b1_fnv.lua` gives checksum -4587520 under
+BOTH `-joff` and `-jon` -> the interpreter, not the JIT narrowing. His's
+analysis: 343592796160 - (-4587520) = 343597383680 = 80 * 2^32, i.e. the right
+sum wrapped at 32 bits.
+Root cause candidate (next action): in `vm_arm64.dasc` `ins_arithdn`,
+`ins_arithcheck_int >5` sends a *widened* inline integer to label 5, the FP
+variant, which loads a NaN-boxed integer value as an IEEE double (garbage) and
+stores a float; the int32 asm path is skipped, so the sum never reaches
+`lj_i64_arith`. Fix pattern: split the check -- a tag mismatch (float operand)
+keeps the FP path; a widened int32-range failure (payload bits 32..46 set) goes
+to a new label that calls `lj_i64_arith` with the ORIGINAL operand slots and
+continues (no 32-bit store first). Mirror on x64 (add/jo path). Then enable,
+gate both boxes (incl. the overdue x64 re-run), bench, commit, send.

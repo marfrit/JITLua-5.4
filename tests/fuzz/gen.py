@@ -94,6 +94,15 @@ class Gen:
             k = r.randint(1, 6)
             out.append('for i%d = 1, %d do acc = acc + (i%d %% 3) end' % (i, k, i))
             out.append('p("loop%d", true, acc)' % i)
+        elif c < 0.97:
+            # Overflowing int arithmetic in a hot loop (JIT must match the
+            # interpreter's 64-bit wrap and bit-op semantics).
+            seed = r.choice([12345, 1, -5, 99991])
+            mul = r.choice([1103515245, 0x7fffffff, 0x100000001b3, 0x40000001])
+            inc = r.choice([12345, 1, 7, 0x7ffffff])
+            mask = r.choice([0x7fffffff, 0xffffffff, 0x3fffffff])
+            out.append('do local q = %d; for j = 1, 200 do q = (q * %d + %d) & %d end '
+                       'p("lcg%d", true, q, math.type(q)) end' % (seed, mul, inc, mask, i))
         else:
             out.append('p("t%d", try(function() local t = {%s, %s, %s} return #t, t[1], t[2] end))'
                        % (i, self.leaf(), self.leaf(), self.leaf()))

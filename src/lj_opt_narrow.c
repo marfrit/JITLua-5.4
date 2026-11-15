@@ -483,15 +483,11 @@ TRef LJ_FASTCALL lj_opt_narrow_tobit(jit_State *J, TRef tr)
 {
   if (tref_isstr(tr))
     tr = emitir(IRTG(IR_STRTO, IRT_NUM), tr, 0);
-  if (tref_isnum(tr))  /* Conversion may be narrowed, too. See above. */
-    return emitir(IRTI(IR_TOBIT), tr, lj_ir_knum_tobit(J));
   if (!tref_isinteger(tr))
-    lj_trace_err(J, LJ_TRERR_BADTYPE);
-  /*
-  ** Wrapped overflow semantics allow stripping of ADDOV and SUBOV.
-  ** MULOV cannot be stripped due to precision widening.
-  */
-  return narrow_stripov(J, tr, IR_SUBOV, (IRT_INT<<5)|IRT_INT|IRCONV_TOBIT);
+    lj_trace_err(J, LJ_TRERR_BADTYPE);  /* 5.4: exact int64 bit semantics */
+  /* Keep the overflow guards: a guarded int is proven int32 at the use, so
+  ** the bit operand is exact there; an overflow exits to the interpreter. */
+  return tr;
 }
 
 #if LJ_HASFFI
@@ -529,10 +525,11 @@ TRef lj_opt_narrow_arith(jit_State *J, TRef rb, TRef rc,
   rb = conv_str_tonum(J, rb, vb);
   rc = conv_str_tonum(J, rc, vc);
   /* Must not narrow MUL in non-DUALNUM variant, because it loses -0. */
-  if ((op >= IR_ADD && op <= (LJ_DUALNUM ? IR_MUL : IR_SUB)) &&
-      tref_isinteger(rb) && tref_isinteger(rc) &&
-      lj_num2int_ok(lj_vm_foldarith(numberVnum(vb), numberVnum(vc),
-				    (int)op - (int)IR_ADD)))
+  /* Lua 5.4: integer +/-/* overflow is not undefined; it widens to 64-bit
+  ** (wrap) in the interpreter. Always emit the guarded form, so an overflow
+  ** exits to the interpreter instead of silently wrapping at 32 bits. */
+  if (op >= IR_ADD && op <= IR_MUL &&
+      tref_isinteger(rb) && tref_isinteger(rc))
     return emitir(IRTGI((int)op - (int)IR_ADD + (int)IR_ADDOV), rb, rc);
   if (!tref_isnum(rb)) rb = emitir(IRTN(IR_CONV), rb, IRCONV_NUM_INT);
   if (!tref_isnum(rc)) rc = emitir(IRTN(IR_CONV), rc, IRCONV_NUM_INT);

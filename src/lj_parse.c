@@ -136,6 +136,7 @@ typedef struct FuncScope {
 #define VSTACK_GOTO		0x02	/* Pending goto. */
 #define VSTACK_LABEL		0x04	/* Label. */
 #define VSTACK_CONST		0x08	/* Constant variable. */
+#define VSTACK_CLOSE		0x10	/* To-be-closed variable (5.4). */
 
 /* Per-function state. */
 typedef struct FuncState {
@@ -197,7 +198,9 @@ LJ_NORET LJ_NOINLINE static void err_syntax(LexState *ls, ErrMsg em)
 
 LJ_NORET LJ_NOINLINE static void err_token(LexState *ls, LexToken tok)
 {
-  lj_lex_error(ls, ls->tok, LJ_ERR_XTOKEN, lj_lex_token2str(ls, tok));
+  /* 5.4 does not quote <name>/<number>/<string>/<eof> in "expected" errors. */
+  lj_lex_error(ls, ls->tok, tok >= TK_number ? LJ_ERR_XTOKENU : LJ_ERR_XTOKEN,
+	       lj_lex_token2str(ls, tok));
 }
 
 LJ_NORET static void err_limit(FuncState *fs, uint32_t limit, const char *what)
@@ -1142,15 +1145,8 @@ static MSize var_new(LexState *ls, BCReg n, GCstr *name)
 {
   FuncState *fs = ls->fs;
   MSize vtop = ls->vtop;
-  if ((uintptr_t)name >= VARNAME__MAX) {  /* Check for const re-declaration. */
-    MSize vidx = ls->vhash[var_hash(name)];
-    while (vidx != VINDEX_NONE) {
-      VarInfo *v = &ls->vstack[vidx];
-      if (strref(v->name) == name && (v->info & VSTACK_CONST))
-       lj_lex_error(ls, 0, LJ_ERR_XCONSTR, strdata(name));
-      vidx = v->prev;
-    }
-  }
+  /* Lua 5.4 allows shadowing a const local with a new local (including a
+  ** new <const>), so there is no re-declaration check here. */
   checklimit(fs, fs->nactvar+n, LJ_MAX_LOCVAR, "local variables");
   if (LJ_UNLIKELY(vtop >= ls->sizevstack)) {
     if (ls->sizevstack >= LJ_MAX_VSTACK)
@@ -2587,6 +2583,29 @@ static void parse_call_assign(LexState *ls)
 }
 
 /* Parse 'local' or 'const' statement. */
+/* Parse an optional Lua 5.4 attributive: <const> or <close>.
+** Returns the VSTACK_* flag, or 0 if there is no attributive. */
+static int parse_attrib(LexState *ls)
+{
+  GCstr *name;
+  int attr;
+  if (ls->tok != '<') return 0;
+  lj_lex_next(ls);
+  name = lex_str(ls);  /* Errors with "<name> expected" for non-names. */
+  if (!strcmp(strdata(name), "const")) {
+    attr = VSTACK_CONST;
+  } else if (!strcmp(strdata(name), "close")) {
+    /* P1.5: needs VM support for scope-exit/error/coroutine close. */
+    lj_lex_error(ls, 0, LJ_ERR_XCLOSE);
+    attr = 0;
+  } else {
+    lj_lex_error(ls, 0, LJ_ERR_XATTR, strdata(name));
+    attr = 0;
+  }
+  lex_check(ls, '>');
+  return attr;
+}
+
 static void parse_local(LexState *ls, int vinfo)
 {
   lj_lex_next(ls);  /* Skip local or const. */
@@ -2617,12 +2636,13 @@ static void parse_local(LexState *ls, int vinfo)
 	VarHash hash = var_hash(strref(v->name));
 	v->prev = ls->vhash[hash];  /* Temporarily add to hash. */
 	ls->vhash[hash] = vidx;
-	v->info = (uint8_t)vinfo;
+	v->info = (uint8_t)(vinfo | parse_attrib(ls));
       } while (lex_opt(ls, ','));
       memcpy(ls->vhash, vhsave, sizeof(vhsave));  /* Restore hash anchors. */
     } else {
       do {  /* Collect LHS. */
-	var_new(ls, nvars++, lex_str(ls));
+	MSize vidx = var_new(ls, nvars++, lex_str(ls));
+	ls->vstack[vidx].info = (uint8_t)parse_attrib(ls);
       } while (lex_opt(ls, ','));
     }
     if (lex_opt(ls, '=')) {  /* Optional RHS. */

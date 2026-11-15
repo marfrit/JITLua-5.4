@@ -21,6 +21,7 @@ tests/corpus/puc54/sort.lua	A	P5: table.sort 5.4 + string.pack
 tests/corpus/puc54/tpack.lua	A	P5: string.pack/unpack absent
 tests/corpus/puc54/utf8.lua	A	P1: utf8 lib + \u{} + NUL-in-pattern done; last assert needs int64 bitwise ((1<<31)-1)
 tests/corpus/puc54/vararg.lua	A	P1: vararg 5.4 semantics
+tests/d54/attrib_01_const.lua	A	P1.5: <const> fully matches 5.4; remaining: <close> needs VM support, and 'x <const> = 1' error wording differs
 tests/d54/bits_01_ops.lua	A	P1: bitwise ops, logical >>, mod-64/negative counts
 tests/d54/bits_02_metamethods.lua	A	P1: __band/__bor/__bxor/__shl/__shr/__bnot dispatch
 tests/d54/coro_01_close.lua	A	P1/P5: coroutine.close absent, <close> support

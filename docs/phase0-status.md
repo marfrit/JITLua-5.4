@@ -317,3 +317,25 @@ IN PROGRESS (edits applied, NOT yet compiled):
   int64 bits and reading them back through lj_i64_box.
 - Then: literals test (`lex_01_literals` mode A), full gates both boxes,
   benchmark gate again (now honest), commit per step.
+
+## Session 10 — step 2b done; benchmark gate measured (honest)
+
+Committed `425eaedb` (boxed int64 literals + BC_KI64 + BCDUMP_KGC_I64BOX).
+Both boxes green (47/128/32).
+
+Benchmark gate on arm-box with the real int64 model (`tests/bench/run.sh`,
+median of 3, four arms):
+  b1 FNV-1a-64 (10 MiB):   ours JIT 16463 ms | ours -joff 16422 | stock FFI 15.1 | PUC 278.1
+  b2 1e6 64-bit table:     FAILED "attempt to compare two userdata values"
+  b2b 1e6 ~2^41 values:    FAILED same
+  b3 int32 control:        ours JIT 48.1 | ours -joff 5557 | stock 46.2 | PUC 262.1
+=> b1 is ~1000x the FFI yardstick and 59x slower than PUC: every 64-bit op
+   allocates+interns a box and the recorder aborts (NYI), so nothing is
+   compiled. b3 shows no JIT regression (48.1 vs 46.2), interpreter 5557 vs
+   the earlier 372 because int32 mul overflow now boxes.
+   b2/b2b blocked by missing box<->box comparison.
+
+NEXT (in this turn): add box-aware compare in lj_meta_comp (and lj_obj_equal
+already covers interned equality) so b2/b2b run; rerun bench; write the table
+into docs/adr-001b-boxed-i64.md; then Markus decides on step 5/47-bit with the
+numbers.

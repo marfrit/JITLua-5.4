@@ -573,3 +573,21 @@ should: keep per-block close lists with a level per block (parse-time), so UCLO
 closes only the entries of the blocks being left, matching the level filter;
 cover the error-unwinding path in lj_err_run; and keep the sentinel only as a
 double-close guard.
+
+## Session 23 — <close> parked again: per-UCLO pc mapping cannot pass PC from the VM
+
+Second attempt: per-block close lists tagged with the UCLO bytecode position
+(FuncState records (u16 pcpos, u16 slot) pairs for each emitted UCLO; GCproto
+carries them after varinfo and dumps are refused for such functions), plus
+MM_close at the END of MMDEF and VM UCLO calling lj_tbc_close(L, level, pc)
+before closing upvalues. Parser bookkeeping (active close stack, per-scope
+entry counts, return paths closing all active entries) is in place.
+Blocker: the VM keeps PC in an encoded form inside the UCLO handler
+(`sub PC, RC, #0x20000` after computing the target), so passing PC as a real
+code pointer produces a garbage position and a segfault in the nested
+__close call. Also clobbering CARG3 (openupval) broke the upvalue branch.
+Next attempt: get the UCLO position without the VM's PC: (a) set SAVE_PC before
+the call and let the helper read it, or (b) give UCLO a literal list id
+instead of a pc tag (add a bytecode operand or a parallel table keyed by a
+pseudo level). Keep the parser bookkeeping and the proto map; only the VM
+hand-off needs rework. Error unwinding (lj_err_run) is still not wired.

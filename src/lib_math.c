@@ -282,12 +282,17 @@ LUALIB_API int luaopen_math(lua_State *L)
   RandState *rs = (RandState *)lua_newuserdata(L, sizeof(RandState));
   rand_setseed(rs, (uint64_t)time(NULL), (uint64_t)(size_t)L);
   LJ_LIB_REG(L, LUA_MATHLIBNAME, math);
-  /* 5.4 math.maxinteger/mininteger need a 64-bit integer that Lua code can
-  ** see. lj_i64_box() provides it (ADR-001b, C-test verified), but pushing it
-  ** as a library constant crashes the interpreter's fast print/format path:
-  ** measured this session (segfault in the VM for print(math.maxinteger)).
-  ** Step 2 (parser/VM) must teach that path the box first, so the constants
-  ** stay out until then. */
+  /* 5.4 constants: exact 64-bit bounds as boxed integers (ADR-001b step 1).
+  ** lj_lib_register leaves the library table on top; use that absolute index. */
+  {
+    int tabidx = lua_gettop(L);
+    lua_pushstring(L, "maxinteger");
+    lj_i64_push(L, (int64_t)0x7fffffffffffffffLL);
+    lua_settable(L, tabidx);
+    lua_pushstring(L, "mininteger");
+    lj_i64_push(L, (int64_t)(-0x7fffffffffffffffLL - 1));
+    lua_settable(L, tabidx);
+  }
   return 1;
 }
 

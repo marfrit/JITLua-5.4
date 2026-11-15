@@ -173,6 +173,9 @@ const char *lj_strfmt_wstrnum(lua_State *L, cTValue *o, MSize *lenp)
     return sbx->r ? sbx->r : "";
   } else if (tvisint(o)) {
     sb = lj_strfmt_putint(lj_buf_tmp_(L), intV(o));
+  } else if (tvisi64(o)) {
+    /* ADR-001b: print's shortcut path must know the boxed integer. */
+    sb = lj_strfmt_putfxint(lj_buf_tmp_(L), STRFMT_D, (uint64_t)i64V(o));
   } else if (tvisnum(o)) {
     sb = lj_strfmt_putfnumstr(lj_buf_tmp_(L), o->n);
   } else {
@@ -554,14 +557,27 @@ GCstr * LJ_FASTCALL lj_strfmt_int(lua_State *L, int32_t k)
   return lj_str_new(L, buf, len);
 }
 
-/* Boxed int64 (ADR-001b): decimal representation, exactly like a 64-bit %d. */
+/* Boxed int64 (ADR-001b): write the decimal form into a plain buffer. No SBuf
+** here: lj_strfmt_putfxint() may grow the buffer, which a stack SBuf cannot. */
+static char *strfmt_wint64(char *p, int64_t k)
+{
+  char tmp[22];
+  int n = 0;
+  uint64_t u = k < 0 ? (uint64_t)0 - (uint64_t)k : (uint64_t)k;
+  do {
+    tmp[n++] = (char)('0' + (u % 10));
+    u /= 10;
+  } while (u != 0);
+  if (k < 0) *p++ = '-';
+  while (n > 0) *p++ = tmp[--n];
+  return p;
+}
+
 GCstr * LJ_FASTCALL lj_strfmt_i64(lua_State *L, int64_t k)
 {
-  char buf[STRFMT_MAXBUF_XINT];
-  SBuf tmp;
-  tmp.b = tmp.w = tmp.e = buf;
-  (void)lj_strfmt_putfxint(&tmp, STRFMT_D, (uint64_t)k);
-  return lj_str_new(L, buf, (MSize)(tmp.w - buf));
+  char buf[22];
+  char *p = strfmt_wint64(buf, k);
+  return lj_str_new(L, buf, (MSize)(p - buf));
 }
 
 /* Convert integer or number to string. */

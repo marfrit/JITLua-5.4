@@ -27,14 +27,14 @@ tests/d54/dump_str_01.lua	A	P1.3: gmatch 5.4 empty-match rule done; remaining: 5
 tests/d54/dump_02_border.lua	A	IMPL-DEFINED: dump/reload border bug FIXED and rawlen added; only the runtime-built sparse-table border differs (any border is legal per the 5.4 manual)
 tests/d54/env_01_fenv.lua	A	P1: _ENV model (5.1 globals); getfenv/setfenv kept as ext
 tests/d54/err_02_tailname.lua	A	P1.8b: tail-call error names -- LuaJIT reuses the caller frame, so the loaded-module fallback reports 'string.rep' where 5.4 reports the short 'rep'. Non-tail and pcall paths match.
-tests/d54/fmt_01_format.lua	A	P1: %d/%x integer-representation rule done; remaining diffs need math.maxinteger/mininteger (int64 core)
 tests/d54/gc_01_tbc_gc.lua	A	P1/P4: <close>/__close, generational GC options
 tests/d54/lex_01_literals.lua	A	P1: 5.4 literal classification (int vs float, overflow)
+tests/d54/i64_01_box.lua	B	ADR-001b step 4 OPEN: JIT-on segfaults when a traced loop calls tostring() on a boxed int64 (recorder NYI in sload/constify is not sufficient; remaining fast path to find). Modes A and R pass.
 tests/d54/math_os_01.lua	A	P1/P5: math.type/tointeger/ult done; remaining: math.maxinteger/mininteger (int64 core), math.random(1,2^62)
 tests/d54/math_02_random.lua	A	P5.5 done: xoshiro256** sequence matches PUC for every seeded call; only math.random(0) still returns a float -- needs a 64-bit integer in the value model (ADR-001)
 tests/d54/meta_01_matrix.lua	A	P1: int/float arithmetic + metamethod operand matrix
 tests/d54/meta_02_compare_len.lua	A	P1: exact int/float compare, __len any value, __pairs
-tests/d54/numeric_01_types.lua	A	P1: int64/float value model, math.type, wrap
+tests/d54/numeric_01_types.lua	A	ADR-001b step 1 done: maxinteger/mininteger exist as boxes; arithmetic on them (wrap, mixed, unary minus) is step 3
 tests/d54/numeric_02_arith.lua	A	P1: int/float arithmetic, coercion, wrap
 tests/d54/numeric_03_idiv.lua	A	P1: // floor division (5.4 syntax absent)
 tests/d54/numeric_04_mod.lua	A	P1: % floor-mod sign rules (5.1 is fmod-like)

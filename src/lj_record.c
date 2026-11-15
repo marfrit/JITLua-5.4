@@ -200,12 +200,21 @@ static TRef sloadt(jit_State *J, int32_t slot, IRType t, int mode)
 /* Specialize a slot to the runtime type. Note: slot can be negative! */
 static TRef sload(jit_State *J, int32_t slot)
 {
-  IRType t = itype2irt(&J->L->base[slot]);
-  TRef ref = emitir_raw(IRTG(IR_SLOAD, t), (int32_t)J->baseslot+slot,
-			IRSLOAD_TYPECHECK);
-  if (irtype_ispri(t)) ref = TREF_PRI(t);  /* Canonicalize primitive refs. */
-  J->base[slot] = ref;
-  return ref;
+  /* ADR-001b step 4: a boxed 64-bit integer (private udtype) is NYI --
+  ** aborting keeps the interpreter's exact semantics instead of letting the
+  ** backends misinterpret the object (measured: JIT-on segfaulted on
+  ** tostring/%d of a box). Boxing becomes fast only with the later IRT_I64
+  ** lowering, not before. */
+  if (tvisi64(&J->L->base[slot]))
+    lj_trace_err(J, LJ_TRERR_BADTYPE);
+  {
+    IRType t = itype2irt(&J->L->base[slot]);
+    TRef ref = emitir_raw(IRTG(IR_SLOAD, t), (int32_t)J->baseslot+slot,
+			  IRSLOAD_TYPECHECK);
+    if (irtype_ispri(t)) ref = TREF_PRI(t);  /* Canonicalize primitive refs. */
+    J->base[slot] = ref;
+    return ref;
+  }
 }
 
 /* Get TRef from slot. Load slot and specialize if not done already. */
@@ -252,6 +261,8 @@ int lj_record_objcmp(jit_State *J, TRef a, TRef b, cTValue *av, cTValue *bv)
 /* Constify a value. Returns 0 for non-representable object types. */
 TRef lj_record_constify(jit_State *J, cTValue *o)
 {
+  if (tvisi64(o))
+    lj_trace_err(J, LJ_TRERR_BADTYPE);  /* ADR-001b step 4: boxed int64 is NYI */
   if (tvisgcv(o))
     return lj_ir_kgc(J, gcV(o), itype2irt(o));
   else if (tvisint(o))

@@ -738,7 +738,7 @@ static void asm_tvstore64(ASMState *as, Reg base, int32_t ofs, IRRef ref)
     Reg src = ra_alloc1(as, ref, allow);
     rset_clear(allow, src);
     if (irt_isinteger(ir->t)) {
-      Reg type = ra_allock(as, (int64_t)irt_toitype(ir->t) << 47, allow);
+      Reg type = ra_allock(as, (int64_t)((uint64_t)irt_toitype(ir->t) << 47), allow);
       emit_lso(as, A64I_STRx, RID_TMP, base, ofs);
       emit_dnm(as, A64I_ADDx | A64F_EX(A64EX_UXTW), RID_TMP, type, src);
     } else {

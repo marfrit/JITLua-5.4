@@ -61,6 +61,20 @@ separators, no `0b` literals, `table.create` is not PUC 5.4, `%g`/`tostring` use
 `%.14g` (not shortest round-trip), bitwise accepts exactly-representable floats,
 negative shift counts reverse direction (no error), int→float rounds (does not
 truncate), `v2.1` is a branch not a tag.
+**`__pairs` DOES exist in 5.4.7** (it is honored); `__ipairs` does not. MISSION
+4.2's claim that both were removed is wrong — implemented accordingly.
+
+## Implemented since M0 (see git log for the labeled commits)
+utf8 lib · `\u{}` to 0x7FFFFFFF · NUL-aware patterns · gmatch 5.4 lastmatch rule ·
+`%d/%x/...` integer-representation rule · `%q` literal forms · library error-name
+resolution · goto/label 5.4 diagnostics · `<const>` attributives · int/float
+literal split (scanner, parser float-constant table, fold rules, JIT recorder) ·
+5.4 `.0` float rendering (tostring/concat/table.concat, interp+JIT) ·
+math.type/tointeger/ult · os.time/date/difftime/rename · io.write/open/lines ·
+tonumber 5.4 rules · debug.upvalueid/upvaluejoin · table borders + rawlen ·
+`__len` on tables (any value) · `__pairs` · `__name` type names ·
+C API: absindex, isinteger, geti/seti, len, compare, stringtonumber, rotate,
+luaL_len, luaL_getsubtable (34-check C harness).
 
 ## Fuzzing
 `tests/fuzz/gen.py` (seeded, valid 5.4, deterministic) + `tests/fuzz/fuzz.py`

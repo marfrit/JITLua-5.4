@@ -74,6 +74,26 @@ Also fixed a real syntax error in `err_01_xpcall.lua` (missing paren) found by t
 9. `tostring(-(0/0))` == "-nan" on aarch64 PUC → nan sign is observable; do NOT normalize it away.
 10. `os.time{...}` is TZ-dependent → harness forces TZ=UTC.
 
+## Session 6 — sanitizer build state (IMPORTANT)
+
+- Fixed a latent parallel-build race: `src/Makefile` now has
+  `$(LJLIB_O): lj_libdef.h` (clean -j builds could compile lib_*.c before the
+  generated header existed; exposed by adding lib_utf8.c).
+- `-DLUAJIT_USE_SYSMALLOC` + ASan on arm64/GC64 CANNOT START: "cannot create
+  state: not enough memory" (system allocator returns addresses outside
+  LuaJIT's 47-bit GC range). ci-local.sh now sanitizes WITHOUT SYSMALLOC and
+  probes the binary before running the harness. Consequence: ASan cannot see
+  heap overflows inside LuaJIT's own allocator (stack/global/UB still covered).
+  Tracked for Phase 6 (needs a low-address allocator hint).
+- UBSan findings (pre-existing LuaJIT UB, NOT introduced by the port):
+  * lj_buf.c:298 `(*w & 0x7f) << 28` signed overflow -> FIXED (uint32_t cast).
+  * lj_asm_arm64.h:741 `irt_toitype << 47` signed overflow -> FIXED (uint64_t).
+  * lj_parse.c:1177 `setgcref(ls->vstack[vtop].name, ...)` misaligned GCobj
+    access -> OPEN. Investigate VarInfo layout/alignment (a BCLine field was
+    added to VarInfo for 5.4 label diagnostics; check sizeof/alignment).
+  Because UBSan writes reports to stderr, the sanitizer harness run shows
+  FAILs until these are resolved. Sanitizer-green is therefore an OPEN task.
+
 ## Session 5 (in progress) — __len/__pairs + __name type names
 
 DONE (uncommitted): enabled the LJ_52-gated VM paths for 5.4 in ALL 7 backends

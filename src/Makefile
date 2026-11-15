@@ -698,6 +698,10 @@ lj_libdef.h: $(BUILDVM_T) $(LJLIB_C)
 	$(E) "BUILDVM   $@"
 	$(Q)$(BUILDVM_X) -m libdef -o $@ $(LJLIB_C)
 
+# Library sources #include "lj_libdef.h": make the ordering explicit so a
+# clean parallel build cannot compile them before the header is generated.
+$(LJLIB_O): lj_libdef.h
+
 lj_recdef.h: $(BUILDVM_T) $(LJLIB_C)
 	$(E) "BUILDVM   $@"
 	$(Q)$(BUILDVM_X) -m recdef -o $@ $(LJLIB_C)

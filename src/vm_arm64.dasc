@@ -297,9 +297,9 @@
 |  cbnz TMP0, target		// not int32-proven: use the C helper instead
 |.endif
 |.endmacro
-|.macro checkintw, reg, fptarget, i64target
+|.macro checkintw, reg, fptarget, i64target	// fptarget unused (kept for clarity)
 |  cmp TISNUMhi, reg, lsr #32
-|  bne fptarget			// not an inline integer: FP variant handles floats
+|  bne i64target		// widened int or double: C helper decides, exact 5.4
 |.if DUALNUM
 |  ubfx TMP0, reg, #32, #15	// widened 47-bit inline integer?
 |  cbnz TMP0, i64target		// exact 64-bit semantics via the C helper
@@ -2803,6 +2803,19 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     ||}
     |.endmacro
     |
+    |.macro ins_arithfb_i64	// helper returned 0: metamethod path per vk
+    ||switch (vk) {
+    ||case 0:
+    |   cbz CRET1, ->vmeta_arith_vn
+    ||  break;
+    ||case 1:
+    |   cbz CRET1, ->vmeta_arith_nv
+    ||  break;
+    ||default:
+    |   cbz CRET1, ->vmeta_arith_vv
+    ||}
+    |.endmacro
+    |
     |.macro ins_arithfallback, ins
     ||switch (vk) {
     ||case 0:
@@ -2828,7 +2841,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |.macro ins_arithdn, intins, fpins
     |  ins_arithhead
     |  ins_arithload CARG1, CARG2
-    |  ins_arithcheck_int >5
+    |  checkintw CARG1, >5, >7
+    |   checkintw CARG2, >5, >7
     |.if "intins" == "smull"
     |  smull CARG1, CARG1w, CARG2w
     |  cmp CARG1, CARG1, sxtw
@@ -2846,6 +2860,26 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |4:
     |  ins_next
     |
+    |7:  // Widened inline integer: exact 64-bit semantics via the C helper.
+    |  add CARG3, BASE, RB, lsl #3
+    |   add CARG4, BASE, RC, lsl #3
+    |    add CARG2, BASE, RA, lsl #3
+    |.if "intins" == "adds"
+    |   mov CARG5, #I64_ADD
+    |.elif "intins" == "subs"
+    |   mov CARG5, #I64_SUB
+    |.elif "intins" == "smull"
+    |   mov CARG5, #I64_MUL
+    |.else
+    |   mov CARG5, #I64_MOD
+    |.endif
+    |    str BASE, L->base
+    |   mov CARG1, L
+    |    str PC, SAVE_PC
+    |  bl extern lj_i64_arith  // (L, ra, rb, rc, op) -> 1 handled, 0 fallback
+    |  ins_arithfb_i64
+    |  ins_next
+    |
     |5:  // FP variant.
     |  ins_arithload FARG1, FARG2
     |  ins_arithfallback ins_arithcheck_num
@@ -2857,7 +2891,10 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |.macro ins_arithfp, fpins
     |  ins_arithhead
     |  ins_arithload CARG1, CARG2
+    |  checkintw CARG1, >5, >6	// widened inline int: exact 64-bit helper
+    |   checkintw CARG2, >5, >6
     |  ins_arithload FARG1, FARG2
+    |5:  // FP variant.
     |  ins_arithfallback ins_arithcheck_num
     |.if "fpins" == "fpow"
     |  bl extern pow
@@ -2865,6 +2902,21 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  fpins FARG1, FARG1, FARG2
     |.endif
     |  str FARG1, [BASE, RA, lsl #3]
+    |  ins_next
+    |6:  // Widened inline integer: exact 64-bit semantics via the C helper.
+    |  add CARG3, BASE, RB, lsl #3
+    |   add CARG4, BASE, RC, lsl #3
+    |    add CARG2, BASE, RA, lsl #3
+    |.if "fpins" == "fpow"
+    |   mov CARG5, #I64_POW
+    |.else
+    |   mov CARG5, #I64_DIV
+    |.endif
+    |    str BASE, L->base
+    |   mov CARG1, L
+    |    str PC, SAVE_PC
+    |  bl extern lj_i64_arith
+    |  ins_arithfb_i64
     |  ins_next
     |.endmacro
 

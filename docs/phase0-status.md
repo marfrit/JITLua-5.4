@@ -480,3 +480,31 @@ keeps the FP path; a widened int32-range failure (payload bits 32..46 set) goes
 to a new label that calls `lj_i64_arith` with the ORIGINAL operand slots and
 continues (no 32-bit store first). Mirror on x64 (add/jo path). Then enable,
 gate both boxes (incl. the overdue x64 re-run), bench, commit, send.
+
+## Session 18 — arm64 helper routing landed, but it does NOT fire for a boxed operand
+
+Patched vm_arm64.dasc: new `checkintw` (separate widened target) + label >7/-6
+in `ins_arithdn` (ADD/SUB/MUL/MOD) and `ins_arithfp` (DIV/POW) calling
+`lj_i64_arith` with the original slots; new `ins_arithfb_i64` for the vk-aware
+vmeta fallback. Builds and runs.
+
+Measured (activation ON, widened store ON): B1/B2 still `unsupported`/wrong, and
+a *direct* probe disagrees with itself:
+  `local mi = math.maxinteger; print(mi+1)` -> -2  (WRONG, int32 low-word add)
+whereas `print(math.maxinteger+1)` in one expression -> -9223372036854775808
+(correct). So with a box in a *stack slot* the ADDVN check passes the int32
+fast path, i.e. the boxed udata's tag word equals `TISNUMhi` (x25). That is
+consistent with -2 = low-word add of the udata pointer. Hence `checkint`
+(and `checkintw`) never route boxes to the C helper; they must special-case
+`tvisudata`/box in asm (or the box tag must differ from the inline NUM tag).
+
+Also observed: `(a~1)==(1099511627776~1)` is false with activation ON though it
+was true with it OFF -> the VM `BC_ISEQV` fast path compares raw words, so
+lj_obj_equal's exact compare never runs for inline-vs-box; equality needs the
+same routing as arithmetic.
+
+Next: (1) print the actual high words for int32-int, widened-int, box, float
+from a tiny C patch or a `-e` script with `tostring`+`string.format("%x")` on
+internals; (2) fix the tag test accordingly; (3) route BC_ISEQV to
+lj_obj_equal when a box is present; (4) then enable, gate both boxes, bench.
+Activation back to #if 0 so the tree behaves like the last green gate.

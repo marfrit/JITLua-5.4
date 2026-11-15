@@ -2876,6 +2876,21 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  ins_arithfp fpow
     break;
 
+  case BC_IDIV:  // Lua 5.4 floor division: C helper (int32, boxed int64, floats)
+    |  decode_RB RB, INS
+    |   and RC, RC, #255
+    |  add CARG3, BASE, RB, lsl #3
+    |   add CARG4, BASE, RC, lsl #3
+    |    add CARG2, BASE, RA, lsl #3
+    |   mov CARG5, #I64_IDIV
+    |    str BASE, L->base
+    |   mov CARG1, L
+    |    str PC, SAVE_PC
+    |  bl extern lj_i64_arith  // (L, ra, rb, rc, op) -> 1 handled, 0 fallback
+    |  cbz CRET1, ->vmeta_arith_vv
+    |  ins_next
+    break;
+
   case BC_CAT:
     |  decode_RB RB, INS
     |   and RC, RC, #255
@@ -2932,11 +2947,17 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
   case BC_BXOR:
     |  ins_bitop eor
     break;
+  // 5.4 shifts are 64-bit: counts >= 64 yield 0 and negative counts reverse
+  // the direction, so they cannot use the 32-bit fast path.
   case BC_BSHL:
-    |  ins_bitop lsl
+    |  decode_RB RB, INS
+    |   and RC, RC, #255
+    |  b ->vmeta_bitop
     break;
   case BC_BSHR:
-    |  ins_bitop lsr
+    |  decode_RB RB, INS
+    |   and RC, RC, #255
+    |  b ->vmeta_bitop
     break;
   case BC_BSAR:
     |  ins_bitop asr

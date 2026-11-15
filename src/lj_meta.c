@@ -22,6 +22,8 @@
 #include "lj_strscan.h"
 #include "lj_strfmt.h"
 #include "lj_lib.h"
+#include "lj_debug.h"
+#include "lj_i64.h"
 #if LJ_HASFFI
 #include "lj_ctype.h"
 #include "lj_cdata.h"
@@ -221,6 +223,16 @@ TValue *lj_meta_arith(lua_State *L, TValue *ra, cTValue *rb, cTValue *rc,
   MMS mm = bcmode_mm(op);
   TValue tempb, tempc;
   cTValue *b, *c;
+  /* Lua 5.4 exact 64-bit semantics (ADR-001b): a boxed integer operand, or an
+  ** int32 overflow that landed here, is handled by the C helper. */
+  if (mm < MM__MAX) {
+    I64Op iop = lj_i64_op_from_mm(mm);
+    if (iop != I64__MAX && (tvisi64(rb) || tvisi64(rc) ||
+			   (tvisint(rb) && tvisint(rc)))) {
+      if (lj_i64_arith(L, ra, rb, rc, iop))
+	return NULL;  /* Handled. */
+    }
+  }
   if ((b = str2num(rb, &tempb)) != NULL &&
       (c = str2num(rc, &tempc)) != NULL) {  /* Try coercion first. */
     setnumV(ra, lj_vm_foldarith(numV(b), numV(c), (int)mm-MM_add));
@@ -239,10 +251,28 @@ TValue *lj_meta_arith(lua_State *L, TValue *ra, cTValue *rb, cTValue *rc,
   }
 }
 
-/* Helper for bit operators. No bitop metamethods in v2.1. */
+/* Helper for bit operators. Lua 5.4 semantics (ADR-001b): integer operands are
+** 64-bit, floats must have an exact integer representation; cdata keeps the
+** LuaJIT extension behaviour. */
 void lj_meta_bitop(lua_State *L, TValue *ra, cTValue *rb, cTValue *rc, BCReg op)
 {
 #if LJ_HASFFI
+  if (!(tviscdata(rb) || tviscdata(rc))) {
+    if (lj_i64_bitop(L, ra, rb, rc, op)) return;
+    {
+      cTValue *o = (tvisint(rb) || tvisi64(rb) || tvisnum(rb)) ? rc : rb;
+      const char *tname = lj_typename(o);
+      const char *oname = NULL;
+      if (curr_funcisL(L)) {
+	GCproto *pt = curr_proto(L);
+	const BCIns *pc = cframe_Lpc(L) - 1;
+	const char *kind = lj_debug_slotname(pt, pc, (BCReg)(o-L->base), &oname);
+	if (kind && oname)
+	  lj_err_msgv(L, LJ_ERR_BADOPBITK, tname, kind, oname);
+      }
+      lj_err_msgv(L, LJ_ERR_BADOPBIT, tname);
+    }
+  }
   CTypeID id = 0, id_ignore = 0;
   uint64_t b = lj_carith_checkbit64(L, rb, &id);
   uint64_t c = lj_carith_checkbit64(L, rc, op >= BC_BSHL ? &id_ignore : &id);

@@ -118,6 +118,7 @@
   _(MODVV,	dst,	var,	var,	mod) \
   \
   _(POW,	dst,	var,	var,	pow) \
+  _(IDIV,	dst,	var,	var,	idiv) \
   _(CAT,	dst,	rbase,	rbase,	concat) \
   \
   /* Constant ops. */ \

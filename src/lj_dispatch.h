@@ -81,8 +81,9 @@ typedef uint16_t HotCount;
 
 /* This solves a circular dependency problem -- bump as needed. Sigh. */
 /* LuaJIT-5.4: type() moved from an asm fast function to C (ADR-001b: a boxed
-** int64 must report "number", not "userdata"), so the count is 56. */
-#define GG_NUM_ASMFF	56
+** int64 must report "number", not "userdata"), and math.floor/math.ceil are C
+** now (5.4: they return integers when the result is integral). Count: 54. */
+#define GG_NUM_ASMFF	54
 
 #define GG_LEN_DDISP	(BC__MAX + GG_NUM_ASMFF)
 #define GG_LEN_SDISP	BC_FUNCF

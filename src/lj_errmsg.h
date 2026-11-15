@@ -35,6 +35,10 @@ ERRDEF(OPINDEX,	"index")
 ERRDEF(OPARITH,	"perform arithmetic on")
 ERRDEF(OPCAT,	"concatenate")
 ERRDEF(OPLEN,	"get length of")
+ERRDEF(IDIVZ,	"attempt to divide by zero")
+ERRDEF(MODZ,	"attempt to perform 'n%%0'")
+ERRDEF(BADOPBIT,	"attempt to perform bitwise operation on a %s value")
+ERRDEF(BADOPBITK,	"attempt to perform bitwise operation on a %s value (%s " LUA_QS ")")
 
 /* Type checks. */
 ERRDEF(BADSELF,	"calling " LUA_QS " on bad self (%s)")

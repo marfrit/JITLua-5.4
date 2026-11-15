@@ -29,8 +29,30 @@ LJLIB_ASM(math_abs)		LJLIB_REC(.)
   lj_lib_checknumber(L, 1);
   return FFH_RETRY;
 }
-LJLIB_ASM_(math_floor)		LJLIB_REC(math_round IRFPM_FLOOR)
-LJLIB_ASM_(math_ceil)		LJLIB_REC(math_round IRFPM_CEIL)
+/* Lua 5.4: floor/ceil return an integer when the result has an exact integer
+** representation, otherwise the float. (C form: the asm fast function always
+** produced a float, and fixing that in every backend is unnecessary.) */
+static int math_round_result(lua_State *L, lua_Number r)
+{
+  int64_t k = lj_num2i64(r);
+  if ((lua_Number)k == r) {
+    if ((int64_t)(int32_t)k == k) setintV(L->top++, (int32_t)k);
+    else lj_i64_push(L, k);
+  } else {
+    setnumV(L->top++, r);
+  }
+  return 1;
+}
+
+LJLIB_CF(math_floor)
+{
+  return math_round_result(L, floor(lj_lib_checknum(L, 1)));
+}
+
+LJLIB_CF(math_ceil)
+{
+  return math_round_result(L, ceil(lj_lib_checknum(L, 1)));
+}
 
 LJLIB_ASM(math_sqrt)		LJLIB_REC(math_unary IRFPM_SQRT)
 {

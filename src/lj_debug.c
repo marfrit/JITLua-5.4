@@ -274,6 +274,9 @@ restart:
       case BC_GGET:
 	*name = strdata(gco2str(proto_kgc(pt, ~(ptrdiff_t)bc_d(ins))));
 	return "global";
+      case BC_KSTR:  /* 5.4 reports the constant in operand errors */
+	*name = strdata(gco2str(proto_kgc(pt, ~(ptrdiff_t)bc_d(ins))));
+	return "constant";
       case BC_TGETS:
 	*name = strdata(gco2str(proto_kgc(pt, ~(ptrdiff_t)bc_c(ins))));
 	if (ip > proto_bc(pt)) {

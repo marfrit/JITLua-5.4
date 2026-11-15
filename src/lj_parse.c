@@ -168,6 +168,7 @@ typedef struct FuncState {
 /* Binary and unary operators. ORDER OPR */
 typedef enum BinOpr {
   OPR_ADD, OPR_SUB, OPR_MUL, OPR_DIV, OPR_MOD, OPR_POW,  /* ORDER ARITH */
+  OPR_IDIV,  /* 5.4 `//` -- not in the arith group; own opcode BC_IDIV */
   OPR_BAND, OPR_BOR, OPR_BXOR, OPR_BSHL, OPR_BSHR, OPR_BSAR, /* ORDER BIT */
   OPR_CONCAT,
   OPR_NE, OPR_EQ,
@@ -817,6 +818,33 @@ static void bcemit_branch_f(FuncState *fs, ExpDesc *e)
 
 /* -- Bytecode emitter for operators -------------------------------------- */
 
+/* Try constant-folding of 5.4 floor division (`//`). */
+static int foldidiv(ExpDesc *e1, ExpDesc *e2)
+{
+  if (!expr_isnumk_nojump(e1) || !expr_isnumk_nojump(e2)) return 0;
+  if (tvisint(&e1->u.nval) && tvisint(&e2->u.nval)) {
+    int64_t a = intV(&e1->u.nval), b = intV(&e2->u.nval);
+    if (b == 0) return 0;  /* runtime error */
+    {
+      int64_t q = a / b;
+      if ((a % b) != 0 && ((a < 0) != (b < 0))) q -= 1;
+      if ((int64_t)(int32_t)q == q) {  /* int32 result: fold as a constant */
+	setintV(&e1->u.nval, (int32_t)q);
+	return 1;
+      }
+      return 0;  /* needs a boxed constant -- runtime until step 2b */
+    }
+  }
+  {
+    lua_Number n = lj_vm_floor(expr_numberV(e1) / expr_numberV(e2));
+    if (tvisnan(&e1->u.nval) || tvismzero(&e1->u.nval)) {
+      setnumV(&e1->u.nval, n);
+    }
+    setnumV(&e1->u.nval, n);
+    return 1;
+  }
+}
+
 /* Try constant-folding of arithmetic operators. */
 static int foldarith(BinOpr opr, ExpDesc *e1, ExpDesc *e2)
 {
@@ -842,23 +870,58 @@ static int foldarith(BinOpr opr, ExpDesc *e1, ExpDesc *e2)
 }
 
 /* Try constant-folding of bit operators. */
-static int foldbitop(BinOpr opr, ExpDesc *e1, ExpDesc *e2)
+/* Integer value of a numeric constant, or 0 if it has no exact integer form. */
+static int fold_numint(ExpDesc *e, int64_t *p)
 {
-  if (expr_isnumk_nojump(e1) && expr_isnumk_nojump(e2)) {
-    int32_t k1 = expr_bitV(e1), k2 = expr_bitV(e2);
-    switch (opr) {
-    case OPR_BAND: k1 &= k2; break;
-    case OPR_BOR: k1 |= k2; break;
-    case OPR_BXOR: k1 ^= k2; break;
-    case OPR_BSHL: k1 <<= (k2 & 31); break;
-    case OPR_BSHR: k1 = (int32_t)((uint32_t)k1 >> (k2 & 31)); break;
-    case OPR_BSAR: k1 >>= (k2 & 31); break;
-    default: lj_assertX(0, "bad OPR %d", opr); break;
-    }
-    setintV(&e1->u.nval, k1);
+  TValue *o = expr_numtv(e);
+  if (tvisint(o)) {
+    *p = (int64_t)intV(o);
+    return 1;
+  } else if (tvisnum(o)) {
+    int64_t k = lj_num2i64(numV(o));
+    if ((lua_Number)k != numV(o)) return 0;
+    *p = k;
     return 1;
   }
   return 0;
+}
+
+/* Lua 5.4 bit shift on int64: counts >= 64 yield 0, negative reverses. */
+static int64_t fold_shift(int64_t a, int64_t n, int right)
+{
+  uint64_t u = (uint64_t)a, cnt;
+  if (n < 0) { right = !right; cnt = (uint64_t)0 - (uint64_t)n; }
+  else cnt = (uint64_t)n;
+  if (cnt >= 64) return 0;
+  if (right) return (int64_t)(cnt == 0 ? u : (u >> cnt));
+  return (int64_t)(cnt == 0 ? u : (u << cnt));
+}
+
+/* Try constant-folding of bit operators (5.4 int64 semantics). Folding is only
+** possible when the result stays in int32; otherwise the runtime helper boxes
+** the result (boxed constants are a later step). */
+static int foldbitop(BinOpr opr, ExpDesc *e1, ExpDesc *e2)
+{
+  int64_t k1, k2, res;
+  if (!(expr_isnumk_nojump(e1) && expr_isnumk_nojump(e2))) return 0;
+  if (!fold_numint(e1, &k1) || !fold_numint(e2, &k2)) return 0;
+  switch (opr) {
+  case OPR_BAND: res = (int64_t)((uint64_t)k1 & (uint64_t)k2); break;
+  case OPR_BOR: res = (int64_t)((uint64_t)k1 | (uint64_t)k2); break;
+  case OPR_BXOR: res = (int64_t)((uint64_t)k1 ^ (uint64_t)k2); break;
+  case OPR_BSHL: res = fold_shift(k1, k2, 0); break;
+  case OPR_BSHR: res = fold_shift(k1, k2, 1); break;
+  case OPR_BSAR: {
+    uint64_t cnt = (k2 < 0) ? (uint64_t)0 - (uint64_t)k2 : (uint64_t)k2;
+    if (cnt >= 64) res = (k1 < 0) ? -1 : 0;
+    else res = (cnt == 0) ? k1 : (k1 >> (int)cnt);
+    break;
+    }
+  default: lj_assertX(0, "bad OPR %d", opr); return 0;
+  }
+  if ((int64_t)(int32_t)res != res) return 0;  /* needs a boxed constant */
+  setintV(&e1->u.nval, (int32_t)res);
+  return 1;
 }
 
 /* Emit arithmetic operator. */
@@ -866,7 +929,11 @@ static void bcemit_arith(FuncState *fs, BinOpr opr, ExpDesc *e1, ExpDesc *e2)
 {
   BCReg rb, rc, t;
   uint32_t op;
-  if (opr == OPR_POW) {
+  if (opr == OPR_IDIV) {  /* 5.4 `//`: BC_IDIV, two registers */
+    op = BC_IDIV;
+    rc = expr_toanyreg(fs, e2);
+    rb = expr_toanyreg(fs, e1);
+  } else if (opr == OPR_POW) {
     op = BC_POW;
     rc = expr_toanyreg(fs, e2);
     rb = expr_toanyreg(fs, e1);
@@ -978,6 +1045,8 @@ static void bcemit_binop(FuncState *fs, BinOpr op, ExpDesc *e1, ExpDesc *e2)
 {
   if (op <= OPR_POW) {
     if (!foldarith(op, e1, e2)) bcemit_arith(fs, op, e1, e2);
+  } else if (op == OPR_IDIV) {  /* 5.4 `//`: own opcode, always two registers */
+    if (!foldidiv(e1, e2)) bcemit_arith(fs, op, e1, e2);
   } else if (op <= OPR_BSAR) {
     if (!foldbitop(op, e1, e2)) {
       fs->flags |= PROTO_BITOP;
@@ -2330,6 +2399,7 @@ static BinOpr token2binop(LexToken tok)
   case '*':	return OPR_MUL;
   case '/':	return OPR_DIV;
   case '%':	return OPR_MOD;
+  case TK_idiv:	return OPR_IDIV;
   case '^':	return OPR_POW;
   case '&':	return OPR_BAND;
   case '|':	return OPR_BOR;
@@ -2358,6 +2428,7 @@ static const struct {
 } priority[] = {
   {10,10}, {10,10}, {11,11}, {11,11}, {11,11},	/* ADD SUB MUL DIV MOD */
   {14,13},				/* POW (right associative) */
+  {11,11},				/* IDIV: same as MUL/DIV/MOD in 5.4 */
   {6,6}, {4,4}, {5,5},			/* BAND BOR BXOR */
   {7,7}, {7,7}, {7,7},			/* BSHL BSHR BSAR */
   {9,8},				/* CONCAT (right associative) */

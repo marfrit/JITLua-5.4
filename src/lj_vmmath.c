@@ -77,15 +77,15 @@ double lj_vm_foldarith(double x, double y, int op)
 #if (LJ_HASJIT && !(LJ_TARGET_ARM || LJ_TARGET_ARM64 || LJ_TARGET_PPC)) || LJ_TARGET_MIPS
 int32_t LJ_FASTCALL lj_vm_modi(int32_t a, int32_t b)
 {
-  uint32_t y, ua, ub;
+  int32_t r;
   /* This must be checked before using this function. */
   lj_assertX(b != 0, "modulo with zero divisor");
-  ua = a < 0 ? ~(uint32_t)a+1u : (uint32_t)a;
-  ub = b < 0 ? ~(uint32_t)b+1u : (uint32_t)b;
-  y = ua % ub;
-  if (y != 0 && (a^b) < 0) y = y - ub;
-  if (((int32_t)y^b) < 0) y = ~y+1u;
-  return (int32_t)y;
+  /* Lua 5.4: integer modulo is a floor modulo -- the result takes the sign of
+  ** the divisor (C's % takes the sign of the dividend). */
+  r = a % b;
+  if (r != 0 && ((r < 0) != (b < 0)))
+    r += b;
+  return r;
 }
 #endif
 

@@ -36,6 +36,8 @@ LJ_FUNC_NORET void lj_err_comp(lua_State *L, cTValue *o1, cTValue *o2);
 LJ_FUNC_NORET void lj_err_optype_call(lua_State *L, TValue *o);
 LJ_FUNC_NORET void lj_err_callermsg(lua_State *L, const char *msg);
 LJ_FUNC_NORET void lj_err_callerv(lua_State *L, ErrMsg em, ...);
+/* Formatted message, safe from VM helpers (no frame-chain walk). */
+LJ_FUNC_NORET void lj_err_msgv(lua_State *L, ErrMsg em, ...);
 LJ_FUNC_NORET void lj_err_caller(lua_State *L, ErrMsg em);
 LJ_FUNC_NORET void lj_err_arg(lua_State *L, int narg, ErrMsg em);
 LJ_FUNC_NORET void lj_err_argv(lua_State *L, int narg, ErrMsg em, ...);

@@ -414,6 +414,10 @@ static LexToken lex_scan(LexState *ls, TValue *tv)
     case '=':
       lex_next(ls);
       if (ls->c != '=') return '='; else { lex_next(ls); return TK_eq; }
+    case '/':  /* Lua 5.4 floor division '//' */
+      lex_next(ls);
+      if (ls->c != '/') return '/';
+      lex_next(ls); return TK_idiv;
     case '<':
       lex_next(ls);
       if (ls->c == '=') { lex_next(ls); return TK_le; }

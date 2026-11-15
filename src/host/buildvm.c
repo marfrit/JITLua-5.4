@@ -23,6 +23,7 @@
 #include "lj_ircall.h"
 #endif
 #include "lj_frame.h"
+#include "lj_i64.h"
 #include "lj_dispatch.h"
 #if LJ_HASFFI
 #include "lj_ctype.h"

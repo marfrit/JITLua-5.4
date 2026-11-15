@@ -3485,6 +3485,10 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  ins_arithpre movsd, xmm1
     |  jmp ->BC_MODVN_Z			// Avoid 3 copies. It's slow anyway.
     break;
+  case BC_IDIV:  // Lua 5.4 floor division: handled by lj_meta_arith -> C helper
+    |  b ->vmeta_arith_vv
+    break;
+
   case BC_POW:
     |  ins_arithpre movsd, xmm1
     |  mov RB, BASE
@@ -3589,11 +3593,13 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
   case BC_BXOR:
     |  ins_bitop xor, 0
     break;
+  // 5.4 shifts are 64-bit (counts >= 64 yield 0, negative reverses), so they
+  // go through lj_meta_bitop instead of the 32-bit fast path.
   case BC_BSHL:
-    |  ins_bitop shl, 1
+    |  b ->vmeta_bitop
     break;
   case BC_BSHR:
-    |  ins_bitop shr, 1
+    |  b ->vmeta_bitop
     break;
   case BC_BSAR:
     |  ins_bitop sar, 1

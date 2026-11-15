@@ -35,6 +35,11 @@ TKDEF(TKENUM1, TKENUM2)
 typedef int LexChar;	/* Lexical character. Unsigned ext. from char. */
 typedef int LexToken;	/* Lexical token. */
 
+/* Lua 5.4 floor-division token '//'. It cannot live in TKDEF because "//" would
+** start a C comment inside the macro argument; the token name only shows up in
+** syntax-error text, so a private code is fine. */
+#define TK_idiv		253
+
 /* Combined bytecode ins/line. Only used during bytecode generation. */
 typedef struct BCInsLine {
   BCIns ins;		/* Bytecode instruction. */

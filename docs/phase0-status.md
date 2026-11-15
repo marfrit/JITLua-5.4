@@ -422,3 +422,23 @@ vmeta route, BC_BAND/BOR/BXOR asm checkint route, mul/add overflow route, and
 `lj_meta_cat`/for-loop setup (`lj_meta.c:584` intV on widened?).
 Arm gate after disabling: FAIL 0, XFAIL 17, i64 OK. x64 gate run hit the box
 job timeout (124, inconclusive) -> re-run.
+
+## Session 15 — bisect with activation ON: two findings
+
+Per-op probes with widened operands (a = 1<<40) were correct for xor/and/mul/
+add/shl/shr/concat (wrap mod 2^64 for a*a -> 0 is correct 5.4). Wrong:
+- **for-loop setup truncates**: `for i=a,a+2 do s=s+i end` returns 3 instead of
+  3*a. Cause: `lj_meta.c` for-loop preparation uses intV() on start/stop/step
+  (lines ~584-597). Fix: use the exact reader there (intV47 for widened) and
+  write the loop slots with setint47V when they fit; FORI only runs for int32
+  loop variants in the VM, so widened loop bounds must route to the float/FORN
+  path or convert exactly.
+- **inline-widened vs boxed equality is false**: `(a ~ 1) == 1099511627776 ~ 1`
+  is false because the literal is a boxed constant and one side is inline.
+  Equality needs the numeric compare in lj_obj_equal/BC_ISEQ for int-inline vs
+  box (both exact), not the pointer/word compare.
+These are the candidates for B1's wrong checksum (b1 uses `h ~ byte`, `* prime`,
+`+`, `& 0xffff` — all individually correct, so the remaining suspect is an
+int-vs-box comparison inside the *fold/guard* path or the 0xffff mask path on
+a box).
+Activation stays OFF again after the bisect job (tree green).

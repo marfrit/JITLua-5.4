@@ -994,10 +994,16 @@ comparison) -- see the ADR note. Also: exact float->int64 conversion with
 a range check (2^63 passed as an integer on arm64 in bitops, floor/ceil,
 constant folding, io); boxes are "number" in compare error messages.
 Test: sort_02_int64.
-Gates at 62541a67 (main 1df2cd3a merged; lua_lessthan keeps an inline path
-for int32/widened operands -- the first version called lj_i64_getint per
-operand and cost the int32 default sort 15-40 %), both arches identical:
-A+B 91 PASS / 0 FAIL / 9 XFAIL / 1 XPASS (dump_03_version B), opt 0-3
-196/0/0/4, R 50, GC stress 58/0/2, JIT tooling smoke 30/30, corpus 6/0, C
-API + i64 14/14, fuzz 160/160. Bench arm64: B1 16.7, B2 829.1 (was 1496.6;
-FFI 607.8, PUC 549.5), B2b 155.9, B3 21.1 / 223.6 ms; x64: B1 30.3, B2 3188.7 (was 3211.6; FFI 2612.7, PUC 2161.0), B2b 758.4, B3 47.7 / 1068.9 ms.
+Gates at 4fe1f9c5 (main 4a6fbbd7 merged), both arches identical: A+B 93
+PASS / 0 FAIL / 8 XFAIL / 1 XPASS (dump_03_version B), opt 0-3 200/0/0/4,
+R 51, GC stress 58/0/2, JIT tooling smoke 30/30, corpus 6/0, C API 81 + i64
+14/14, fuzz 160/160. Bench arm64 (JIT): B1 16.7, B2 929.6 (822-942 across
+runs on the shared escher; was 1496.6; FFI 618, PUC 544), B2b 163.2, B3 21.1
+/ 219.2 ms. x64 (JIT, main 4a6fbbd7 measured back to back as reference):
+B1 30.3 (main 30.3), B2 3179.1 (main 3242.9), B2b 793.2 (main 654.5), B3
+47.7 / 1013.3 (main 47.7 / 934.1) ms. B2b: main sorted the widened values
+by their low word (lua_lessthan bug) -- the exact 64-bit comparison is the
++21 %; B3-table +8 % on int32 only, within one run each, left as measured
+(the int32 path is the same single compare plus one or/test on the tag
+words). Earlier version 62541a67 (lj_i64_getint call per operand) cost
+15-40 % on both and was replaced.

@@ -2987,6 +2987,35 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
 
   /* Remember: all ops branch for a true comparison, fall through otherwise. */
 
+  |// Decode a 5.4 integer TValue in val to its int64 value (int32 inline,
+  |// widened 47-bit, interned box); anything else goes to vmeta_comp.
+  |// Clobbers t1, t2. Local labels 5 (box path) and 4 (done).
+  |.macro i64cmp_decode, val, t1, t2
+  |  mov t1, val
+  |  sar t1, 47
+  |  cmp t1d, LJ_TISNUM
+  |  jne >5
+  |  mov t2, val
+  |  shl t2, 32
+  |  sar t2, 32			// int32 inline
+  |  mov t1, val
+  |  shr t1, 32			// payload bits 32..46 in t1d
+  |  shl val, 17
+  |  sar val, 17			// widened
+  |  test t1d, 0x7fff
+  |  cmovz val, t2			// no payload: the int32 form
+  |  jmp >4
+  |5:
+  |  cmp t1d, LJ_TUDATA
+  |  jne ->vmeta_comp
+  |  shl val, 17
+  |  shr val, 17
+  |  cmp byte UDATA:val->udtype, UDTYPE_I64BOX
+  |  jne ->vmeta_comp
+  |  mov val, [val+sizeof(GCudata)]	// box payload
+  |4:
+  |.endmacro
+  |
   |.macro jmp_comp, lt, ge, le, gt, target
   ||switch (op) {
   ||case BC_ISLT:
@@ -3059,48 +3088,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |4:  // 5.4 (ADR-001b): compare two integers (int32 inline, widened
     |  // 47-bit, interned box) inline; anything else via lj_meta_comp.
     |  // RA, RD = raw TValues (vmeta_comp reloads them from the slots).
-    |  mov ITYPE, RA
-    |  sar ITYPE, 47
-    |  cmp ITYPEd, LJ_TISNUM
-    |  jne >11
-    |  mov TMPR, RA
-    |  shr TMPR, 32
-    |  test TMPRd, 0x7fff
-    |  jz >12
-    |  shl RA, 17; sar RA, 17	// widened
-    |  jmp >13
-    |12:
-    |  shl RA, 32; sar RA, 32	// int32 inline
-    |  jmp >13
-    |11:
-    |  cmp ITYPEd, LJ_TUDATA
-    |  jne ->vmeta_comp
-    |  shl RA, 17; shr RA, 17
-    |  cmp byte UDATA:RA->udtype, UDTYPE_I64BOX
-    |  jne ->vmeta_comp
-    |  mov RA, [RA+sizeof(GCudata)]	// box payload
-    |13:
-    |  mov RB, RD
-    |  sar RB, 47
-    |  cmp RBd, LJ_TISNUM
-    |  jne >14
-    |  mov TMPR, RD
-    |  shr TMPR, 32
-    |  test TMPRd, 0x7fff
-    |  jz >15
-    |  shl RD, 17; sar RD, 17
-    |  jmp >16
-    |15:
-    |  shl RD, 32; sar RD, 32
-    |  jmp >16
-    |14:
-    |  cmp RBd, LJ_TUDATA
-    |  jne ->vmeta_comp
-    |  shl RD, 17; shr RD, 17
-    |  cmp byte UDATA:RD->udtype, UDTYPE_I64BOX
-    |  jne ->vmeta_comp
-    |  mov RD, [RD+sizeof(GCudata)]
-    |16:
+    |  i64cmp_decode RA, ITYPE, TMPR
+    |  i64cmp_decode RD, RB, TMPR
     |  add PC, 4
     |  cmp RA, RD
     |  jmp_comp jge, jl, jg, jle, >9

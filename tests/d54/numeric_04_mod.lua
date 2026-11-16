@@ -14,7 +14,7 @@ p("float mod type", math.type(5.5 % 2), math.type(-5.5 % 2))
 p("mixed mod", 5 % 2.0, -5 % 2.0, math.type(5 % 2.0))
 p("mod identity", 7 % 3 + 3 * (7 // 3 == 0 and 0 or 0))
 p("mod zero", pcall(function() return 1 % 0 end))
-p("float mod zero", 1.0 % 0, -1.0 % 0)
+p("float mod zero", 1.0 % 0 ~= 1.0 % 0, -1.0 % 0 ~= -1.0 % 0)  -- NaN sign is impl-defined
 p("minint mod", math.mininteger % -1, math.mininteger % 2, math.maxinteger % 2)
 p("fmod vs mod", math.fmod(-5, 3), -5 % 3, math.fmod(5, -3), 5 % -3)
 p("fmod float", math.fmod(-5.5, 2), -5.5 % 2, math.fmod(5.5, -2), 5.5 % -2)

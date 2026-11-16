@@ -3046,6 +3046,39 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  mov RB, [BASE+RD*8]
     |  mov ITYPE, [BASE+RA*8]
     |  add PC, 4
+    |  // Exact int64/box numeric equality: compare by value, not by bits.
+    |  mov TMPR, RB
+    |  shr TMPR, 48
+    |  cmp TMPRd, 65529	// 0xfff9: int32, widened inline int, boxed int64
+    |  je >6
+    |  mov TMPR, ITYPE
+    |  shr TMPR, 48
+    |  cmp TMPRd, 65529
+    |  je >6
+    |  jmp >4
+    |6:
+    |  mov TMP1, BASE	// A C call clobbers BASE (CARG2/CARG3).
+    |  lea CARG1, [BASE+RA*8]	// Caveat: CARG1 == RA (WIN).
+    |  lea CARG2, [BASE+RD*8]	// Caveat: CARG2 == BASE (WIN).
+    |  call extern lj_i64_numeq	// (cTValue *a, cTValue *b)
+    |  mov BASE, TMP1	// Restore BASE: every exit path below uses it.
+    |  cmp RCd, -1		// -1: not numeric, use the normal path.
+    |  je >5
+    |  cmp RCd, 1		// 1 = equal, 0 = unequal.
+    if (vk) {
+      |  je >7
+    } else {
+      |  jne >7
+    }
+    |  ins_next
+    |7:
+    |  movzx RDd, PC_RD
+    |  branchPC RD
+    |  ins_next
+    |5:  // Reload what the call clobbered (RB is C callee-save).
+    |  movzx RAd, byte [PC-7]	// A of the compare (PC is past its JMP).
+    |  mov ITYPE, [BASE+RA*8]
+    |4:  // Resume the normal path (pre-call path jumps here directly).
     |  mov RD, RB
     |  mov RA, ITYPE
     |  sar RB, 47
@@ -3181,6 +3214,39 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  ins_AD	// RA = src, RD = num const, JMP with RD = target
     |  mov RB, [BASE+RA*8]
     |  add PC, 4
+    |  // Exact int64/box numeric equality: compare by value, not by bits.
+    |  mov TMPR, RB
+    |  shr TMPR, 48
+    |  cmp TMPRd, 65529	// 0xfff9: int32, widened inline int, boxed int64
+    |  je >6
+    |  mov TMPR, [KBASE+RD*8]
+    |  shr TMPR, 48
+    |  cmp TMPRd, 65529
+    |  je >6
+    |  jmp >4
+    |6:
+    |  mov TMP1, BASE	// A C call clobbers BASE (CARG2/CARG3).
+    |  lea CARG1, [BASE+RA*8]	// Caveat: CARG1 == RA (WIN).
+    |  lea CARG2, [KBASE+RD*8]	// RD is still the constant register index.
+    |  call extern lj_i64_numeq	// (cTValue *a, cTValue *b)
+    |  mov BASE, TMP1	// Restore BASE: every exit path below uses it.
+    |  cmp RCd, -1		// -1: not numeric, use the normal path.
+    |  je >5
+    |  cmp RCd, 1		// 1 = equal, 0 = unequal.
+    if (vk) {
+      |  je >7
+    } else {
+      |  jne >7
+    }
+    |  ins_next
+    |7:
+    |  movzx RDd, PC_RD
+    |  branchPC RD
+    |  ins_next
+    |5:  // Reload what the call clobbered (RB is C callee-save).
+    |  movzx RAd, byte [PC-7]	// A of the compare (PC is past its JMP).
+    |  movzx RDd, byte [PC-6]	// Constant register index of the compare.
+    |4:  // Resume the normal path (pre-call path jumps here directly).
     |.if DUALNUM
     |  checkint RB, >7
     |  mov RD, [KBASE+RD*8]

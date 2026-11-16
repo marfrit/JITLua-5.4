@@ -1,5 +1,5 @@
 #!/bin/sh
-# Fetch and build the PUC-Lua 5.4.7 reference interpreter used by harness mode A.
+# Fetch and build the PUC-Lua 5.4.9 reference interpreter used by harness mode A.
 #
 #   tests/ref/fetch-ref.sh            # download (cached), verify, build
 #   tests/ref/fetch-ref.sh --force    # rebuild even if binaries exist
@@ -83,6 +83,7 @@ if [ "$CORPUS" = 1 ]; then
   tar xzf "$LUA_GH_TARBALL" -C "$CACHE"
   rm -rf "$ROOT/tests/corpus/puc54"
   cp -r "$CACHE/lua-$LUA_VERSION/testes" "$ROOT/tests/corpus/puc54"
-  echo "corpus re-extracted from lua/lua $LUA_GH_COMMIT"
+  python3 "$ROOT/tests/ref/corpus-adapt.py" "$ROOT/tests/corpus/puc54"
+  echo "corpus re-extracted from lua/lua $LUA_GH_COMMIT (local adaptations reapplied)"
 fi
 echo "reference ready: $HERE/bin/lua54ref"

@@ -4,7 +4,7 @@
 #   build-box -t 3600 tests/ci-box.sh              # x64 build box (born)
 #   sh tests/ci-box.sh                             # here (aarch64)
 #
-# Builds our LuaJIT, builds the PUC-Lua 5.4.7 reference from the vendored
+# Builds our LuaJIT, builds the PUC-Lua 5.4.9 reference from the vendored
 # tarball (tests/ref/dist, no network needed), then runs the differential
 # harness for the port corpus in modes A and B at several JIT opt levels,
 # plus the C API harness. Prints a compact report; artifacts stay local.
@@ -28,7 +28,7 @@ make -j"$NPROC" >"$OUT-build.log" 2>&1 || { tail -30 "$OUT-build.log"; exit 1; }
 # x64/x86 default to single-number mode unless LUAJIT_NUMMODE=2 is set.
 ./src/luajit -joff -e 'print("nummodel: math.type(3) = " .. tostring(math.type(3)) .. " (must be integer)")'
 
-say "build reference (PUC-Lua 5.4.7, vendored tarball)"
+say "build reference (PUC-Lua 5.4.9, vendored tarball)"
 # A copied tree can carry a reference binary built for another architecture
 # (e.g. aarch64 on the x64 box): always check that it actually runs.
 if ! tests/ref/bin/lua54ref -v >/dev/null 2>&1; then

@@ -1352,3 +1352,32 @@ constructs, goto, big, tpack, utf8, bitwise, verybig and all d54 tests except
 the documented rows. Remaining corpus: db (istailcall without a hook), sort
 (IMPL-DEFINED counters/timings), main (missing libs fixtures; PUC stops there),
 and PERF rows.
+
+## Session 42 — reference switched to PUC-Lua 5.4.9 (final 5.4 release)
+
+Lua 5.4.9 (25 Aug 2026) is the last 5.4 release. The vendored reference is now
+tests/ref/dist/lua-5.4.9.tar.gz (lua.org sha256
+2335b6c582a52654f94612bf10d2f4672805d05329aa6568b1d8cd9e5c6fb8e6) and the
+test suite comes from lua/lua GitHub tag v5.4.9 (commit
+312b9efaa1061c2c4cad08554dbc1351c3270eef). fetch-ref.sh, ci-box and the corpus
+helper paths use 5.4.9; `fetch-ref.sh --corpus` reapplies the three local
+adaptations via tests/ref/corpus-adapt.py.
+
+Manual diff 5.4.7->5.4.9 (doc/manual.html): no semantic changes — copyright
+year, two-complement -> two's complement, spacing in `{10,20,...}` examples,
+"and it excludes also" -> "and it excludes also", "mutlres" typo fixed,
+timestamp. lua.org/bugs.html: 5.4.9 lists no own bugs (last release note);
+5.4.8 fixed four (all-weak table metatable revisited; `lua --` without script;
+constructor item counter overflow; finalizer stack-leak); 5.4.7 fixed eight
+(REPL multiline EOF message, VJMP index codegen, 16-bit local limit, panic
+lua_status, emergency GC weak __newindex, luaD_seterrorobj unprotected, closing
+message handler, plus entries listed on the page).
+
+5.4.9 teste/ additions versus the previous corpus: api panic threadstatus,
+closure `_ENV[1 < 2]` 5.4.7 codegen fix, coroutine message-handler overwrite on
+close, errors `('_ENV').x + 1` wording, events weak-__newindex emergency GC,
+gc all-weak table (T hook), main `--`/REPL cases. All new corpus tests pass in
+mode A with our interpreter on x64 and arm64; no output changes were needed.
+Both boxes: ci-box A+B 107 PASS/5 XFAIL, opt 224, R 56, GC 59+1X, capi 101,
+i64 14, fuzz 160/0; corpus-ext 15 arms SAME / 0 unexpected. Reference banner is
+now `Lua 5.4.9 Copyright (C) 1994-2026 Lua.org, PUC-Rio`.

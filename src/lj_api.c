@@ -1192,8 +1192,10 @@ static GCRef *api_uvref(GCfunc *fn, uint32_t n, int *isenv)
 {
   uint32_t ei = lj_debug_envuv(fn);
   *isenv = 0;
-  if (n == ei) { *isenv = 1; return &fn->l.env; }
-  if (n > ei) n--;
+  if (ei != ~0u) {
+    if (n == ei) { *isenv = 1; return &fn->l.env; }
+    if (n > ei) n--;
+  }
   return &fn->l.uvptr[n];
 }
 

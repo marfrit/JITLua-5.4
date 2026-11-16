@@ -104,12 +104,16 @@ run_suite() {
     : > "$OUT/$name.$arm.txt"
     for s in "$@"; do
       pre=""; [ -n "$PRELUDE" ] && pre="-e $PRELUDE"
+      # A wrapper script per arm carries the flags, so arg[-1] is an
+      # interpreter path under every arm (Penlight's test-utils re-executes
+      # it) -- the same shape as "lua script.lua" under PUC.
       case $arm in
         puc) cmd="$REF $s"; cpath=$CPATH_PUC ;;
-        joff) cmd="$LUAJIT -joff $pre $s"; cpath=$CPATH_OURS ;;
-        jon) cmd="$LUAJIT -jon $pre $s"; cpath=$CPATH_OURS ;;
-        gcs) cmd="$LUAJIT -jon $pre -e collectgarbage(\"setpause\",0) $s"; cpath=$CPATH_OURS ;;
+        joff) printf '#!/bin/sh\nexec "%s" -joff %s "$@"\n' "$LUAJIT" "$pre" > "$OUT/lua-joff"; cmd="$OUT/lua-joff $s"; cpath=$CPATH_OURS ;;
+        jon) printf '#!/bin/sh\nexec "%s" -jon %s "$@"\n' "$LUAJIT" "$pre" > "$OUT/lua-jon"; cmd="$OUT/lua-jon $s"; cpath=$CPATH_OURS ;;
+        gcs) printf '#!/bin/sh\nexec "%s" -jon %s -e %s "$@"\n' "$LUAJIT" "$pre" "'collectgarbage(\"setpause\",0)'" > "$OUT/lua-gcs"; cmd="$OUT/lua-gcs $s"; cpath=$CPATH_OURS ;;
       esac
+      chmod +x "$OUT"/lua-* 2>/dev/null
       ( cd "$dir" && LUA_PATH="$lpath" LUA_CPATH="${cpath:-;;}" timeout 600 $cmd ) > "$OUT/tmp.txt" 2>&1; rc=$?
       { printf '## %s rc=%s\n' "$s" "$rc"; cat "$OUT/tmp.txt"; } >> "$OUT/$name.$arm.txt"
     done

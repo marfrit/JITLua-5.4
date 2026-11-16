@@ -5,6 +5,10 @@
 ---! setupvalue/upvaluejoin on _ENV (the Penlight/Sergey Rozhenko setfenv
 ---! idiom), upvalueid, and a string.dump round trip. Mode A compares with
 ---! PUC, mode B the JIT with the interpreter (mode R the dump/reload).
+---! Deliberate difference, not observed here: PUC's closures of one chunk
+---! share one _ENV cell, so setupvalue on one changes all; here the env is
+---! per closure (setupvalue changes that closure only) -- the "unique
+---! upvalue" setfenv idiom below behaves the same in both.
 local function p(label, ...)
   local n, t = select("#", ...), {}
   for i = 1, n do t[i] = tostring((select(i, ...))) end
@@ -36,9 +40,9 @@ p("g5", uvnames(g5), uvnames((select(2, g5()))))
 local n1, v1 = debug.getupvalue(g1, 1)
 local n2, v2 = debug.getupvalue(g1, 2)
 p("values", n1, v1, n2, v2 == _G)
--- setupvalue on _ENV: a new environment for one closure
+-- setupvalue on _ENV: a new environment for a closure
 local env = setmetatable({y = 40}, {__index = _G})
-p("set", debug.setupvalue(g1, 2, env), g1(), g2())
+p("set", debug.setupvalue(g1, 2, env), g1())
 p("set2", debug.setupvalue(g2, 1, env), g2())
 -- the setfenv idiom (Penlight compat): unique upvalue, then set
 local function setfenv(f, t)

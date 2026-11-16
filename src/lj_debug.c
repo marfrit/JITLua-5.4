@@ -348,12 +348,14 @@ const char *lj_debug_uvnamev(cTValue *o, uint32_t idx, TValue **tvp, GCobj **op)
     if (isluafunc(fn)) {
       GCproto *pt = funcproto(fn);
       uint32_t ei = lj_debug_envuv(fn);
-      if (idx == ei) {
-	*tvp = NULL;
-	*op = obj2gco(fn);
-	return "_ENV";
+      if (ei != ~0u) {  /* Function has the synthesized _ENV upvalue. */
+	if (idx == ei) {
+	  *tvp = NULL;
+	  *op = obj2gco(fn);
+	  return "_ENV";
+	}
+	if (idx > ei) idx--;
       }
-      if (idx > ei) idx--;
       if (idx < pt->sizeuv) {
 	GCobj *uvo = gcref(fn->l.uvptr[idx]);
 	*tvp = uvval(&uvo->uv);

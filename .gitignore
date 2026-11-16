@@ -26,3 +26,4 @@ __pycache__/
 # except the reference sources vendored for offline build boxes
 !tests/ref/dist/*.tar.gz
 !tests/bench/dist/*.tar.gz
+.dlcache/

@@ -1,0 +1,8 @@
+# name	file in .dlcache	sha256	top directory after extraction
+penlight	penlight-1.14.0.tar.gz	2387431c0e83c4189cccb35b989141a3280d735cb5d42bacf3451af9869bebf7	Penlight-1.14.0
+serpent	serpent-0.30.tar.gz	ebc8d9121a793ae2df69ca03b7f9d2ad0e82e385d4ed0d452eedd305c1b93b22	serpent-0.30
+luaunit	luaunit-3.4.tar.gz	b8aea5826f09749d149efa8ef1b13f81e6a9fc6abfbe4c1cbf87a558a6d4e8d0	luaunit-LUAUNIT_V3_4
+rxi-json	rxi-json-0.1.2.tar.gz	a786a429adfd3b9034213b52b9a44de7ed99970f10cfb8bf5e7ff006577c3f58	json.lua-0.1.2
+dkjson	dkjson-2.8-1.src.rock	3d8de09cd43a60a005ac769ee1cedc515952c892d63cba9ac925ed02afc98091	dkjson-2.8
+# (needs lua-TestAssertion) messagepack	lua-messagepack-0.5.4-1.src.rock	86e5aedc94342f1447b3cac26dfacc69f05b0827221cd5e44d3b623087b16f37	lua-MessagePack-0.5.4
+# testmore	lua-testmore-0.3.7-1.src.rock	acef148e10e312f262d9390c3cdbb9fdd3d5541f0dbeb4c35b8c37fbf95cb52f	lua-TestMore-0.3.7

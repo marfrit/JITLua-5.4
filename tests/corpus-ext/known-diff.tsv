@@ -1,0 +1,7 @@
+# name	arm	reason
+serpent	joff	IMPL-DEFINED: pairs() order of hash keys and string.dump bytes differ; values equal
+serpent	jon	IMPL-DEFINED: pairs() order of hash keys and string.dump bytes differ; values equal
+serpent	gcs	IMPL-DEFINED: pairs() order of hash keys and string.dump bytes differ; values equal
+dkjson	joff	IMPL-DEFINED: key order of encoded sparse/mixed tables follows pairs() order
+dkjson	jon	IMPL-DEFINED: key order of encoded sparse/mixed tables follows pairs() order
+dkjson	gcs	IMPL-DEFINED: key order of encoded sparse/mixed tables follows pairs() order

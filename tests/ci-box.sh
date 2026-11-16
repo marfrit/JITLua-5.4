@@ -53,6 +53,9 @@ tests/harness.sh --mode all --opt-levels 0,3 --gc-stress --corpus tests/d54 \
 say "JIT tooling smoke (-jv/-jdump/-jbc/-jp over the int64 tests)"
 sh tests/jitutil-smoke.sh | tail -4
 
+say "real-program corpus (tests/corpus-ext: PUC vs -joff / -jon / -jon+GC-stress)"
+sh tests/corpus-ext/run.sh | grep -v "^      " | tail -24
+
 say "C API"
 tests/capi/run.sh | tail -3
 

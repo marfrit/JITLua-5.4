@@ -7,6 +7,7 @@
 */
 
 #include <errno.h>
+#include <limits.h>
 #include <time.h>
 
 #define lib_os_c
@@ -154,19 +155,28 @@ static int getboolfield(lua_State *L, const char *key)
   return res;
 }
 
-static int getfield(lua_State *L, const char *key, int d)
+/* PUC 5.4 getfield: absent -> default (error when d<0), present but not an
+** integer -> "field 'x' is not an integer", out-of-range -> out-of-bound. */
+static int getfield(lua_State *L, const char *key, int d, int delta)
 {
-  int res;
+  int isnum, t;
+  lua_Integer res;
   lua_getfield(L, -1, key);
-  if (lua_isnumber(L, -1)) {
-    res = (int)lua_tointeger(L, -1);
-  } else {
-    if (d < 0)
-      lj_err_callerv(L, LJ_ERR_OSDATEF, key);
+  t = lua_type(L, -1);
+  res = lua_tointegerx(L, -1, &isnum);
+  if (!isnum) {
+    if (t != LUA_TNIL)
+      return luaL_error(L, "field " LUA_QS " is not an integer", key);
+    else if (d < 0)
+      return luaL_error(L, "field " LUA_QS " missing in date table", key);
     res = d;
+  } else {
+    if (!(res >= 0 ? res - delta <= INT_MAX : INT_MIN + delta <= res))
+      return luaL_error(L, "field " LUA_QS " is out-of-bound", key);
+    res -= delta;
   }
   lua_pop(L, 1);
-  return res;
+  return (int)res;
 }
 
 /* 5.4: validate strftime conversion specifiers (C99 + POSIX E/O modifiers). */
@@ -223,9 +233,9 @@ LJLIB_CF(os_date)
     stm = localtime(&t);
 #endif
   }
-  if (stm == NULL) {  /* Invalid date? */
-    setnilV(L->top++);
-  } else if (strcmp(s, "*t") == 0) {
+  if (stm == NULL)  /* invalid date? */
+    return luaL_error(L, "date result cannot be represented in this installation");
+  if (strcmp(s, "*t") == 0) {
     lua_createtable(L, 0, 9);  /* 9 = number of fields */
     setfield(L, "sec", stm->tm_sec);
     setfield(L, "min", stm->tm_min);
@@ -270,19 +280,28 @@ LJLIB_CF(os_time)
     struct tm ts;
     luaL_checktype(L, 1, LUA_TTABLE);
     lua_settop(L, 1);  /* make sure table is at the top */
-    ts.tm_sec = getfield(L, "sec", 0);
-    ts.tm_min = getfield(L, "min", 0);
-    ts.tm_hour = getfield(L, "hour", 12);
-    ts.tm_mday = getfield(L, "day", -1);
-    ts.tm_mon = (int)((unsigned int)getfield(L, "month", -1) - 1u);
-    ts.tm_year = (int)((unsigned int)getfield(L, "year", -1) - 1900u);
+    ts.tm_year = getfield(L, "year", -1, 1900);
+    ts.tm_mon = getfield(L, "month", -1, 1);
+    ts.tm_mday = getfield(L, "day", -1, 0);
+    ts.tm_hour = getfield(L, "hour", 12, 0);
+    ts.tm_min = getfield(L, "min", 0, 0);
+    ts.tm_sec = getfield(L, "sec", 0, 0);
     ts.tm_isdst = getboolfield(L, "isdst");
     t = mktime(&ts);
+    /* 5.4: update the table with normalized values. */
+    setfield(L, "year", ts.tm_year+1900);
+    setfield(L, "month", ts.tm_mon+1);
+    setfield(L, "day", ts.tm_mday);
+    setfield(L, "hour", ts.tm_hour);
+    setfield(L, "min", ts.tm_min);
+    setfield(L, "sec", ts.tm_sec);
+    setfield(L, "yday", ts.tm_yday+1);
+    setfield(L, "wday", ts.tm_wday+1);
+    setboolfield(L, "isdst", ts.tm_isdst);
   }
-  if (t == (time_t)(-1) && errno != 0)
-    lua_pushnil(L);
-  else
-    lua_pushinteger(L, (lua_Integer)t);  /* 5.4: os.time returns an integer */
+  if (t == (time_t)(-1))
+    return luaL_error(L, "time result cannot be represented in this installation");
+  lua_pushinteger(L, (lua_Integer)t);  /* 5.4: os.time returns an integer */
   return 1;
 }
 

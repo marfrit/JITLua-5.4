@@ -194,9 +194,39 @@ static int dostring(lua_State *L, const char *s, const char *name)
 
 static int dolibrary(lua_State *L, const char *name)
 {
+  /* PUC 5.4 -l semantics: 'global=module' names the global explicitly; without
+  ** '=', the module name (minus a '-suffix') names the global. The require
+  ** result is stored in that global. */
+  const char *eq = strchr(name, '=');
+  const char *modname = eq ? eq+1 : name;
+  const char *gname = name;
+  size_t glen = eq ? (size_t)(eq-name) : strlen(name);
+  if (!eq) {
+    const char *suffix = strchr(name, '-');
+    if (suffix) glen = (size_t)(suffix-name);
+  }
   lua_getglobal(L, "require");
-  lua_pushstring(L, name);
-  return report(L, docall(L, 1, 1));
+  lua_pushstring(L, modname);
+  {
+    int base = lua_gettop(L) - 1;  /* function index */
+    int status;
+    lua_pushcfunction(L, traceback);
+    lua_insert(L, base);
+    status = lua_pcall(L, 1, 1, base);  /* exactly the module result */
+    lua_remove(L, base);
+    if (status == LUA_OK) {
+      char *buf = (char *)malloc(glen+1);
+      if (buf) {
+	memcpy(buf, gname, glen);
+	buf[glen] = '\0';
+	lua_setglobal(L, buf);  /* pops the require result */
+	free(buf);
+      } else {
+	lua_pop(L, 1);
+      }
+    }
+    return report(L, status);
+  }
 }
 
 static void write_prompt(lua_State *L, int firstline)

@@ -11,7 +11,7 @@ tests/corpus/puc54/db.lua	A	P5: debug library 5.4 (info fields, hooks)
 tests/corpus/puc54/files.lua	A	P5: io library 5.4 exactness
 tests/corpus/puc54/goto.lua	A	P1.5: goto rules/messages done; test needs <close> attributives
 tests/corpus/puc54/heavy.lua	A	PERF: reference exceeds 60s (triage; raise timeout)
-tests/corpus/puc54/main.lua	A	P5: standalone interpreter semantics (progname, arg)
+tests/corpus/puc54/main.lua	A	P5: corpus lacks its built libs/*.so fixtures (PUC also stops there); progname/argv and traceback naming differ
 tests/corpus/puc54/math.lua	A	P1: int64 numeric model + math library 5.4
 tests/corpus/puc54/pm.lua	A	P5: pattern semantics now match PUC except one %p identity assert (gsub returns interned strings; needs lj_str.c)
 tests/d54/dump_02_border.lua	A	IMPL-DEFINED: dump/reload border bug FIXED and rawlen added; only the runtime-built sparse-table border differs (any border is legal per the 5.4 manual)

@@ -13,7 +13,14 @@ p("dump strip", (function()
   local g = assert(load(d))
   return #string.dump(f) > #d, g()
 end)())
-p("dump header", (function() local d = string.dump(f) return string.format("%02x%02x%02x%02x", d:byte(1, 4)) end)())
+-- Header magic differs by design (PUC "\27Lua", fork "\27LJ"); only the
+-- common first byte and the overall validity are comparable. dump_03_version
+-- checks the private fork version.
+p("dump header", (function()
+  local d = string.dump(f)
+  local tag = d:sub(2, 3) == "LJ" or d:sub(2, 4) == "Lua"
+  return string.format("%02x", d:byte(1)), tag
+end)())
 p("dump upvalue", (function()
   local u = 5
   local h = load("return u")

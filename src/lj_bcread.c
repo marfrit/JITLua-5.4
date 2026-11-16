@@ -39,7 +39,7 @@ static LJ_NOINLINE void bcread_error(LexState *ls, ErrMsg em)
 {
   lua_State *L = ls->L;
   const char *name = ls->chunkarg;
-  if (*name == BCDUMP_HEAD1) name = "(binary)";
+  if (*name == BCDUMP_HEAD1) name = "binary string";  /* PUC 5.4 wording */
   else if (*name == '@' || *name == '=') name++;
   lj_strfmt_pushf(L, "%s: %s", name, err2msg(em));
   lj_err_throw(L, LUA_ERRSYNTAX);
@@ -404,9 +404,14 @@ static int bcread_header(LexState *ls)
 {
   uint32_t flags;
   bcread_want(ls, 3+5+5);
+  /* A byte string that starts with ESC but not our magic is not a chunk at
+  ** all: PUC's message (not a version mismatch). Stock LuaJIT 2.1 has LJ
+  ** magic with version 2, which falls through to the incompatible-bytecode
+  ** error below (deliberate fork). */
   if (bcread_byte(ls) != BCDUMP_HEAD2 ||
-      bcread_byte(ls) != BCDUMP_HEAD3 ||
-      bcread_byte(ls) != BCDUMP_VERSION) return 0;
+      bcread_byte(ls) != BCDUMP_HEAD3)
+    bcread_error(ls, LJ_ERR_BCBINFMT);
+  if (bcread_byte(ls) != BCDUMP_VERSION) return 0;
   bcread_flags(ls) = flags = bcread_uleb128(ls);
   if ((flags & ~(BCDUMP_F_KNOWN)) != 0) return 0;
   if ((flags & BCDUMP_F_FR2) != (uint32_t)ls->fr2*BCDUMP_F_FR2) return 0;

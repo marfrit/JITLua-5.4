@@ -87,14 +87,17 @@ LJLIB_ASM(string_sub)		LJLIB_REC(string_range 1)
 LJLIB_CF(string_rep)		LJLIB_REC(.)
 {
   GCstr *s = lj_lib_checkstr(L, 1);
-  int32_t rep = lj_lib_checkint(L, 2);
+  lua_Integer n = luaL_checkinteger(L, 2);  /* exact; floats like 2^62 too */
   GCstr *sep = lj_lib_optstr(L, 3);
   SBuf *sb = lj_buf_tmp_(L);
-  /* 5.4: the size check comes first (a count saturated from a 5.4 integer
-  ** outside int32 lands here too). */
-  if (rep > 0 &&
-      ((uint64_t)s->len + (sep ? sep->len : 0)) * (uint64_t)rep >= LJ_MAX_STR)
+  int32_t rep;
+  /* 5.4: the size check comes first and uses the exact integer; LuaJIT's
+  ** lj_lib_checkint saturates/wraps counts outside int32, which let huge
+  ** counts succeed. */
+  if (n > 0 &&
+      ((uint64_t)s->len + (sep ? sep->len : 0)) * (uint64_t)n >= LJ_MAX_STR)
     lj_err_caller(L, LJ_ERR_STRREP);
+  rep = (n >= 0 && n <= 0x7fffffff) ? (int32_t)n : -1;  /* negative -> empty */
   if (sep && rep > 1) {
     GCstr *s2 = lj_buf_cat2str(L, sep, s);
     lj_buf_reset(sb);

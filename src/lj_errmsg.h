@@ -165,6 +165,7 @@ ERRDEF(XLINEDIR,	"malformed line number directive")
 
 /* Bytecode reader errors. */
 ERRDEF(BCFMT,	"cannot load incompatible bytecode")
+ERRDEF(BCBINFMT,	"bad binary format (not a binary chunk)")
 ERRDEF(BCBAD,	"cannot load malformed bytecode")
 
 #if LJ_HASFFI

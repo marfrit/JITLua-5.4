@@ -17,10 +17,7 @@ tests/corpus/puc54/pm.lua	A	P5: pattern semantics now match PUC except one %p id
 tests/corpus/puc54/sort.lua	A	P5: table.sort 5.4 + string.pack
 tests/corpus/puc54/tpack.lua	A	P5: string.pack/unpack absent
 tests/corpus/puc54/utf8.lua	A	P1: utf8 lib + \u{} + NUL-in-pattern done; last assert needs int64 bitwise ((1<<31)-1)
-tests/d54/coro_01_close.lua	A	P5: coroutine.close and <close> done; remaining: argument/yield error wording and error position prefix
-tests/d54/dump_str_01.lua	A	P1.3: gmatch 5.4 empty-match rule done; remaining: 5.4 dump header/format + load error wording
 tests/d54/dump_02_border.lua	A	IMPL-DEFINED: dump/reload border bug FIXED and rawlen added; only the runtime-built sparse-table border differs (any border is legal per the 5.4 manual)
-tests/d54/env_01_fenv.lua	A	P1: _ENV now a table alias (env_02 passes); remaining: getfenv/setfenv kept as 5.1 ext by MISSION, and 'attempt to call a nil value (global x)' wording differs
 tests/d54/err_02_tailname.lua	A	P1.8b: tail-call error names -- LuaJIT reuses the caller frame, so the loaded-module fallback reports 'string.rep' where 5.4 reports the short 'rep'. Non-tail and pcall paths match.
 tests/d54/gc_01_tbc_gc.lua	A	P1/P4: <close>/__close, generational GC options
 tests/d54/tbl_03_border_divergence.lua	A	IMPL-DEFINED: runtime-built sparse tables may report any legal border (5.4 manual 3.4.7); LuaJIT's array-growth policy differs from PUC's alimit hint

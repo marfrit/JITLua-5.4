@@ -137,13 +137,6 @@ LUA_API void lua_xmove(lua_State *L, lua_State *to, int n)
   L->top = f;
 }
 
-LUA_API const lua_Number *lua_version(lua_State *L)
-{
-  static const lua_Number version = LUA_VERSION_NUM;
-  UNUSED(L);
-  return &version;
-}
-
 /* -- Stack manipulation -------------------------------------------------- */
 
 LUA_API int lua_gettop(lua_State *L)
@@ -1157,6 +1150,22 @@ LUA_API int lua_gettable(lua_State *L, int idx)
   }
   copyTV(L, L->top-1, v);
   return lua_type(L, -1);
+}
+
+LUA_API int lua_getglobal(lua_State *L, const char *name)
+{
+  return lua_getfield(L, LUA_GLOBALSINDEX, name);
+}
+
+LUA_API void lua_setglobal(lua_State *L, const char *name)
+{
+  lua_setfield(L, LUA_GLOBALSINDEX, name);
+}
+
+LUA_API lua_Number lua_version(lua_State *L)
+{
+  UNUSED(L);
+  return (lua_Number)LUA_VERSION_NUM;
 }
 
 LUA_API int lua_getfield(lua_State *L, int idx, const char *k)

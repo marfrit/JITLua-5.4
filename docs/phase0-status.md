@@ -1413,4 +1413,8 @@ LUA_INTEGER_FMT, maxinteger rawgeti/rawseti, and lightuserdata rawgetp/setp:
 108 checks, 0 failures. corpus-ext C modules (lfs, lpeg, cjson) still build
 against our headers and pass on x64 (3 SAME arms for lfs/lpeg; cjson known
 pair-order diffs). Both boxes ci-box green (109/0/5, opt228, R57, GC59+1X,
-capi 108, i64 14, fuzz 160/0).
+capi 112, i64 14, fuzz 160/0). Further 5.4 surface in the same session:
+lua_getglobal/setglobal are real functions (getglobal returns the type),
+lua_version returns lua_Number 504 (5.4 signature, not LuaJIT's pointer form),
+luaL_tolstring, luaL_requiref and luaL_typeerror are implemented, with
+LUA_LOADED_TABLE defined; capi tests cover version/tolstring/requiref.

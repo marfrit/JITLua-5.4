@@ -197,6 +197,7 @@ LUA_API int   (lua_pushthread) (lua_State *L);
 */
 LUA_API int   (lua_gettable) (lua_State *L, int idx);
 LUA_API int   (lua_getfield) (lua_State *L, int idx, const char *k);
+LUA_API int   (lua_getglobal) (lua_State *L, const char *name);
 LUA_API int   (lua_rawget) (lua_State *L, int idx);
 LUA_API int   (lua_rawgetp) (lua_State *L, int idx, const void *p);
 LUA_API int   (lua_rawgeti) (lua_State *L, int idx, lua_Integer n);
@@ -212,6 +213,7 @@ LUA_API void  (lua_getfenv) (lua_State *L, int idx);
 */
 LUA_API void  (lua_settable) (lua_State *L, int idx);
 LUA_API void  (lua_setfield) (lua_State *L, int idx, const char *k);
+LUA_API void  (lua_setglobal) (lua_State *L, const char *name);
 LUA_API void  (lua_rawset) (lua_State *L, int idx);
 LUA_API void  (lua_rawsetp) (lua_State *L, int idx, const void *p);
 LUA_API void  (lua_rawseti) (lua_State *L, int idx, lua_Integer n);
@@ -301,8 +303,6 @@ LUA_API void lua_setallocf (lua_State *L, lua_Alloc f, void *ud);
 #define lua_pushliteral(L, s)	\
 	lua_pushlstring(L, "" s, (sizeof(s)/sizeof(char))-1)
 
-#define lua_setglobal(L,s)	lua_setfield(L, LUA_GLOBALSINDEX, (s))
-#define lua_getglobal(L,s)	lua_getfield(L, LUA_GLOBALSINDEX, (s))
 
 #define lua_tostring(L,i)	lua_tolstring(L, (i), NULL)
 
@@ -375,7 +375,7 @@ LUA_API void *lua_upvalueid (lua_State *L, int idx, int n);
 LUA_API void lua_upvaluejoin (lua_State *L, int idx1, int n1, int idx2, int n2);
 LUA_API int lua_loadx (lua_State *L, lua_Reader reader, void *dt,
 		       const char *chunkname, const char *mode);
-LUA_API const lua_Number *lua_version (lua_State *L);
+LUA_API lua_Number lua_version (lua_State *L);
 LUA_API void lua_copy (lua_State *L, int fromidx, int toidx);
 LUA_API lua_Number lua_tonumberx (lua_State *L, int idx, int *isnum);
 LUA_API lua_Integer lua_tointegerx (lua_State *L, int idx, int *isnum);

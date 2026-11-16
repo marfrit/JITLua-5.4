@@ -90,6 +90,14 @@ static void test_stream_abi(void)
   lua_close(L);
 }
 
+static int open_capimod(lua_State *L)
+{
+  lua_newtable(L);
+  lua_pushinteger(L, 321);
+  lua_setfield(L, -2, "x");
+  return 1;
+}
+
 static void test_api54_surface(void)
 {
   lua_State *L = newL();
@@ -124,6 +132,20 @@ static void test_api54_surface(void)
   lua_pop(L, 1);
   snprintf(buf, sizeof(buf), LUA_INTEGER_FMT, (LUAI_UACINT)(lua_Integer)-42);
   ok(strcmp(buf, "-42") == 0, "LUA_INTEGER_FMT formats lua_Integer");
+  ok(lua_version(L) == (lua_Number)504, "lua_version returns 5.4 API version");
+  lua_pushnil(L);
+  { size_t len; const char *s = luaL_tolstring(L, -1, &len);
+    ok(s != NULL && strcmp(s, "nil") == 0 && len == 3, "luaL_tolstring(nil)"); }
+  lua_pop(L, 1);
+  lua_pushnumber(L, 1.5);
+  { size_t len; const char *s = luaL_tolstring(L, -1, &len);
+    ok(s != NULL && strcmp(s, "1.5") == 0 && len == 3, "luaL_tolstring(1.5)"); }
+  lua_pop(L, 1);
+  luaL_requiref(L, "capimod", open_capimod, 1);
+  ok(lua_getglobal(L, "capimod") == LUA_TTABLE &&
+     lua_getfield(L, -1, "x") == LUA_TNUMBER &&
+     lua_tointeger(L, -1) == 321, "luaL_requiref registers and sets global");
+  lua_pop(L, 2);
   lua_close(L);
 }
 

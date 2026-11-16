@@ -160,6 +160,70 @@ LUALIB_API lua_Integer luaL_len(lua_State *L, int idx)
   return l;
 }
 
+LUALIB_API int luaL_typeerror(lua_State *L, int arg, const char *tname)
+{
+  const char *typearg;
+  if (luaL_getmetafield(L, arg, "__name") == LUA_TSTRING)
+    typearg = lua_tostring(L, -1);
+  else if (lua_type(L, arg) == LUA_TLIGHTUSERDATA)
+    typearg = "light userdata";
+  else
+    typearg = luaL_typename(L, arg);
+  lua_pushfstring(L, "%s expected, got %s", tname, typearg);
+  return luaL_argerror(L, arg, lua_tostring(L, -1));
+}
+
+LUALIB_API const char *luaL_tolstring(lua_State *L, int idx, size_t *len)
+{
+  idx = lua_absindex(L, idx);
+  if (luaL_callmeta(L, idx, "__tostring")) {
+    if (!lua_isstring(L, -1))
+      luaL_error(L, "'__tostring' must return a string");
+  } else {
+    switch (lua_type(L, idx)) {
+    case LUA_TNUMBER:
+    case LUA_TSTRING:
+      lua_pushvalue(L, idx);
+      break;
+    case LUA_TBOOLEAN:
+      lua_pushstring(L, lua_toboolean(L, idx) ? "true" : "false");
+      break;
+    case LUA_TNIL:
+      lua_pushliteral(L, "nil");
+      break;
+    default: {
+      int tt = luaL_getmetafield(L, idx, "__name");
+      const char *kind = (tt == LUA_TSTRING) ? lua_tostring(L, -1) :
+					     luaL_typename(L, idx);
+      lua_pushfstring(L, "%s: %p", kind, lua_topointer(L, idx));
+      if (tt != LUA_TNIL) lua_remove(L, -2);
+      break;
+    }
+    }
+  }
+  return lua_tolstring(L, -1, len);
+}
+
+LUALIB_API void luaL_requiref(lua_State *L, const char *modname,
+			      lua_CFunction openf, int glb)
+{
+  luaL_getsubtable(L, LUA_REGISTRYINDEX, LUA_LOADED_TABLE);
+  lua_getfield(L, -1, modname);
+  if (!lua_toboolean(L, -1)) {
+    lua_pop(L, 1);
+    lua_pushcfunction(L, openf);
+    lua_pushstring(L, modname);
+    lua_call(L, 1, 1);
+    lua_pushvalue(L, -1);
+    lua_setfield(L, -3, modname);
+  }
+  lua_remove(L, -2);
+  if (glb) {
+    lua_pushvalue(L, -1);
+    lua_setglobal(L, modname);
+  }
+}
+
 LUALIB_API int luaL_getsubtable(lua_State *L, int idx, const char *fname)
 {
   lua_getfield(L, idx, fname);

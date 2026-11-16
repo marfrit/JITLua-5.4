@@ -29,6 +29,7 @@ typedef struct luaL_Reg {
 
 /* Lua 5.4 file-stream ABI used by C modules via LUA_FILEHANDLE. */
 #define LUA_FILEHANDLE          "FILE*"
+#define LUA_LOADED_TABLE        "_LOADED"
 
 typedef struct luaL_Stream {
   FILE *f;
@@ -42,6 +43,10 @@ LUALIB_API void (luaL_register) (lua_State *L, const char *libname,
 LUALIB_API int (luaL_getmetafield) (lua_State *L, int obj, const char *e);
 LUALIB_API lua_Integer (luaL_len) (lua_State *L, int idx);
 LUALIB_API int (luaL_getsubtable) (lua_State *L, int idx, const char *fname);
+LUALIB_API void (luaL_requiref) (lua_State *L, const char *modname,
+                                 lua_CFunction openf, int glb);
+LUALIB_API const char *(luaL_tolstring) (lua_State *L, int idx, size_t *len);
+LUALIB_API int (luaL_typeerror) (lua_State *L, int arg, const char *tname);
 LUALIB_API int (luaL_callmeta) (lua_State *L, int obj, const char *e);
 LUALIB_API int (luaL_typerror) (lua_State *L, int narg, const char *tname);
 LUALIB_API int (luaL_argerror) (lua_State *L, int numarg, const char *extramsg);

@@ -3,8 +3,8 @@
 # Reasons are triaged by root cause and tagged with the phase that fixes them.
 # Refresh with: tests/harness.sh --mode all --update-known-bad (keeps reasons).
 tests/corpus/puc54/sort.lua	A	IMPL-DEFINED: functional asserts pass; table.sort prints comparison counters/timings that differ from PUC
-tests/corpus/puc54/calls.lua	A	PERF: our side exceeds 60s (triage; raise timeout)
-tests/corpus/puc54/closure.lua	B	PERF: JIT-on side exceeds 60s while JIT-off finishes (mode A now passes; triage the slowdown)
+tests/corpus/puc54/calls.lua	A,B	PERF/RUNTIME: hangs >600s (A) / >1200s (B) at the xpcall(loop,loop) C-stack-overflow block; PUC returns immediately. Reproduced isolated; lj_state_growstack error-handler recursion does not abort promptly (VM owner).
+tests/corpus/puc54/closure.lua	B	PERF: JIT-on arm exceeds 600s while A (JIT-off) passes; JIT slowdown to triage
 tests/corpus/puc54/db.lua	A	P5: debug.getinfo(1,"t").istailcall must be true without a hook; Fable tail marks exist only while a call hook is installed (db.lua:619). nups/getlocal now match.
 tests/corpus/puc54/heavy.lua	A	PERF: reference exceeds 60s (triage; raise timeout)
 tests/corpus/puc54/main.lua	A	P5: corpus lacks built libs/*.so fixtures (both stop there); with fixtures PUC itself stops on the interactive prompt test in this harness; progname/argv/traceback naming differ

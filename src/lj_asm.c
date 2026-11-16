@@ -137,7 +137,16 @@ typedef struct ASMState {
    (o) == IR_FLOAD || (o) == IR_XLOAD || (o) == IR_SLOAD || (o) == IR_VLOAD)
 
 /* Sparse limit checks using a red zone before the actual limit. */
+/* The x86/x64 int64 sequences (a boxed/widened key or operand decoded inline
+** in HREF/HLOAD/EQ: load the udata pointer, check the type, load the payload,
+** with the widened-inline fallback) emit more than 64 bytes for one IR, which
+** the assert build's checkmclim caught on i64_01_box/i64_04_keys. arm64's
+** fixed-width sequences stay well below 64. */
+#if LJ_TARGET_X86ORX64
+#define MCLIM_REDZONE	128
+#else
 #define MCLIM_REDZONE	64
+#endif
 
 static LJ_NORET LJ_NOINLINE void asm_mclimit(ASMState *as)
 {

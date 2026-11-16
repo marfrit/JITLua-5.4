@@ -348,6 +348,14 @@ static void loop_unroll(LoopState *lps)
 	    else if (irt_isnum(irr->t) && irt_isinteger(t))  /* Fix num->int. */
 	      ref = tref_ref(emitir(IRTGI(IR_CONV), ref,
 				    IRCONV_INT_NUM|IRCONV_CHECK));
+	    /* Lua 5.4 int64 (ADR-001b step 3): the PHI keeps the loop-entry
+	    ** type; the back edge is widened, or narrowed under a guard. */
+	    else if (irt_isint64(t) && irt_isinteger(irr->t))  /* int->i64. */
+	      ref = tref_ref(emitir(IRT(IR_CONV, IRT_I64), ref,
+				    IRCONV_I64_INT|IRCONV_SEXT));
+	    else if (irt_isint64(irr->t) && irt_isinteger(t))  /* i64->int. */
+	      ref = tref_ref(emitir(IRTGI(IR_CONV), ref,
+				    IRCONV_INT_I64|IRCONV_CHECK));
 	    else
 	      lj_trace_err(J, LJ_TRERR_TYPEINS);
 	    subst[ins] = (IRRef1)ref;

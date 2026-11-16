@@ -1663,6 +1663,16 @@ void lj_ffrecord_func(jit_State *J)
   rd.nres = 1;  /* Default is one result. */
   rd.argv = J->L->base;
   J->base[J->maxslot] = 0;  /* Mark end of arguments. */
+  {
+    /* ADR-001b step 3: a 5.4 integer outside int32 travels as an IRT_I64
+    ** ref. No fast-function handler understands that type yet, and several
+    ** test the TValue (tvisnumber) rather than the ref, so they would treat
+    ** it as an int32. Leave such calls to the interpreter. */
+    BCReg i;
+    for (i = 0; i < J->maxslot; i++)
+      if (tref_istype(J->base[i], IRT_I64))
+	lj_trace_err(J, LJ_TRERR_BADTYPE);
+  }
   (recff_func[m >> 8])(J, &rd);  /* Call recff_* handler. */
   if (rd.nres >= 0) {
     if (J->postproc == LJ_POST_NONE) J->postproc = LJ_POST_FFRETRY;

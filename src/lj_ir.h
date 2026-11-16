@@ -237,6 +237,7 @@ IRFLDEF(FLENUM)
 #define IRSLOAD_READONLY	0x10	/* Read-only, omit slot store. */
 #define IRSLOAD_INHERIT		0x20	/* Inherited by exits/side traces. */
 #define IRSLOAD_KEYINDEX	0x40	/* Table traversal key index. */
+#define IRSLOAD_I64		0x80	/* 5.4 int64 slot: widened inline or box. */
 
 /* XLOAD mode bits, stored in op2. */
 #define IRXLOAD_READONLY	0x01	/* Load from read-only data. */
@@ -254,6 +255,10 @@ IRFLDEF(FLENUM)
 #define IRCONV_DSH		5
 #define IRCONV_NUM_INT		((IRT_NUM<<IRCONV_DSH)|IRT_INT)
 #define IRCONV_INT_NUM		((IRT_INT<<IRCONV_DSH)|IRT_NUM)
+/* Lua 5.4 int64 (ADR-001b step 3): widen, narrow (checked), to float. */
+#define IRCONV_I64_INT		((IRT_I64<<IRCONV_DSH)|IRT_INT)
+#define IRCONV_INT_I64		((IRT_INT<<IRCONV_DSH)|IRT_I64)
+#define IRCONV_NUM_I64		((IRT_NUM<<IRCONV_DSH)|IRT_I64)
 #define IRCONV_SEXT		0x0800	/* Sign-extend integer to integer. */
 #define IRCONV_MODEMASK		0x0fff
 #define IRCONV_CONVMASK		0xf000

@@ -966,7 +966,17 @@ static void asm_conv(ASMState *as, IRIns *ir)
       }
     } else {
       Reg dest = ra_dest(as, ir, RSET_GPR);
-      if (st64 && !(ir->op2 & IRCONV_NONE)) {
+      if (st64 && irt_isguard(ir->t)) {
+	/* Checked narrowing int64 -> int32 (ADR-001b step 3): the value must
+	** be its own sign extension. Executed: movsxd t, left32; cmp t, left;
+	** jne exit. t is dest unless dest aliases the operand.
+	*/
+	Reg left = ra_alloc1(as, lref, RSET_GPR);
+	Reg t = dest == left ? ra_scratch(as, rset_exclude(RSET_GPR, dest)) : dest;
+	asm_guardcc(as, CC_NE);
+	emit_rr(as, XO_CMP, t|REX_64, left);
+	emit_rr(as, XO_MOVSXd, t|REX_64, left);
+      } else if (st64 && !(ir->op2 & IRCONV_NONE)) {
 	Reg left = asm_fuseload(as, lref, RSET_GPR);
 	/* This is either a 32 bit reg/reg mov which zeroes the hiword
 	** or a load of the loword from a 64 bit address.
@@ -1564,6 +1574,54 @@ static Reg asm_load_lightud64(ASMState *as, IRIns *ir, int typecheck)
 }
 #endif
 
+#if LJ_GC64
+/* Decode a Lua 5.4 integer outside int32 (ADR-001b step 3) from the raw
+** TValue word in tmp into dest (IRT_I64), guarding that the value is one of
+** its two representations and nothing else:
+**   widened inline: itype LJ_TISNUM with payload bits 32..46 nonzero;
+**   interned box:   itype LJ_TUDATA with udtype UDTYPE_I64BOX.
+** Executed order:
+**   mov dest, tmp ; sar dest, 47 ; cmp dest32, TISNUM ; jne box
+**   mov dest, tmp ; shr dest, 32 ; test dest32, 0x7fff ; je exit
+**   mov dest, tmp ; shl dest, 17 ; sar dest, 17 ; jmp done
+** box:
+**   cmp dest32, TUDATA ; jne exit ; mov dest, tmp ; shl dest, 17 ; shr dest, 17
+**   cmp byte [dest+udtype], UDTYPE_I64BOX ; jne exit
+**   mov dest, [dest+sizeof(GCudata)]
+** done:
+*/
+static void asm_i64decode(ASMState *as, Reg dest, Reg tmp)
+{
+  MCLabel l_done = emit_label(as), l_box;
+  emit_rmro(as, XO_MOV, dest|REX_64, dest, (int32_t)sizeof(GCudata));
+  asm_guardcc(as, CC_NE);
+  emit_i8(as, UDTYPE_I64BOX);
+  emit_rmro(as, XO_ARITHib, XOg_CMP, dest, (int32_t)offsetof(GCudata, udtype));
+  emit_shifti(as, XOg_SHR|REX_64, dest, 17);
+  emit_shifti(as, XOg_SHL|REX_64, dest, 17);
+  emit_rr(as, XO_MOV, dest|REX_64, tmp);
+  asm_guardcc(as, CC_NE);
+  emit_i8(as, (int8_t)LJ_TUDATA);
+  emit_rr(as, XO_ARITHi8, XOg_CMP, dest);
+  l_box = emit_label(as);
+  checkmclim(as);
+  emit_sjmp(as, l_done);
+  emit_shifti(as, XOg_SAR|REX_64, dest, 17);
+  emit_shifti(as, XOg_SHL|REX_64, dest, 17);
+  emit_rr(as, XO_MOV, dest|REX_64, tmp);
+  asm_guardcc(as, CC_E);
+  emit_u32(as, 0x7fff);
+  emit_rr(as, XO_GROUP3, XOg_TEST, dest);
+  emit_shifti(as, XOg_SHR|REX_64, dest, 32);
+  emit_rr(as, XO_MOV, dest|REX_64, tmp);
+  emit_sjcc(as, CC_NE, l_box);
+  emit_i8(as, (int8_t)LJ_TISNUM);
+  emit_rr(as, XO_ARITHi8, XOg_CMP, dest);
+  emit_shifti(as, XOg_SAR|REX_64, dest, 47);
+  emit_rr(as, XO_MOV, dest|REX_64, tmp);
+}
+#endif
+
 static void asm_ahuvload(ASMState *as, IRIns *ir)
 {
 #if LJ_GC64
@@ -1737,6 +1795,20 @@ static void asm_sload(ASMState *as, IRIns *ir)
 	     !irt_isint(t) ||
 	     (ir->op2 & (IRSLOAD_CONVERT|IRSLOAD_FRAME|IRSLOAD_KEYINDEX)),
 	     "bad SLOAD type");
+#if LJ_GC64
+  if ((ir->op2 & IRSLOAD_I64)) {  /* 5.4 int64 slot (ADR-001b step 3). */
+    Reg dest, tmp;
+    lj_assertA(irt_isint64(t) && (ir->op2 & IRSLOAD_TYPECHECK),
+	       "bad I64 SLOAD");
+    dest = ra_used(ir) ? ra_dest(as, ir, RSET_GPR) : ra_scratch(as, RSET_GPR);
+    tmp = ra_scratch(as, rset_exclude(RSET_GPR, dest));
+    base = ra_alloc1(as, REF_BASE,
+		     rset_exclude(rset_exclude(RSET_GPR, dest), tmp));
+    asm_i64decode(as, dest, tmp);
+    emit_rmro(as, XO_MOV, tmp|REX_64, base, ofs);
+    return;
+  }
+#endif
   if ((ir->op2 & IRSLOAD_CONVERT) && irt_isguard(t) && irt_isint(t)) {
     Reg left = ra_scratch(as, RSET_FPR);
     asm_tointg(as, ir, left);  /* Frees dest reg. Do this before base alloc. */

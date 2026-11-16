@@ -35,9 +35,19 @@
 #include "lj_dispatch.h"
 #include "lj_vm.h"
 #include "lj_prng.h"
+#include "lj_i64.h"
 
 /* Some local macros to save typing. Undef'd at the end. */
 #define IR(ref)			(&J->cur.ir[(ref)])
+
+/* Lua 5.4 int64 in traces (ADR-001b step 3). Representation rule: an IRT_INT
+** ref always stands for an int32 inline TValue, an IRT_I64 ref for a 5.4
+** integer that does not fit int32 (widened 47-bit inline or interned box).
+** Results that fit int32 are narrowed back under a guard right where they
+** are produced, so a slot's IR type follows the interpreter's representation
+** and exits can re-encode a value from its type alone (lj_snap.c). */
+#define tref_isi64(tr)		(tref_istype((tr), IRT_I64))
+#define tvisi64any(o)		(tvisi64((o)) || tvisi47w((o)))
 
 /* Pass IR on to next optimization in chain (FOLD). */
 #define emitir(ot, a, b)	(lj_ir_set(J, (ot), (a), (b)), lj_opt_fold(J))
@@ -163,11 +173,12 @@ static void rec_check_slots(jit_State *J)
 				   s, tref_type(tr));
       } else {
 	/* Number repr. may differ, but other types must be the same. */
-	lj_assertJ(tvisnumber(tv) ? tref_isnumber(tr) :
+	lj_assertJ(tvisi64any(tv) ? tref_isi64(tr) :
+		   tvisnumber(tv) ? tref_isnumber(tr) :
 				    itype2irt(tv) == tref_type(tr),
 		   "slot %d type mismatch: stack type %d vs IR type %d",
 		   s, itypemap(tv), tref_type(tr));
-	if (tref_isk(tr)) {  /* Compare constants. */
+	if (tref_isk(tr) && !tref_isi64(tr)) {  /* Compare constants. */
 	  TValue tvk;
 	  lj_ir_kvalue(J->L, &tvk, ir);
 	  lj_assertJ((tvisnum(&tvk) && tvisnan(&tvk)) ?
@@ -200,13 +211,16 @@ static TRef sloadt(jit_State *J, int32_t slot, IRType t, int mode)
 /* Specialize a slot to the runtime type. Note: slot can be negative! */
 static TRef sload(jit_State *J, int32_t slot)
 {
-  /* ADR-001b step 4: a boxed 64-bit integer (private udtype) is NYI --
-  ** aborting keeps the interpreter's exact semantics instead of letting the
-  ** backends misinterpret the object (measured: JIT-on segfaulted on
-  ** tostring/%d of a box). Boxing becomes fast only with the later IRT_I64
-  ** lowering, not before. */
-  if (tvisi64(&J->L->base[slot]))
-    lj_trace_err(J, LJ_TRERR_BADTYPE);
+  /* ADR-001b step 3: a 5.4 integer outside int32 (widened inline or interned
+  ** box) is loaded as a raw IRT_I64 value. The guarded SLOAD accepts either
+  ** representation (and nothing else), so a slot whose value alternates
+  ** between the two forms does not flap between traces. */
+  if (tvisi64any(&J->L->base[slot])) {
+    TRef ref = emitir_raw(IRTG(IR_SLOAD, IRT_I64), (int32_t)J->baseslot+slot,
+			  IRSLOAD_TYPECHECK|IRSLOAD_I64);
+    J->base[slot] = ref;
+    return ref;
+  }
   {
     IRType t = itype2irt(&J->L->base[slot]);
     TRef ref = emitir_raw(IRTG(IR_SLOAD, t), (int32_t)J->baseslot+slot,
@@ -261,8 +275,10 @@ int lj_record_objcmp(jit_State *J, TRef a, TRef b, cTValue *av, cTValue *bv)
 /* Constify a value. Returns 0 for non-representable object types. */
 TRef lj_record_constify(jit_State *J, cTValue *o)
 {
-  if (tvisi64(o))
-    lj_trace_err(J, LJ_TRERR_BADTYPE);  /* ADR-001b step 4: boxed int64 is NYI */
+  if (tvisi64(o))  /* ADR-001b step 3: exact 64-bit constant. */
+    return lj_ir_kint64(J, (uint64_t)i64V(o));
+  else if (tvisi47w(o))
+    return lj_ir_kint64(J, (uint64_t)intV47(o));
   if (tvisgcv(o))
     return lj_ir_kgc(J, gcV(o), itype2irt(o));
   else if (tvisint(o))
@@ -281,6 +297,192 @@ TRef lj_record_vload(jit_State *J, TRef ref, MSize idx, IRType t)
   TRef tr = emitir(IRTG(IR_VLOAD, t), ref, idx);
   if (irtype_ispri(t)) tr = TREF_PRI(t);  /* Canonicalize primitives. */
   return tr;
+}
+
+/* -- Lua 5.4 int64 arithmetic (ADR-001b step 3) -------------------------- */
+
+/* Integer operand (int32 or int64 ref)? */
+#define tref_isintany(tr)	(tref_isinteger((tr)) || tref_isi64((tr)))
+
+/* Widen an int32 ref to int64 (no-op for int64 refs). */
+static TRef rec_i64_sext(jit_State *J, TRef tr)
+{
+  if (tref_isi64(tr)) return tr;
+  lj_assertJ(tref_isinteger(tr), "bad int64 operand type %d", tref_type(tr));
+  return emitir(IRT(IR_CONV, IRT_I64), tr, IRCONV_I64_INT|IRCONV_SEXT);
+}
+
+/* Keep the representation rule: a result that fits int32 (the interpreter
+** stores it inline as int32) is narrowed under a guard; anything else stays
+** an int64 ref. v is the exact value the interpreter computed. */
+static TRef rec_i64_narrow(jit_State *J, TRef tr, int64_t v)
+{
+  if ((int64_t)(int32_t)v == v)
+    return emitir(IRTGI(IR_CONV), tr, IRCONV_INT_I64|IRCONV_CHECK);
+  return tr;
+}
+
+/* Exact 64-bit value of an integer operand (int32, widened or box). */
+static int64_t rec_i64_value(jit_State *J, cTValue *o)
+{
+  int64_t v;
+  if (!lj_i64_getint(o, &v)) lj_trace_err(J, LJ_TRERR_BADTYPE);
+  return v;
+}
+
+/* Number ref (int32 or int64) to a float ref. */
+static TRef rec_i64_tonum(jit_State *J, TRef tr)
+{
+  if (tref_isnum(tr)) return tr;
+  if (tref_isi64(tr)) return emitir(IRTN(IR_CONV), tr, IRCONV_NUM_I64);
+  lj_assertJ(tref_isinteger(tr), "bad arith operand type %d", tref_type(tr));
+  return emitir(IRTN(IR_CONV), tr, IRCONV_NUM_INT);
+}
+
+/* Arithmetic with at least one int64 operand. op is IR_ADD..IR_POW. */
+static TRef rec_i64_arith(jit_State *J, TRef rb, TRef rc,
+			  cTValue *vb, cTValue *vc, IROp op)
+{
+  /* Strings and metamethods: the interpreter's generic path, not a trace. */
+  if (!(tref_isintany(rb) || tref_isnum(rb)) ||
+      !(tref_isintany(rc) || tref_isnum(rc)))
+    lj_trace_err(J, LJ_TRERR_NYIBC);
+  /* 5.4: a float operand, '/' and '^' give a float result. */
+  if (tref_isnum(rb) || tref_isnum(rc) || op == IR_DIV || op == IR_POW)
+    return emitir(IRTN(op), rec_i64_tonum(J, rb), rec_i64_tonum(J, rc));
+  {
+    int64_t a = rec_i64_value(J, vb), b = rec_i64_value(J, vc), r;
+    rb = rec_i64_sext(J, rb);
+    rc = rec_i64_sext(J, rc);
+    switch (op) {
+    case IR_ADD: r = (int64_t)((uint64_t)a + (uint64_t)b); break;
+    case IR_SUB: r = (int64_t)((uint64_t)a - (uint64_t)b); break;
+    case IR_MUL: r = (int64_t)((uint64_t)a * (uint64_t)b); break;
+    case IR_MOD:  /* Floor modulo via helper; the divisor is guarded. */
+      if (b == 0) lj_trace_err(J, LJ_TRERR_BADTYPE);  /* Interpreter errors. */
+      emitir(IRTG(IR_NE, IRT_I64), rc, lj_ir_kint64(J, 0));
+      r = lj_i64_mod(a, b);
+      return rec_i64_narrow(J, lj_ir_call(J, IRCALL_lj_i64_mod, rb, rc), r);
+    default:
+      lj_trace_err(J, LJ_TRERR_NYIBC);
+      return 0;
+    }
+    return rec_i64_narrow(J, emitir(IRT(op, IRT_I64), rb, rc), r);
+  }
+}
+
+/* Bitwise and/or/xor/not with at least one int64 operand. */
+static TRef rec_i64_bitop(jit_State *J, TRef rb, TRef rc,
+			  cTValue *vb, cTValue *vc, IROp op)
+{
+  int64_t a, b, r;
+  /* Floats with an exact integer value are accepted by the interpreter;
+  ** that conversion is not recorded (exact semantics, see lj_opt_narrow). */
+  if (!tref_isintany(rb) || (op != IR_BNOT && !tref_isintany(rc)))
+    lj_trace_err(J, LJ_TRERR_BADTYPE);
+  a = rec_i64_value(J, vb);
+  rb = rec_i64_sext(J, rb);
+  if (op == IR_BNOT) {
+    r = (int64_t)~(uint64_t)a;
+    return rec_i64_narrow(J, emitir(IRT(IR_BNOT, IRT_I64), rb, 0), r);
+  }
+  b = rec_i64_value(J, vc);
+  rc = rec_i64_sext(J, rc);
+  r = op == IR_BAND ? (int64_t)((uint64_t)a & (uint64_t)b) :
+      op == IR_BOR ? (int64_t)((uint64_t)a | (uint64_t)b) :
+		     (int64_t)((uint64_t)a ^ (uint64_t)b);
+  return rec_i64_narrow(J, emitir(IRT(op, IRT_I64), rb, rc), r);
+}
+
+/* 5.4 shifts (always 64-bit): a count of 64 or more yields 0, a negative
+** count shifts the other way, '>>' is logical. Constant counts become
+** native shifts, variable counts call the exact helper. */
+static TRef rec_i64_shift(jit_State *J, TRef rb, TRef rc,
+			  cTValue *vb, cTValue *vc, BCOp op)
+{
+  int64_t a, n, r;
+  TRef res;
+  if (!tref_isintany(rb) || !tref_isintany(rc))
+    lj_trace_err(J, LJ_TRERR_BADTYPE);
+  a = rec_i64_value(J, vb);
+  n = rec_i64_value(J, vc);
+  rb = rec_i64_sext(J, rb);
+  if (op == BC_BSAR) {  /* LuaJIT extension: arithmetic shift. */
+    if (!tref_isk(rc) || n < 0 || n >= 64) lj_trace_err(J, LJ_TRERR_NYIBC);
+    r = n == 0 ? a : (a >> (int)n);
+    res = n == 0 ? rb : emitir(IRT(IR_BSAR, IRT_I64), rb, lj_ir_kint(J, (int32_t)n));
+    return rec_i64_narrow(J, res, r);
+  }
+  r = op == BC_BSHL ? lj_i64_shl(a, n) : lj_i64_shr(a, n);
+  if (tref_isk(rc)) {
+    int right = (op == BC_BSHR);
+    if (n < 0) { right = !right; n = (int64_t)((uint64_t)0 - (uint64_t)n); }
+    if ((uint64_t)n >= 64)
+      res = lj_ir_kint64(J, 0);
+    else if (n == 0)
+      res = rb;
+    else
+      res = emitir(IRT(right ? IR_BSHR : IR_BSHL, IRT_I64), rb,
+		   lj_ir_kint(J, (int32_t)n));
+  } else {
+    res = lj_ir_call(J, op == BC_BSHL ? IRCALL_lj_i64_shl : IRCALL_lj_i64_shr,
+		     rb, rec_i64_sext(J, rc));
+  }
+  return rec_i64_narrow(J, res, r);
+}
+
+static void rec_comp_prep(jit_State *J);
+static void rec_comp_fixup(jit_State *J, const BCIns *pc, int cond);
+
+/* Ordered comparison with at least one int64 operand: emits the guard in the
+** taken direction and the branch fixup, or aborts. */
+static void rec_i64_comp(jit_State *J, TRef ra, TRef rc, cTValue *av,
+			 cTValue *cv, BCOp op)
+{
+  int64_t a, c;
+  int irop = (int)op - (int)BC_ISLT + (int)IR_LT, res;
+  /* int64 vs. float needs the exact mathematical compare: interpreter only. */
+  if (!tref_isintany(ra) || !tref_isintany(rc))
+    lj_trace_err(J, LJ_TRERR_NYIBC);
+  a = rec_i64_value(J, av);
+  c = rec_i64_value(J, cv);
+  ra = rec_i64_sext(J, ra);
+  rc = rec_i64_sext(J, rc);
+  rec_comp_prep(J);
+  res = irop == IR_LT ? a < c : irop == IR_GE ? a >= c :
+	irop == IR_LE ? a <= c : a > c;
+  if (!res) irop ^= 1;
+  emitir(IRTG(irop, IRT_I64), ra, rc);
+  rec_comp_fixup(J, J->pc, ((int)op ^ irop) & 1);
+}
+
+/* Bytecodes whose int64 operands are handled above or are plain copies.
+** Everything else with an int64 input is left to the interpreter. */
+static int rec_i64_bcok(BCOp op)
+{
+  switch (op) {
+  case BC_ISLT: case BC_ISGE: case BC_ISLE: case BC_ISGT:
+  case BC_ISEQV: case BC_ISNEV: case BC_ISEQS: case BC_ISNES:
+  case BC_ISEQN: case BC_ISNEN: case BC_ISEQP: case BC_ISNEP:
+  case BC_ISTC: case BC_ISFC: case BC_IST: case BC_ISF: case BC_NOT:
+  case BC_MOV: case BC_UNM:
+  case BC_ADDVN: case BC_SUBVN: case BC_MULVN: case BC_DIVVN: case BC_MODVN:
+  case BC_ADDNV: case BC_SUBNV: case BC_MULNV: case BC_DIVNV: case BC_MODNV:
+  case BC_ADDVV: case BC_SUBVV: case BC_MULVV: case BC_DIVVV: case BC_MODVV:
+  case BC_POW: case BC_BNOT: case BC_BAND: case BC_BOR: case BC_BXOR:
+  case BC_BSHL: case BC_BSHR: case BC_BSAR:
+  case BC_TGETV: case BC_TGETS: case BC_TGETB: case BC_TGETR:
+  case BC_TSETV: case BC_TSETS: case BC_TSETB: case BC_TSETR:
+  case BC_GGET: case BC_GSET: case BC_UGET:
+  case BC_USETV: case BC_USETS: case BC_USETN: case BC_USETP:
+  case BC_CALLM: case BC_CALL: case BC_CALLMT: case BC_CALLT:
+  case BC_RETM: case BC_RET: case BC_RET0: case BC_RET1:
+  case BC_JMP: case BC_LOOP: case BC_ILOOP: case BC_JLOOP:
+  case BC_ITERC: case BC_VARG:
+    return 1;
+  default:
+    return 0;
+  }
 }
 
 /* -- Record loop ops ----------------------------------------------------- */
@@ -325,6 +527,23 @@ void lj_record_stop(jit_State *J, TraceLink linktype, TraceNo lnk)
       J->cur.link = J->cur.root;
   }
   canonicalize_slots(J);
+  /* ADR-001b step 3: the trace tail stores the final snapshot to the stack
+  ** in machine code, which cannot produce the canonical encoding of a 5.4
+  ** integer outside int32 (int32 / widened inline / interned box). Write
+  ** those slots through the C encoder before the tail and drop them from
+  ** the snapshot. Looping traces keep them in registers (PHIs). */
+  {
+    BCReg s;
+    for (s = 0; s < J->baseslot+J->maxslot; s++) {
+      TRef tr = J->slot[s];
+      if (tref_isi64(tr) && !(tr & (TREF_FRAME|TREF_CONT|TREF_KEYINDEX))) {
+	TRef ptr = emitir(IRT(IR_ADD, IRT_PGC), REF_BASE,
+			  lj_ir_kintpgc(J, 8*((int32_t)s-1-LJ_FR2)));
+	lj_ir_call(J, IRCALL_lj_i64_tvstore, ptr, tr);
+	J->slot[s] = 0;
+      }
+    }
+  }
 nocanon:
   /* Note: all loop ops must set J->pc to the following instruction! */
   lj_snap_add(J);  /* Add loop snapshot. */
@@ -1607,12 +1826,20 @@ TRef lj_record_idx(jit_State *J, RecordIndex *ix)
     }
   }
 
+  /* ADR-001b step 3: int64 keys (hashing a widened/boxed value), int64 stores
+  ** (canonical encoding + barrier) and loads of such values are not recorded
+  ** yet; the interpreter handles them exactly. */
+  if (tref_isi64(ix->key) || tvisi64any(&ix->keyv) || tref_isi64(ix->val))
+    lj_trace_err(J, LJ_TRERR_NYIBC);
+
   /* Record the key lookup. */
   xref = rec_idx_key(J, ix, &rbref, &rbguard);
   xrefop = IR(tref_ref(xref))->o;
   loadop = xrefop == IR_AREF ? IR_ALOAD : IR_HLOAD;
   /* The lj_meta_tset() inconsistency is gone, but better play safe. */
   oldv = xrefop == IR_KKPTR ? (cTValue *)ir_kptr(IR(tref_ref(xref))) : ix->oldv;
+  if (tvisi64any(oldv))
+    lj_trace_err(J, LJ_TRERR_NYIBC);  /* See above. */
 
   if (ix->val == 0) {  /* Indexed load */
     IRType t = itype2irt(oldv);
@@ -1866,6 +2093,9 @@ noconstify:
     uref = tref_ref(emitir(IRT(IR_UREFC, t), fn, uv));
     needbarrier = 1;
   }
+  /* ADR-001b step 3: int64 upvalue loads/stores are not recorded yet. */
+  if (tvisi64any(uvval(uvp)) || tref_isi64(val))
+    lj_trace_err(J, LJ_TRERR_NYIBC);
   if (val == 0) {  /* Upvalue load */
     IRType t = itype2irt(uvval(uvp));
     TRef res = emitir(IRTG(IR_ULOAD, t), uref, 0);
@@ -2359,6 +2589,11 @@ void lj_record_ins(jit_State *J)
   default: break;  /* Handled later. */
   }
 
+  /* ADR-001b step 3: int64 refs reach only the bytecodes prepared for them. */
+  if ((tref_isi64(rb) || tref_isi64(rc) ||
+       (bcmode_a(op) == BCMvar && tref_isi64(ra))) && !rec_i64_bcok(op))
+    lj_trace_err(J, LJ_TRERR_NYIBC);
+
   switch (op) {
 
   /* -- Comparison ops ---------------------------------------------------- */
@@ -2370,6 +2605,10 @@ void lj_record_ins(jit_State *J)
       break;
     }
 #endif
+    if (tref_isi64(ra) || tref_isi64(rc)) {
+      rec_i64_comp(J, ra, rc, rav, rcv, op);
+      break;
+    }
     /* Emit nothing for two numeric or string consts. */
     if (!(tref_isk2(ra,rc) && tref_isnumber_str(ra) && tref_isnumber_str(rc))) {
       IRType ta = tref_isinteger(ra) ? IRT_INT : tref_type(ra);
@@ -2422,6 +2661,9 @@ void lj_record_ins(jit_State *J)
       break;
     }
 #endif
+    /* int64 vs. float equality is exact in 5.4: interpreter only. */
+    if ((tref_isi64(ra) && tref_isnum(rc)) || (tref_isnum(ra) && tref_isi64(rc)))
+      lj_trace_err(J, LJ_TRERR_NYIBC);
     /* Emit nothing for two non-table, non-udata consts. */
     if (!(tref_isk2(ra, rc) && !(tref_istab(ra) || tref_isudata(ra)))) {
       int diff;
@@ -2476,7 +2718,11 @@ void lj_record_ins(jit_State *J)
   /* -- Arithmetic ops ---------------------------------------------------- */
 
   case BC_UNM:
-    if (tref_isnumber_str(rc)) {
+    if (tref_isi64(rc)) {  /* 5.4: wraps; -mininteger == mininteger. */
+      int64_t v = rec_i64_value(J, rcv);
+      rc = rec_i64_narrow(J, emitir(IRT(IR_NEG, IRT_I64), rc, rc),
+			  (int64_t)((uint64_t)0 - (uint64_t)v));
+    } else if (tref_isnumber_str(rc)) {
       rc = lj_opt_narrow_unm(J, rc, rcv);
     } else {
       ix.tab = rc;
@@ -2497,7 +2743,10 @@ void lj_record_ins(jit_State *J)
   case BC_ADDVN: case BC_SUBVN: case BC_MULVN: case BC_DIVVN:
   case BC_ADDVV: case BC_SUBVV: case BC_MULVV: case BC_DIVVV: {
     MMS mm = bcmode_mm(op);
-    if (tref_isnumber_str(rb) && tref_isnumber_str(rc))
+    if (tref_isi64(rb) || tref_isi64(rc))
+      rc = rec_i64_arith(J, rb, rc, rbv, rcv,
+			 (IROp)((int)mm - (int)MM_add + (int)IR_ADD));
+    else if (tref_isnumber_str(rb) && tref_isnumber_str(rc))
       rc = lj_opt_narrow_arith(J, rb, rc, rbv, rcv,
 			       (int)mm - (int)MM_add + (int)IR_ADD);
     else
@@ -2507,14 +2756,18 @@ void lj_record_ins(jit_State *J)
 
   case BC_MODVN: case BC_MODVV:
   recmod:
-    if (tref_isnumber_str(rb) && tref_isnumber_str(rc))
+    if (tref_isi64(rb) || tref_isi64(rc))
+      rc = rec_i64_arith(J, rb, rc, rbv, rcv, IR_MOD);
+    else if (tref_isnumber_str(rb) && tref_isnumber_str(rc))
       rc = lj_opt_narrow_mod(J, rb, rc, rbv, rcv);
     else
       rc = rec_mm_arith(J, &ix, MM_mod);
     break;
 
   case BC_POW:
-    if (tref_isnumber_str(rb) && tref_isnumber_str(rc))
+    if (tref_isi64(rb) || tref_isi64(rc))
+      rc = rec_i64_arith(J, rb, rc, rbv, rcv, IR_POW);
+    else if (tref_isnumber_str(rb) && tref_isnumber_str(rc))
       rc = lj_opt_narrow_arith(J, rb, rc, rbv, rcv, IR_POW);
     else
       rc = rec_mm_arith(J, &ix, MM_pow);
@@ -2529,6 +2782,10 @@ void lj_record_ins(jit_State *J)
       break;
     }
 #endif
+    if (tref_isi64(rc)) {
+      rc = rec_i64_bitop(J, rc, 0, rcv, NULL, IR_BNOT);
+      break;
+    }
     rc = lj_opt_narrow_tobit(J, rc);
     rc = emitir(IRTI(IR_BNOT), rc, 0);
     break;
@@ -2540,7 +2797,11 @@ void lj_record_ins(jit_State *J)
       break;
     }
 #endif
-  recbit:
+    if (tref_isi64(rb) || tref_isi64(rc)) {
+      rc = rec_i64_bitop(J, rb, rc, rbv, rcv,
+			 (IROp)((int)op - (int)BC_BAND + (int)IR_BAND));
+      break;
+    }
     rb = lj_opt_narrow_tobit(J, rb);
     rc = lj_opt_narrow_tobit(J, rc);
     rc = emitir(IRTI((int)op - (int)BC_BAND + (int)IR_BAND), rb, rc);
@@ -2557,7 +2818,9 @@ void lj_record_ins(jit_State *J)
       rc = xrc;  /* Shift amount may have been converted. */
     }
 #endif
-    goto recbit;
+    /* 5.4 shifts are 64-bit even for int32 operands (1 << 40 == 2^40). */
+    rc = rec_i64_shift(J, rb, rc, rbv, rcv, op);
+    break;
 
   /* -- Miscellaneous ops ------------------------------------------------- */
 
@@ -2591,6 +2854,12 @@ void lj_record_ins(jit_State *J)
       J->base[ra++] = TREF_NIL;
     if (rc >= J->maxslot) J->maxslot = rc+1;
     break;
+  case BC_KI64: {  /* Boxed int64 literal (ADR-001b): an exact constant. */
+    GCudata *ud = gco2ud(proto_kgc(J->pt, ~(ptrdiff_t)rc));
+    lj_assertJ(ud->udtype == UDTYPE_I64BOX, "KI64 constant is not a box");
+    rc = lj_ir_kint64(J, (uint64_t)*(int64_t *)uddata(ud));
+    break;
+    }
 #if LJ_HASFFI
   case BC_KCDATA:
     rc = lj_ir_kgc(J, proto_kgc(J->pt, ~(ptrdiff_t)rc), IRT_CDATA);

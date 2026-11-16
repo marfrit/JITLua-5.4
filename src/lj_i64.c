@@ -234,6 +234,44 @@ static int64_t i64_shift(int64_t a, int64_t n, int right)
     return (int64_t)((cnt == 0) ? u : (u << cnt));
 }
 
+/* -- JIT helpers (ADR-001b step 3) ---------------------------------------- */
+
+/* Canonical TValue encoding of an int64, written directly to *o. */
+void lj_i64_tvstore(lua_State *L, TValue *o, int64_t v)
+{
+  if ((int64_t)(int32_t)v == v) {
+    setintV(o, (int32_t)v);
+#if LJ_GC64
+  } else if (i47_fits(v) && (((uint64_t)v >> 32) & 0x7fffu) != 0) {
+    setint47V(o, v);
+#endif
+  } else {
+    setudataV(L, o, lj_i64_box(L, v));
+  }
+}
+
+int64_t lj_i64_shl(int64_t a, int64_t n) { return i64_shift(a, n, 0); }
+int64_t lj_i64_shr(int64_t a, int64_t n) { return i64_shift(a, n, 1); }
+
+/* The recorder guards b != 0 before emitting these calls. */
+int64_t lj_i64_mod(int64_t a, int64_t b)
+{
+  int64_t r;
+  if (b == -1) return 0;  /* Also covers I64_MIN % -1. */
+  r = a % b;
+  if (r != 0 && ((r < 0) != (b < 0))) r += b;
+  return r;
+}
+
+int64_t lj_i64_idiv(int64_t a, int64_t b)
+{
+  int64_t q;
+  if (b == -1) return (int64_t)((uint64_t)0 - (uint64_t)a);  /* Wraps for I64_MIN. */
+  q = a / b;
+  if ((a % b) != 0 && ((a < 0) != (b < 0))) q -= 1;
+  return q;
+}
+
 /* Float semantics for the mixed int/float and float cases of the same ops. */
 static void i64_floatop(lua_State *L, TValue *ra, lua_Number a, lua_Number b,
 			I64Op op)

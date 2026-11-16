@@ -314,7 +314,7 @@ a,b = F(nil)==nil; assert(a == true and b == nil)
 ------------------------------------------------------------------
 
 -- sometimes will be 0, sometimes will not...
-_ENV.GLOB1 = math.random(0, 1)
+_ENV.GLOB1 = 0  -- fixed (was math.random(0,1); differential output must be deterministic)
 
 -- basic expressions with their respective values
 local basiccases = {

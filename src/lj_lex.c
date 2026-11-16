@@ -131,7 +131,8 @@ static void lex_number(LexState *ls, TValue *tv)
       if (hex) {
 	if (!lj_char_isxdigit(c)) { ok = 0; break; }
 	d = (uint64_t)(lj_char_isdigit(c) ? c - '0' : (c | 0x20) - 'a' + 10);
-	if (++ndig > 16) { ok = 0; break; }
+	/* 5.4: hex integer literals wrap modulo 2^64, however many digits. */
+	ndig++;
 	u = (u << 4) | d;
       } else {
 	if (!lj_char_isdigit(c)) { ok = 0; break; }
@@ -674,10 +675,11 @@ const char *lj_lex_token2str(LexState *ls, LexToken tok)
 {
   if (tok > TK_OFS)
     return tokennames[tok-TK_OFS-1];
-  else if (!lj_char_iscntrl(tok))
+  else if (tok >= 0x20 && tok < 0x7f)
     return lj_strfmt_pushf(ls->L, "%c", tok);
   else
-    return lj_strfmt_pushf(ls->L, "char(%d)", tok);
+    /* 5.4: non-ASCII bytes and control chars are '<\\%d>'. */
+    return lj_strfmt_pushf(ls->L, "<\\%d>", tok);
 }
 
 /* Lexer error. */

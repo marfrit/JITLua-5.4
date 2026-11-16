@@ -83,6 +83,8 @@ LUA_API int lua_load(lua_State *L, lua_Reader reader, void *data,
 
 typedef struct FileReaderCtx {
   FILE *fp;
+  char pre[2];  /* optional synthetic '\n' (skipped '#' line) + first char */
+  int prelen;
   char buf[LUAL_BUFFERSIZE];
 } FileReaderCtx;
 
@@ -90,6 +92,11 @@ static const char *reader_file(lua_State *L, void *ud, size_t *size)
 {
   FileReaderCtx *ctx = (FileReaderCtx *)ud;
   UNUSED(L);
+  if (ctx->prelen > 0) {
+    *size = (size_t)ctx->prelen;
+    ctx->prelen = 0;
+    return ctx->pre;
+  }
   if (feof(ctx->fp)) return NULL;
   *size = fread(ctx->buf, 1, sizeof(ctx->buf), ctx->fp);
   return *size > 0 ? ctx->buf : NULL;
@@ -113,6 +120,25 @@ LUALIB_API int luaL_loadfilex(lua_State *L, const char *filename,
   } else {
     ctx.fp = stdin;
     chunkname = "=stdin";
+  }
+  /* PUC 5.4 luaL_loadfilex: skip an optional BOM, then a first line that
+  ** starts with '#'. A synthetic '\n' after the skipped line keeps later
+  ** line numbers and error positions right. */
+  ctx.prelen = 0;
+  {
+    int c = fgetc(ctx.fp);
+    if (c == 0xEF && fgetc(ctx.fp) == 0xBB && fgetc(ctx.fp) == 0xBF)
+      c = fgetc(ctx.fp);  /* valid BOM: ignore it */
+    if (c == '#') {  /* shebang/exec file: skip the first line */
+      do { c = fgetc(ctx.fp); } while (c != EOF && c != '\n');
+      if (c == '\n') c = fgetc(ctx.fp);
+      if (c != EOF) {
+	ctx.pre[ctx.prelen++] = '\n';
+	ctx.pre[ctx.prelen++] = (char)c;
+      }
+    } else if (c != EOF) {
+      ctx.pre[ctx.prelen++] = (char)c;
+    }
   }
   status = lua_loadx(L, reader_file, &ctx, chunkname, mode);
   if (ferror(ctx.fp)) err = errno;

@@ -1529,10 +1529,23 @@ static void gola_fixup(LexState *ls, FuncScope *bl)
   }
 }
 
-/* Find existing label. */
+/* Find existing label visible for a goto (current block and enclosing ones). */
 static VarInfo *gola_findlabel(LexState *ls, GCstr *name)
 {
   VarInfo *v = ls->vstack + ls->fs->bl->vstart;
+  VarInfo *ve = ls->vstack + ls->vtop;
+  for (; v < ve; v++)
+    if (strref(v->name) == name && gola_islabel(v))
+      return v;
+  return NULL;
+}
+
+/* Find any label with this name in the whole function: 5.4 rejects a
+** duplicate even when the second one is in a nested block (PUC checklabel
+** scans every active label of the function, not just the current scope). */
+static VarInfo *gola_findlabel_all(LexState *ls, GCstr *name)
+{
+  VarInfo *v = ls->vstack + ls->fs->vbase;
   VarInfo *ve = ls->vstack + ls->vtop;
   for (; v < ve; v++)
     if (strref(v->name) == name && gola_islabel(v))
@@ -3001,7 +3014,7 @@ static void parse_label(LexState *ls)
   lj_lex_next(ls);  /* Skip '::'. */
   name = lex_str(ls);
   {
-    VarInfo *vl = gola_findlabel(ls, name);
+    VarInfo *vl = gola_findlabel_all(ls, name);
     if (vl)
       lj_lex_error(ls, 0, LJ_ERR_XLDUP, strdata(name), (int)vl->line);
   }

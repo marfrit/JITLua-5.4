@@ -55,6 +55,20 @@ static void test_getseti(void)
   lua_pushinteger(L, 42); lua_seti(L, -2, 1);
   lua_geti(L, -1, 1);
   ok(lua_tointeger(L, -1) == 42, "geti/seti roundtrip");
+  lua_pop(L, 1);  /* keep the table, pop the roundtrip result */
+  /* int64 keys outside the inline forms: boxed exact, not a float. */
+  {
+    lua_Integer big = (lua_Integer)0x7fffffffffffffffLL;
+    lua_settop(L, 0); lua_getglobal(L, "p");  /* fresh stack */
+    lua_pushinteger(L, big); lua_seti(L, -2, big);
+    lua_geti(L, -1, big);
+    ok(lua_tointeger(L, -1) == big, "geti/seti maxinteger key exact");
+    ok(lua_tonumber(L, -1) == (lua_Number)big, "lua_tonumber(max box) exact");
+    lua_pop(L, 1);
+    lua_geti(L, -1, (lua_Integer)0x8000000000000000LL);
+    ok(lua_isnil(L, -1), "geti mininteger key (absent) is nil");
+    lua_pop(L, 1);
+  }
   lua_close(L);
 }
 

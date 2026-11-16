@@ -81,7 +81,12 @@ LJLIB_CF(table_maxn)
 LJLIB_CF(table_insert)		LJLIB_REC(.)
 {
   GCtab *t = lj_lib_checktab(L, 1);
-  int32_t n, i = (int32_t)lj_tab_len(t) + 1;
+  int32_t n, i;
+  /* 5.4: #t goes through luaL_len, so a __len result is type-checked with
+  ** PUC's "object length is not an integer" error instead of reading the
+  ** raw array length. */
+  lua_Integer len = luaL_len(L, 1);
+  i = len < 0x7fffffff ? (int32_t)len + 1 : 0x7fffffff;
   int nargs = (int)((char *)L->top - (char *)L->base);
   if (nargs != 2*sizeof(TValue)) {
     if (nargs != 3*sizeof(TValue))
@@ -263,12 +268,21 @@ static void auxsort(lua_State *L, int l, int u)
 
 LJLIB_CF(table_sort)
 {
-  GCtab *t = lj_lib_checktab(L, 1);
-  int32_t n = (int32_t)lj_tab_len(t);
-  lua_settop(L, 2);
-  if (!tvisnil(L->base+1))
-    lj_lib_checkfunc(L, 2);
-  auxsort(L, 1, n);
+  lj_lib_checktab(L, 1);
+  {
+    /* 5.4: length goes through luaL_len (__len honored); a huge result is
+    ** PUC's "array too big", and n <= 1 sorts nothing. */
+    lua_Integer len = luaL_len(L, 1);
+    int32_t n = (int32_t)len;
+    if (len > 1)
+      luaL_argcheck(L, len < INT_MAX, 1, "array too big");
+    if (n > 1) {
+      lua_settop(L, 2);
+      if (!tvisnil(L->base+1))
+	lj_lib_checkfunc(L, 2);
+      auxsort(L, 1, n);
+    }
+  }
   return 0;
 }
 

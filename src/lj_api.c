@@ -402,20 +402,59 @@ LUA_API int lua_isinteger(lua_State *L, int idx)
   return tvisint(o) || tvisi47w(o) || tvisi64(o);  /* inline/widened/boxed int */
 }
 
+/* Push an exact 5.4 integer key (int32, widened 47-bit, or boxed int64).
+** setint64V would turn a large key into a float, which cannot index a table
+** with the exact integer key. */
+static void api_pushkey(lua_State *L, lua_Integer n)
+{
+  if (LJ_DUALNUM && n == (int64_t)(int32_t)n) {
+    setintV(L->top, (int32_t)n);
+#if LJ_GC64
+  } else if (i47_fits((int64_t)n)) {
+    setint47V(L->top, (int64_t)n);
+#endif
+  } else {
+    /* Box allocation may move the stack: take L->top only after it. */
+    GCudata *ud = lj_i64_box(L, (int64_t)n);
+    setudataV(L, L->top, ud);
+  }
+  incr_top(L);
+}
+
 LUA_API void lua_geti(lua_State *L, int idx, lua_Integer n)
 {
   cTValue *v, *t = index2adr_check(L, idx);
   TValue key;
-  setint64V(&key, (int64_t)n);
-  v = lj_meta_tget(L, t, &key);
-  if (v == NULL) {
-    L->top += 2;
-    lj_vm_call(L, L->top-2, 1+1);
-    L->top -= 2+LJ_FR2;
-    v = L->top+1+LJ_FR2;
+  if ((LJ_DUALNUM && n == (int64_t)(int32_t)n)
+#if LJ_GC64
+      || i47_fits((int64_t)n)
+#endif
+      ) {
+    /* Inline key: fast path, no stack rearrangement. */
+    if (LJ_DUALNUM && n == (int64_t)(int32_t)n)
+      setintV(&key, (int32_t)n);
+#if LJ_GC64
+    else
+      setint47V(&key, (int64_t)n);
+#endif
+    v = lj_meta_tget(L, t, &key);
+    if (v == NULL) {
+      L->top += 2;
+      lj_vm_call(L, L->top-2, 1+1);
+      L->top -= 2+LJ_FR2;
+      v = L->top+1+LJ_FR2;
+    }
+    copyTV(L, L->top, v);
+    incr_top(L);
+    return;
   }
-  copyTV(L, L->top, v);
+  /* Boxed int64 key: exactly 5.4. Root it on the stack while tget may run a
+  ** metamethod. */
+  copyTV(L, L->top, t);  /* table copy, so idx stays valid */
   incr_top(L);
+  api_pushkey(L, n);
+  lua_gettable(L, -2);  /* pops the key, pushes the value */
+  lua_remove(L, -2);  /* drop the table copy, keep the result */
 }
 
 LUA_API void lua_seti(lua_State *L, int idx, lua_Integer n)
@@ -424,17 +463,40 @@ LUA_API void lua_seti(lua_State *L, int idx, lua_Integer n)
   TValue key;
   cTValue *t = index2adr_check(L, idx);
   lj_checkapi_slot(1);
-  setint64V(&key, (int64_t)n);
-  o = lj_meta_tset(L, t, &key);
-  if (o) {
-    /* NOBARRIER: lj_meta_tset ensures the table is not black. */
-    copyTV(L, o, --L->top);
-  } else {
-    TValue *base = L->top;
-    copyTV(L, base+2, base-3-2*LJ_FR2);
-    L->top = base+3;
-    lj_vm_call(L, base, 0+1);
-    L->top -= 2+LJ_FR2;
+  if ((LJ_DUALNUM && n == (int64_t)(int32_t)n)
+#if LJ_GC64
+      || i47_fits((int64_t)n)
+#endif
+      ) {
+    /* Inline key: the stock path. */
+    if (LJ_DUALNUM && n == (int64_t)(int32_t)n)
+      setintV(&key, (int32_t)n);
+#if LJ_GC64
+    else
+      setint47V(&key, (int64_t)n);
+#endif
+    o = lj_meta_tset(L, t, &key);
+    if (o) {
+      /* NOBARRIER: lj_meta_tset ensures the table is not black. */
+      copyTV(L, o, --L->top);
+    } else {
+      TValue *base = L->top;
+      copyTV(L, base+2, base-3-2*LJ_FR2);
+      L->top = base+3;
+      lj_vm_call(L, base, 0+1);
+      L->top -= 2+LJ_FR2;
+    }
+    return;
+  }
+  {
+    lj_checkapi_slot(2);
+    copyTV(L, L->top, t);
+    incr_top(L);
+    api_pushkey(L, n);
+    copyTV(L, L->top, L->top - 3);  /* copy of the value for lua_settable */
+    incr_top(L);
+    lua_settable(L, -3);
+    L->top -= 2;  /* drop the pushed table copy and the consumed value */
   }
 }
 
@@ -521,6 +583,8 @@ LUA_API lua_Number lua_tonumber(lua_State *L, int idx)
   TValue tmp;
   if (LJ_LIKELY(tvisnumber(o)))
     return numberVnum(o);
+  else if (tvisi64(o))
+    return (lua_Number)i64V(o);
   else if (tvisstr(o) && lj_strscan_num(strV(o), &tmp))
     return numV(&tmp);
   else
@@ -534,6 +598,9 @@ LUA_API lua_Number lua_tonumberx(lua_State *L, int idx, int *ok)
   if (LJ_LIKELY(tvisnumber(o))) {
     if (ok) *ok = 1;
     return numberVnum(o);
+  } else if (tvisi64(o)) {
+    if (ok) *ok = 1;
+    return (lua_Number)i64V(o);
   } else if (tvisi47w(o)) {  /* widened inline int as a double */
     if (ok) *ok = 1;
     return (lua_Number)intV47(o);
@@ -577,13 +644,15 @@ LUA_API lua_Integer lua_tointeger(lua_State *L, int idx)
   lua_Number n;
   if (LJ_LIKELY(tvisint(o))) {
     return tvisi47w(o) ? (lua_Integer)intV47(o) : intV(o);
+  } else if (tvisi64(o)) {  /* boxed int64 must not read the udata word */
+    return (lua_Integer)i64V(o);
   } else if (LJ_LIKELY(tvisnum(o))) {
     n = numV(o);
   } else {
     if (!(tvisstr(o) && lj_strscan_number(strV(o), &tmp)))
       return 0;
     if (tvisint(&tmp))
-      return intV(&tmp);
+      return tvisi47w(&tmp) ? (lua_Integer)intV47(&tmp) : intV(&tmp);
     n = numV(&tmp);
   }
   return lj_num2int_type(n, lua_Integer);

@@ -9,7 +9,6 @@ tests/corpus/puc54/calls.lua	A	PERF: our side exceeds 60s (triage; raise timeout
 tests/corpus/puc54/closure.lua	B	PERF: JIT-on side exceeds 60s while JIT-off finishes (mode A now passes; triage the slowdown)
 tests/corpus/puc54/db.lua	A	P5: debug library 5.4 (info fields, hooks)
 tests/corpus/puc54/files.lua	A	P5: io library 5.4 exactness
-tests/corpus/puc54/goto.lua	A	P1.5: goto rules/messages done; test needs <close> attributives
 tests/corpus/puc54/heavy.lua	A	PERF: reference exceeds 60s (triage; raise timeout)
 tests/corpus/puc54/main.lua	A	P5: corpus lacks its built libs/*.so fixtures (PUC also stops there); progname/argv and traceback naming differ
 tests/corpus/puc54/math.lua	A	P1: int64 numeric model + math library 5.4

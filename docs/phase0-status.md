@@ -994,4 +994,9 @@ comparison) -- see the ADR note. Also: exact float->int64 conversion with
 a range check (2^63 passed as an integer on arm64 in bitops, floor/ceil,
 constant folding, io); boxes are "number" in compare error messages.
 Test: sort_02_int64.
-GATESLINE4
+Gates at 5781af08 (main 1df2cd3a merged; the follow-up a1f97968 only
+changes the x64 dasc macro syntax), arm64: A+B 91 PASS / 0 FAIL / 9 XFAIL
+/ 1 XPASS (dump_03_version B), opt 0-3 196/0/0/4, R 50, GC stress 58/0/2,
+JIT tooling smoke 30/30, corpus 6/0, C API + i64 14/14, fuzz 160/160; bench
+arm64 B1 16.6, B2 822.1 (was 1496.6; FFI 610, PUC 552), B2b 166.8, B3
+23.6 / 243.7 ms. x64 at a1f97968: X64GATE4

@@ -108,6 +108,7 @@ LJ_ASMF TValue *lj_vm_next(GCtab *t, uint32_t idx);
 LJ_ASMF void lj_cont_cat(void);  /* Continue with concatenation. */
 LJ_ASMF void lj_cont_ra(void);  /* Store result in RA from instruction. */
 LJ_ASMF void lj_cont_nop(void);  /* Do nothing, just continue execution. */
+LJ_ASMF void lj_cont_tbc(void);  /* __close returned: restore MULTRES, redo UCLO. */
 LJ_ASMF void lj_cont_condt(void);  /* Branch if result is true. */
 LJ_ASMF void lj_cont_condf(void);  /* Branch if result is false. */
 LJ_ASMF void lj_cont_hook(void);  /* Continue from hook yield. */

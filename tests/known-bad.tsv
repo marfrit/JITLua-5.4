@@ -21,7 +21,7 @@ tests/corpus/puc54/tpack.lua	A	P5: string.pack/unpack absent
 tests/corpus/puc54/utf8.lua	A	P1: utf8 lib + \u{} + NUL-in-pattern done; last assert needs int64 bitwise ((1<<31)-1)
 tests/d54/attrib_01_const.lua	A	P1.5: <const> fully matches 5.4; remaining: <close> needs VM support, and 'x <const> = 1' error wording differs
 tests/d54/bits_02_metamethods.lua	A	P1: __band/__bor/__bxor/__shl/__shr/__bnot dispatch
-tests/d54/coro_01_close.lua	A	P1/P5: coroutine.close absent, <close> support
+tests/d54/coro_01_close.lua	A	P5: coroutine.close and <close> done; remaining: argument/yield error wording and error position prefix
 tests/d54/dump_str_01.lua	A	P1.3: gmatch 5.4 empty-match rule done; remaining: 5.4 dump header/format + load error wording
 tests/d54/dump_02_border.lua	A	IMPL-DEFINED: dump/reload border bug FIXED and rawlen added; only the runtime-built sparse-table border differs (any border is legal per the 5.4 manual)
 tests/d54/env_01_fenv.lua	A	P1: _ENV now a table alias (env_02 passes); remaining: getfenv/setfenv kept as 5.1 ext by MISSION, and 'attempt to call a nil value (global x)' wording differs

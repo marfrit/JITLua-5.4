@@ -1255,6 +1255,8 @@ void lj_record_ret(jit_State *J, BCReg rbase, ptrdiff_t gotresults)
       if (dst >= J->maxslot) {
 	J->maxslot = dst+1;
       }
+    } else if (cont == lj_cont_tbc) {
+      lj_trace_err(J, LJ_TRERR_NYIRETL);  /* 5.4 __close return: not recorded. */
     } else if (cont == lj_cont_nop) {
       /* Nothing to do here. */
     } else if (cont == lj_cont_cat) {

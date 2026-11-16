@@ -682,7 +682,9 @@ void LJ_FASTCALL lj_meta_for(lua_State *L, TValue *o)
 /* The pending slots of a thread are kept as stack offsets (innermost last).
 ** BC_TBC registers a slot at its declaration, BC_UCLO closes the registered
 ** slots at or above its level in reverse order (one __close call per UCLO
-** execution: the VM re-executes the UCLO after each call), coroutine.close
+** execution: the lj_cont_tbc continuation restores MULTRES, which the __close
+** call clobbers (return f() in a <close> scope is RETM), and re-executes the
+** UCLO), coroutine.close
 ** and the error path close the rest from C. */
 
 static void tbc_push(lua_State *L, TValue *o)
@@ -737,7 +739,7 @@ TValue *lj_meta_tbcclose(lua_State *L, TValue *level)
     {
       TValue nilv;
       setnilV(&nilv);
-      return mmcall(L, lj_cont_nop, mo, o, &nilv);  /* nil mo: "attempt to call" */
+      return mmcall(L, lj_cont_tbc, mo, o, &nilv);  /* nil mo: "attempt to call" */
     }
   }
   return NULL;

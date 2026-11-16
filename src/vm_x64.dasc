@@ -2987,35 +2987,6 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
 
   /* Remember: all ops branch for a true comparison, fall through otherwise. */
 
-  |// Decode a 5.4 integer TValue in val to its int64 value (int32 inline,
-  |// widened 47-bit, interned box); anything else goes to vmeta_comp.
-  |// Clobbers t1, t2. Local labels 5 (box path) and 4 (done).
-  |.macro i64cmp_decode, val, t1, t1w, t2
-  |  mov t1, val
-  |  sar t1, 47
-  |  cmp t1w, LJ_TISNUM
-  |  jne >5
-  |  mov t2, val
-  |  shl t2, 32
-  |  sar t2, 32			// int32 inline
-  |  mov t1, val
-  |  shr t1, 32			// payload bits 32..46 in t1w
-  |  shl val, 17
-  |  sar val, 17			// widened
-  |  test t1w, 0x7fff
-  |  cmovz val, t2			// no payload: the int32 form
-  |  jmp >4
-  |5:
-  |  cmp t1w, LJ_TUDATA
-  |  jne ->vmeta_comp
-  |  shl val, 17
-  |  shr val, 17
-  |  cmp byte UDATA:val->udtype, UDTYPE_I64BOX
-  |  jne ->vmeta_comp
-  |  mov val, [val+sizeof(GCudata)]	// box payload
-  |4:
-  |.endmacro
-  |
   |.macro jmp_comp, lt, ge, le, gt, target
   ||switch (op) {
   ||case BC_ISLT:
@@ -3088,8 +3059,52 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |4:  // 5.4 (ADR-001b): compare two integers (int32 inline, widened
     |  // 47-bit, interned box) inline; anything else via lj_meta_comp.
     |  // RA, RD = raw TValues (vmeta_comp reloads them from the slots).
-    |  i64cmp_decode RA, ITYPE, ITYPEd, TMPR
-    |  i64cmp_decode RD, RB, RBd, TMPR
+    |  mov ITYPE, RA
+    |  sar ITYPE, 47
+    |  cmp ITYPEd, LJ_TISNUM
+    |  jne >5
+    |  mov TMPR, RA
+    |  shl TMPR, 32
+    |  sar TMPR, 32			// int32 inline
+    |  mov ITYPE, RA
+    |  shr ITYPE, 32			// payload bits 32..46
+    |  shl RA, 17
+    |  sar RA, 17			// widened
+    |  test ITYPEd, 0x7fff
+    |  cmovz RA, TMPR			// no payload: the int32 form
+    |  jmp >4
+    |5:
+    |  cmp ITYPEd, LJ_TUDATA
+    |  jne ->vmeta_comp
+    |  shl RA, 17
+    |  shr RA, 17
+    |  cmp byte UDATA:RA->udtype, UDTYPE_I64BOX
+    |  jne ->vmeta_comp
+    |  mov RA, [RA+sizeof(GCudata)]	// box payload
+    |4:
+    |  mov RB, RD
+    |  sar RB, 47
+    |  cmp RBd, LJ_TISNUM
+    |  jne >5
+    |  mov TMPR, RD
+    |  shl TMPR, 32
+    |  sar TMPR, 32			// int32 inline
+    |  mov RB, RD
+    |  shr RB, 32			// payload bits 32..46
+    |  shl RD, 17
+    |  sar RD, 17			// widened
+    |  test RBd, 0x7fff
+    |  cmovz RD, TMPR			// no payload: the int32 form
+    |  jmp >4
+    |5:
+    |  cmp RBd, LJ_TUDATA
+    |  jne ->vmeta_comp
+    |  shl RD, 17
+    |  shr RD, 17
+    |  cmp byte UDATA:RD->udtype, UDTYPE_I64BOX
+    |  jne ->vmeta_comp
+    |  mov RD, [RD+sizeof(GCudata)]	// box payload
+    |4:
     |  add PC, 4
     |  cmp RA, RD
     |  jmp_comp jge, jl, jg, jle, >9

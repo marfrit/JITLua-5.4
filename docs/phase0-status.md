@@ -1376,8 +1376,10 @@ message handler, plus entries listed on the page).
 5.4.9 teste/ additions versus the previous corpus: api panic threadstatus,
 closure `_ENV[1 < 2]` 5.4.7 codegen fix, coroutine message-handler overwrite on
 close, errors `('_ENV').x + 1` wording, events weak-__newindex emergency GC,
-gc all-weak table (T hook), main `--`/REPL cases. All new corpus tests pass in
-mode A with our interpreter on x64 and arm64; no output changes were needed.
+gc all-weak table (T hook), main `--`/REPL cases. The new non-T-hook tests
+(closure, coroutine) pass mode A on x64 and arm64; tests needing PUC's internal
+T hooks (api/errors/events/gc) remain auto-skipped by the harness. No output
+changes were needed.
 Both boxes: ci-box A+B 107 PASS/5 XFAIL, opt 224, R 56, GC 59+1X, capi 101,
 i64 14, fuzz 160/0; corpus-ext 15 arms SAME / 0 unexpected. Reference banner is
 now `Lua 5.4.9 Copyright (C) 1994-2026 Lua.org, PUC-Rio`.

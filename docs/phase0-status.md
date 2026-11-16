@@ -1194,3 +1194,40 @@ scripts (they used to fail under PUC too). Results and findings:
   "shimmed" for every build so the gap stays visible; the shim shrinks as
   the headers grow.
 
+## Session 38 (branch env-uv) — `_ENV` as a visible upvalue
+
+PUC's `_ENV` is upvalue 1 of every main chunk and an upvalue of every
+function that (itself or through a nested function) touches a global, at
+the position of its first use in upvalue-creation order. Debuggers,
+sandboxes and Penlight's compat.getfenv/setfenv find and replace it with
+debug.getupvalue/setupvalue/upvaluejoin; PUC's db.lua checks the name,
+the position and nups. The bytecode here keeps LuaJIT's GGET model (no
+such upvalue, globals go through fn->l.env), so the debug API synthesizes
+it: the parser records the position (pt->envuv = position + 1; fs_markenv
+at every GGET/GSET emission walks the enclosing functions like PUC's
+upvalue resolution; main chunks always 1), lj_debug_uvnamev/lua_getupvalue
+present "_ENV" there with the env table as its value and shift the real
+upvalues by one, lua_setupvalue sets the closure's env (tables only, else
+no such upvalue), lua_upvalueid gives the env table's address,
+lua_upvaluejoin copies the table (into the env, or into a real upvalue),
+getinfo nups counts it. The dump carries envuv behind a dump-only flag bit
+(PROTO_DUMP_ENVUV in the flags byte, 0x08 is unused there), so older
+dumps still load. No VM or recorder change; UGET indices in bytecode are
+untouched (error messages name upvalues by bytecode index as before).
+Deliberate difference: PUC's closures of one chunk share one _ENV cell, so
+setupvalue on one changes all of them; here the env is per closure. The
+"unique upvalue" setfenv idiom (upvaluejoin to a fresh closure, then
+setupvalue) behaves the same in both, which is what Penlight and the
+lua-l recipe rely on. Test: env_04_upvalue (names/positions for main
+chunk, first-use order, nested-only use, none; values; setupvalue; the
+setfenv/getfenv idiom; upvalueid identity; dump round trip; hot loop with
+a swapped env). PUC db.lua now runs to its first no-hook istailcall check
+(line 633) -- the nups and getupvalue sections pass. Corpus: Penlight's
+test-class, test-class2, test-__vector and test-utils3 pass; the runner
+wraps each arm's flags in a script so arg[-1] is an interpreter path
+(test-utils re-executes it) and normalises the interpreter banner.
+Once seen, not reproduced in 10 further runs: test-utils.lua:40
+(executeex of `quit` expected exit code 255) failed under all three arms
+of ours in one full corpus run; the probe shows identical popen/os.execute
+status reporting; kept in mind if it shows up in the soak.
+

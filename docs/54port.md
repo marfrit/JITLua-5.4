@@ -81,7 +81,9 @@ events per PUC's rules, "tail call" events, call/return events for C and
 fast functions incl. pcall/xpcall/coroutine.resume/wrap, hooks disable the
 JIT, per-coroutine hooks via the weak `_HOOKKEY` registry table,
 getinfo `t`/`r`, "hook '?'" frames; see phase0-status session 35 for the
-three deliberate differences).
+three deliberate differences) · `_ENV` visible as an upvalue to the debug
+API at PUC's position (synthesized, backed by the closure env; per-closure,
+not a shared cell) · ipairs honours `__index` · userdata user values n > 1.
 
 ## Fuzzing
 `tests/fuzz/gen.py` (seeded, valid 5.4, deterministic) + `tests/fuzz/fuzz.py`

@@ -115,24 +115,37 @@ void LJ_FASTCALL lj_i64_remove(global_State *g, GCudata *ud)
   g->i64.num--;
 }
 
-GCudata *lj_i64_find(global_State *g, int64_t v)
+/* Probe for v. On a miss *slot is the first reusable slot of the chain
+** (tombstone or the terminating empty slot), so an insert that follows needs
+** no second probe pass (the fill of a big table is one new box per store). */
+static GCudata *i64_lookup(global_State *g, int64_t v, MSize *slot)
 {
-  if (g->i64.tab) {
-    MSize mask = g->i64.mask, h = i64_hash(v) & mask, i;
-    for (i = h; ; i = (i + 1) & mask) {
-      uintptr_t u = gcrefu(g->i64.tab[i]);
-      if (u == 0) break;  /* empty slot: not interned */
-      if (u != I64_TOMB && *(int64_t *)uddata(gco2ud((GCobj *)(uintptr_t)u)) == v)
-	return gco2ud((GCobj *)(uintptr_t)u);
+  MSize mask = g->i64.mask, i, free = ~0u;
+  for (i = i64_hash(v) & mask; ; i = (i + 1) & mask) {
+    uintptr_t u = gcrefu(g->i64.tab[i]);
+    if (u == 0) {  /* empty slot: not interned */
+      *slot = free != ~0u ? free : i;
+      return NULL;
+    }
+    if (u == I64_TOMB) {
+      if (free == ~0u) free = i;
+    } else if (*(int64_t *)uddata(gco2ud((GCobj *)(uintptr_t)u)) == v) {
+      return gco2ud((GCobj *)(uintptr_t)u);
     }
   }
-  return NULL;
+}
+
+GCudata *lj_i64_find(global_State *g, int64_t v)
+{
+  MSize slot;
+  return g->i64.tab ? i64_lookup(g, v, &slot) : NULL;
 }
 
 GCudata *lj_i64_box(lua_State *L, int64_t v)
 {
   global_State *g = G(L);
-  GCudata *found = lj_i64_find(g, v);
+  MSize slot = ~0u;
+  GCudata *found = g->i64.tab ? i64_lookup(g, v, &slot) : NULL;
   if (found) {
     /* A box found during the sweep may carry the dead white: resurrect it,
     ** like lj_str_new() does for strings. */
@@ -152,15 +165,20 @@ GCudata *lj_i64_box(lua_State *L, int64_t v)
     ** -O0 trace tail boxing hung). */
     if (!g->i64.tab) {
       i64_resize(L, I64_HSIZE_MIN);
+      slot = ~0u;
     } else if (g->i64.used + 1 > (g->i64.mask+1) * 3 / 4) {
       MSize size = g->i64.mask+1;
       if (g->i64.num + 1 > size / 2) size *= 2;
       i64_resize(L, size);
+      slot = ~0u;  /* Rehashed: probe again. */
     }
     {
-      MSize mask = g->i64.mask, h = i64_hash(v) & mask;
-      while (gcrefu(g->i64.tab[h]) != 0 && gcrefu(g->i64.tab[h]) != I64_TOMB)
-	h = (h + 1) & mask;
+      MSize mask = g->i64.mask, h = slot;
+      if (h == ~0u) {
+	h = i64_hash(v) & mask;
+	while (gcrefu(g->i64.tab[h]) != 0 && gcrefu(g->i64.tab[h]) != I64_TOMB)
+	  h = (h + 1) & mask;
+      }
       if (gcrefu(g->i64.tab[h]) == 0) g->i64.used++;  /* Reusing a tombstone keeps the load. */
       setgcref(g->i64.tab[h], obj2gco(ud));
       g->i64.num++;
@@ -442,8 +460,7 @@ int LJ_FASTCALL lj_i64_bitop(lua_State *L, TValue *ra, cTValue *rb,
   if (lj_i64_getint(rb, &b)) {
     okb = 1;
   } else if (tvisnum(rb)) {
-    b = lj_num2i64(numV(rb));
-    if ((lua_Number)b != numV(rb)) lj_err_msg(L, LJ_ERR_NUMNOINT);
+    if (!lj_i64_numtoint(numV(rb), &b)) lj_err_msg(L, LJ_ERR_NUMNOINT);
     okb = 1;
   } else {
     okb = 0;
@@ -451,8 +468,7 @@ int LJ_FASTCALL lj_i64_bitop(lua_State *L, TValue *ra, cTValue *rb,
   if (okb && lj_i64_getint(rc, &c)) {
     okc = 1;
   } else if (okb && tvisnum(rc)) {
-    c = lj_num2i64(numV(rc));
-    if ((lua_Number)c != numV(rc)) lj_err_msg(L, LJ_ERR_NUMNOINT);
+    if (!lj_i64_numtoint(numV(rc), &c)) lj_err_msg(L, LJ_ERR_NUMNOINT);
     okc = 1;
   } else {
     okc = 0;

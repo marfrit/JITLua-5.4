@@ -28,7 +28,6 @@
 #include "lj_i64.h"
 #include "lj_vm.h"
 #include "lj_vmevent.h"
-#include "lj_i64.h"
 
 /* -- Parser structures and definitions ----------------------------------- */
 
@@ -887,10 +886,7 @@ static int fold_numint(ExpDesc *e, int64_t *p)
     *p = (int64_t)intV(o);
     return 1;
   } else if (tvisnum(o)) {
-    int64_t k = lj_num2i64(numV(o));
-    if ((lua_Number)k != numV(o)) return 0;
-    *p = k;
-    return 1;
+    return lj_i64_numtoint(numV(o), p);  /* exact and inside int64 */
   }
   return 0;
 }

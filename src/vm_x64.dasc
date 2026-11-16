@@ -95,6 +95,7 @@
 |.type NARGS,		int
 |.type TRACE,		GCtrace
 |.type SBUF,		SBuf
+|.type UDATA,		GCudata
 |
 |// Stack layout while in interpreter. Must match with lj_frame.h.
 |//-----------------------------------------------------------------------
@@ -3022,7 +3023,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  or TMPR, RD
     |  shr TMPR, 32
     |  test TMPRd, 0x7fff
-    |  jnz ->vmeta_comp
+    |  jnz >4			// widened: inline int64 compare
     |  add PC, 4
     |  cmp RAd, RDd
     |  jmp_comp jge, jl, jg, jle, >9
@@ -3033,7 +3034,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  ins_next
     |
     |7:  // RA is not an integer.
-    |  ja ->vmeta_comp
+    |  ja >4			// not a number: int64 box or metamethod
     |  // RA is a number.
     |  cmp RBd, LJ_TISNUM; jb >1; jne ->vmeta_comp
     |  // RA is a number, RD is an integer (5.4: or a widened int -> meta).
@@ -3045,7 +3046,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  jmp >2
     |
     |8:  // RA is an integer, RD is not an integer.
-    |  ja ->vmeta_comp
+    |  ja >4			// not a number: int64 box or metamethod
     |  // RA is an integer (5.4: or a widened int -> meta), RD is a number.
     |  mov TMPR, RA
     |  shr TMPR, 32
@@ -3054,6 +3055,56 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  cvtsi2sd xmm1, RAd
     |  movq xmm0, RD
     |  jmp >3
+    |
+    |4:  // 5.4 (ADR-001b): compare two integers (int32 inline, widened
+    |  // 47-bit, interned box) inline; anything else via lj_meta_comp.
+    |  // RA, RD = raw TValues (vmeta_comp reloads them from the slots).
+    |  mov ITYPE, RA
+    |  sar ITYPE, 47
+    |  cmp ITYPEd, LJ_TISNUM
+    |  jne >11
+    |  mov TMPR, RA
+    |  shr TMPR, 32
+    |  test TMPRd, 0x7fff
+    |  jz >12
+    |  shl RA, 17; sar RA, 17	// widened
+    |  jmp >13
+    |12:
+    |  shl RA, 32; sar RA, 32	// int32 inline
+    |  jmp >13
+    |11:
+    |  cmp ITYPEd, LJ_TUDATA
+    |  jne ->vmeta_comp
+    |  shl RA, 17; shr RA, 17
+    |  cmp byte UDATA:RA->udtype, UDTYPE_I64BOX
+    |  jne ->vmeta_comp
+    |  mov RA, [RA+sizeof(GCudata)]	// box payload
+    |13:
+    |  mov RB, RD
+    |  sar RB, 47
+    |  cmp RBd, LJ_TISNUM
+    |  jne >14
+    |  mov TMPR, RD
+    |  shr TMPR, 32
+    |  test TMPRd, 0x7fff
+    |  jz >15
+    |  shl RD, 17; sar RD, 17
+    |  jmp >16
+    |15:
+    |  shl RD, 32; sar RD, 32
+    |  jmp >16
+    |14:
+    |  cmp RBd, LJ_TUDATA
+    |  jne ->vmeta_comp
+    |  shl RD, 17; shr RD, 17
+    |  cmp byte UDATA:RD->udtype, UDTYPE_I64BOX
+    |  jne ->vmeta_comp
+    |  mov RD, [RD+sizeof(GCudata)]
+    |16:
+    |  add PC, 4
+    |  cmp RA, RD
+    |  jmp_comp jge, jl, jg, jle, >9
+    |  jmp <6
     |.else
     |  cmp ITYPEd, LJ_TISNUM; jae ->vmeta_comp
     |  cmp RBd, LJ_TISNUM; jae ->vmeta_comp

@@ -26,6 +26,7 @@
 #include "lj_strfmt.h"
 #include "lj_ff.h"
 #include "lj_lib.h"
+#include "lj_i64.h"
 #include "lj_strscan.h"
 
 /* Userdata payload for I/O file. */
@@ -92,8 +93,7 @@ static int64_t io_toint64(lua_State *L, int narg, int64_t def)
 #if LJ_GC64
   if (tvisi47w(o)) return (int64_t)intV47(o);
 #endif
-  i64 = lj_num2i64(numV(o));
-  if ((lua_Number)i64 != numV(o))
+  if (!lj_i64_numtoint(numV(o), &i64))
     lj_err_arg(L, narg, LJ_ERR_NUMNOINT);
   return i64;
 }

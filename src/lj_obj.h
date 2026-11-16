@@ -1153,7 +1153,8 @@ static LJ_AINLINE lua_Number numberVnum(cTValue *o)
 LJ_DATA const char *const lj_obj_typename[1+LUA_TCDATA+1];
 LJ_DATA const char *const lj_obj_itypename[~LJ_TNUMX+1];
 
-#define lj_typename(o)	(lj_obj_itypename[itypemap(o)])
+/* A boxed 5.4 integer (ADR-001b) is a number in every message. */
+#define lj_typename(o)	(tvisi64(o) ? lj_obj_itypename[~LJ_TNUMX] : lj_obj_itypename[itypemap(o)])
 
 /* Compare two objects without calling metamethods. */
 LJ_FUNC int LJ_FASTCALL lj_obj_equal(cTValue *o1, cTValue *o2);

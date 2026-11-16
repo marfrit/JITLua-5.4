@@ -24,6 +24,16 @@ LJ_FUNC GCudata *lj_i64_box(lua_State *L, int64_t v);
 ** here means "no table holds that key". */
 LJ_FUNC GCudata *lj_i64_find(global_State *g, int64_t v);
 
+/* Exact conversion of a float to a 5.4 integer: 0 unless n is integral and
+** inside the int64 range (the C conversion saturates on arm64, so a plain
+** (double)(int64_t)n == n check accepts 2^63). */
+static LJ_AINLINE int lj_i64_numtoint(lua_Number n, int64_t *v)
+{
+  if (!(n >= -9223372036854775808.0 && n < 9223372036854775808.0)) return 0;
+  *v = (int64_t)n;
+  return (lua_Number)*v == n;
+}
+
 /* True if v takes the widened 47-bit inline form (canonical encoding: int32
 ** range -> int32 inline; widened only while payload bits 32..46 are nonzero,
 ** so [2^31, 2^32) stays boxed; everything else -> box). */

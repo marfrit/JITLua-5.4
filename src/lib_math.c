@@ -41,8 +41,8 @@ LJLIB_CF(math_abs)
 ** produced a float, and fixing that in every backend is unnecessary.) */
 static int math_round_result(lua_State *L, lua_Number r)
 {
-  int64_t k = lj_num2i64(r);
-  if ((lua_Number)k == r) {
+  int64_t k;
+  if (lj_i64_numtoint(r, &k)) {  /* 2^63 is not an integer (saturating conv). */
     if ((int64_t)(int32_t)k == k) setintV(L->top++, (int32_t)k);
     else lj_i64_push(L, k);
   } else {

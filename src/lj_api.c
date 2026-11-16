@@ -378,10 +378,11 @@ LUA_API int lua_lessthan(lua_State *L, int idx1, int idx2)
 {
   cTValue *o1 = index2adr(L, idx1);
   cTValue *o2 = index2adr(L, idx2);
+  int64_t a, b;
   if (o1 == niltv(L) || o2 == niltv(L)) {
     return 0;
-  } else if (tvisint(o1) && tvisint(o2)) {
-    return intV(o1) < intV(o2);
+  } else if (lj_i64_getint(o1, &a) && lj_i64_getint(o2, &b)) {
+    return a < b;  /* 5.4 integers: int32, widened or boxed (table.sort). */
   } else if (tvisnumber(o1) && tvisnumber(o2)) {
     return numberVnum(o1) < numberVnum(o2);
   } else {

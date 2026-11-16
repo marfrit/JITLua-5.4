@@ -257,28 +257,55 @@ static void lex_string(LexState *ls, TValue *tv, LexChar delim)
       case 't': c = '\t'; break;
       case 'v': c = '\v'; break;
       case 'x':  /* Hexadecimal escape '\xXX'. */
-	c = (lex_next(ls) & 15u) << 4;
-	if (!lj_char_isdigit(ls->c)) {
-	  if (!lj_char_isxdigit(ls->c)) goto err_xesc;
-	  c += 9 << 4;
-	}
-	c += (lex_next(ls) & 15u);
-	if (!lj_char_isdigit(ls->c)) {
-	  if (!lj_char_isxdigit(ls->c)) goto err_xesc;
-	  c += 9;
+	{  /* PUC 5.4 error token text: collect the escape source in a side
+	   ** buffer; ls->sb holds the parsed string and must stay clean. */
+	  char eb[8]; int nb = 0;
+	  eb[nb++] = '\\'; eb[nb++] = 'x';
+	  c = (lex_next(ls) & 15u) << 4;
+	  if (ls->c != LEX_EOF) eb[nb++] = (char)ls->c;
+	  if (!lj_char_isdigit(ls->c)) {
+	    if (!lj_char_isxdigit(ls->c)) {
+	      lj_buf_putmem(&ls->sb, eb, nb);
+	      goto err_xesc;
+	    }
+	    c += 9 << 4;
+	  }
+	  c += (lex_next(ls) & 15u);
+	  if (ls->c != LEX_EOF) eb[nb++] = (char)ls->c;
+	  if (!lj_char_isdigit(ls->c)) {
+	    if (!lj_char_isxdigit(ls->c)) {
+	      lj_buf_putmem(&ls->sb, eb, nb);
+	      goto err_xesc;
+	    }
+	    c += 9;
+	  }
 	}
 	break;
       case 'u': {  /* Unicode escape '\u{XX...}' (5.4: up to 0x7FFFFFFF). */
 	uint32_t u = 0;
 	char ub[8];
 	unsigned int n = 1, i;
-	if (lex_next(ls) != '{') goto err_xesc;
+	char eb[40]; int nb = 0;
+	eb[nb++] = '\\'; eb[nb++] = 'u';
+	if (lex_next(ls) != '{') {
+	  if (ls->c != LEX_EOF) eb[nb++] = (char)ls->c;
+	  lj_buf_putmem(&ls->sb, eb, nb);
+	  goto err_xesc;
+	}
+	eb[nb++] = '{';
 	lex_next(ls);
 	for (;;) {
-	  if (!lj_char_isxdigit(ls->c)) goto err_xesc;
+	  if (nb < (int)sizeof(eb) && ls->c != LEX_EOF) eb[nb++] = (char)ls->c;
+	  if (!lj_char_isxdigit(ls->c)) {
+	    lj_buf_putmem(&ls->sb, eb, nb);
+	    goto err_xesc;
+	  }
+	  if (u > (0x7FFFFFFFu >> 4)) {  /* check before shifting: no uint32 wrap */
+	    lj_buf_putmem(&ls->sb, eb, nb);
+	    goto err_xesc;  /* escape sequence too large */
+	  }
 	  u = (u << 4) | (uint32_t)(ls->c & 15u);
 	  if (!lj_char_isdigit(ls->c)) u += 9;
-	  if (u > 0x7FFFFFFFu) goto err_xesc;  /* escape sequence too large */
 	  if (lex_next(ls) == '}') break;
 	}
 	/* Encode as UTF-8 (1..6 bytes), backwards like the reference. */
@@ -306,18 +333,38 @@ static void lex_string(LexState *ls, TValue *tv, LexChar delim)
       case '\\': case '\"': case '\'': break;
       case LEX_EOF: continue;
       default:
-	if (!lj_char_isdigit(c))
+	if (!lj_char_isdigit(c)) {
+	  if (c != LEX_EOF) {  /* PUC error token: include the escape source. */
+	    char eb[2] = {'\\', (char)c};
+	    lj_buf_putmem(&ls->sb, eb, 2);
+	  }
 	  goto err_xesc;
-	c -= '0';  /* Decimal escape '\ddd'. */
-	if (lj_char_isdigit(lex_next(ls))) {
-	  c = c*10 + (ls->c - '0');
+	}
+	{  /* Decimal escape '\ddd' with PUC's error token text. */
+	  char eb[8]; int nb = 0;
+	  eb[nb++] = '\\'; eb[nb++] = (char)c;
+	  c -= '0';
 	  if (lj_char_isdigit(lex_next(ls))) {
+	    eb[nb++] = (char)ls->c;
 	    c = c*10 + (ls->c - '0');
-	    if (c > 255) {
-	    err_xesc:
-	      lj_lex_error(ls, TK_string, LJ_ERR_XESC);
+	    if (lj_char_isdigit(lex_next(ls))) {
+	      eb[nb++] = (char)ls->c;
+	      c = c*10 + (ls->c - '0');
+	      if (c > 255) {
+		/* Include the source characters up to the string terminator. */
+		for (;;) {
+		  if (lex_next(ls) == LEX_EOF || ls->c == '"' || ls->c == '\'') {
+		    if (ls->c != LEX_EOF) eb[nb++] = (char)ls->c;
+		    break;
+		  }
+		  if (nb < (int)sizeof(eb)) eb[nb++] = (char)ls->c;
+		}
+		lj_buf_putmem(&ls->sb, eb, nb);
+	      err_xesc:
+		lj_lex_error(ls, TK_string, LJ_ERR_XESC);
+	      }
+	      lex_next(ls);
 	    }
-	    lex_next(ls);
 	  }
 	}
 	lex_save(ls, c);
@@ -391,11 +438,14 @@ static int lex_linedir(LexState *ls)
 /* -- Main lexical scanner ------------------------------------------------ */
 
 /* Get next lexical token. */
+#define lex_isident5(c) \
+  (lj_char_isalpha(c) || lj_char_isdigit(c) || (c) == '_')
+
 static LexToken lex_scan(LexState *ls, TValue *tv)
 {
   lj_buf_reset(&ls->sb);
   for (;;) {
-    if (lj_char_isident(ls->c)) {
+    if (lex_isident5(ls->c)) {
       GCstr *s;
       if (lj_char_isdigit(ls->c)) {  /* Numeric literal. */
 	lex_number(ls, tv);
@@ -404,7 +454,7 @@ static LexToken lex_scan(LexState *ls, TValue *tv)
       /* Identifier or reserved word. */
       do {
 	lex_savenext(ls);
-      } while (lj_char_isident(ls->c));
+      } while (lex_isident5(ls->c));
       s = lj_parse_keepstr(ls, ls->sb.b, sbuflen(&ls->sb));
       setstrV(ls->L, tv, s);
       if (s->reserved > 0)  /* Reserved word? */

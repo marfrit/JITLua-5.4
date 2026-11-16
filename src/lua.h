@@ -376,6 +376,8 @@ LUA_API void *lua_newuserdatauv (lua_State *L, size_t sz, int nuvalue);
 LUA_API int lua_getiuservalue (lua_State *L, int idx, int n);
 LUA_API int lua_setiuservalue (lua_State *L, int idx, int n);
 LUA_API void lua_warning (lua_State *L, const char *msg, int tocont);
+typedef void (*lua_WarnFunction) (void *ud, const char *msg, int tocont);
+LUA_API void (lua_setwarnf) (lua_State *L, lua_WarnFunction f, void *ud);
 LUA_API int lua_setcstacklimit (lua_State *L, unsigned int limit);
 
 

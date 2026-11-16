@@ -28,6 +28,8 @@
 #include "lj_str.h"
 #include "lj_tab.h"
 #include "lj_udata.h"
+#include "lj_debug.h"
+#include "lj_frame.h"
 #include "lj_state.h"
 #include "lj_bc.h"
 #include "lj_vm.h"
@@ -340,10 +342,14 @@ static void i64_floatop(lua_State *L, TValue *ra, lua_Number a, lua_Number b,
   case I64_DIV: setnumV(ra, a / b); break;
   case I64_POW: setnumV(ra, lj_vm_foldarith(a, b, (int)MM_pow - (int)MM_add));
     return;
-  case I64_MOD:  /* float % is floor-mod in 5.4 too */
-    if (b == 0) setnumV(ra, a / b * 0);  /* nan, as in Lua */
-    else setnumV(ra, a - floor(a / b) * b);
+  case I64_MOD: {  /* 5.4 luaV_modf: fmod, then adjust to the divisor's sign. */
+    lua_Number m;
+    if (b == 0) { setnumV(ra, a / b * 0); break; }  /* nan, as in Lua */
+    m = fmod(a, b);
+    if ((m > 0 && b < 0) || (m < 0 && b > 0)) m += b;
+    setnumV(ra, m);
     break;
+    }
   case I64_IDIV:
     setnumV(ra, floor(a / b));
     break;
@@ -450,6 +456,21 @@ I64Op lj_i64_op_from_mm(MMS mm)
   }
 }
 
+/* 5.4 bitwise number-to-integer failure, with PUC's variable context
+** ("number (field 'huge') has no integer representation"). */
+static LJ_NORET void i64_numint_error(lua_State *L, cTValue *o)
+{
+  const char *oname = NULL;
+  if (curr_funcisL(L)) {
+    GCproto *pt = curr_proto(L);
+    const BCIns *pc = cframe_Lpc(L) - 1;
+    const char *kind = lj_debug_slotname(pt, pc, (BCReg)(o-L->base), &oname);
+    if (kind && oname)
+      lj_err_msgv(L, LJ_ERR_NUMNOINTCTX, kind, oname);
+  }
+  lj_err_msg(L, LJ_ERR_NUMNOINT);
+}
+
 /* 5.4 bitwise ops: integer operands (int32 or boxed int64) and floats with an
 ** exact integer representation. Returns 1 when handled (result in *ra). */
 int LJ_FASTCALL lj_i64_bitop(lua_State *L, TValue *ra, cTValue *rb,
@@ -460,7 +481,7 @@ int LJ_FASTCALL lj_i64_bitop(lua_State *L, TValue *ra, cTValue *rb,
   if (lj_i64_getint(rb, &b)) {
     okb = 1;
   } else if (tvisnum(rb)) {
-    if (!lj_i64_numtoint(numV(rb), &b)) lj_err_msg(L, LJ_ERR_NUMNOINT);
+    if (!lj_i64_numtoint(numV(rb), &b)) i64_numint_error(L, rb);
     okb = 1;
   } else {
     okb = 0;
@@ -468,7 +489,7 @@ int LJ_FASTCALL lj_i64_bitop(lua_State *L, TValue *ra, cTValue *rb,
   if (okb && lj_i64_getint(rc, &c)) {
     okc = 1;
   } else if (okb && tvisnum(rc)) {
-    if (!lj_i64_numtoint(numV(rc), &c)) lj_err_msg(L, LJ_ERR_NUMNOINT);
+    if (!lj_i64_numtoint(numV(rc), &c)) i64_numint_error(L, rc);
     okc = 1;
   } else {
     okc = 0;

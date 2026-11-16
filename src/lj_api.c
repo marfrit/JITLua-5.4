@@ -649,8 +649,10 @@ LUA_API lua_Integer lua_tointeger(lua_State *L, int idx)
   } else if (LJ_LIKELY(tvisnum(o))) {
     n = numV(o);
   } else {
-    if (!(tvisstr(o) && lj_strscan_number(strV(o), &tmp)))
+    if (!(tvisstr(o) && lj_strscan_number64(L, strV(o), &tmp)))
       return 0;
+    if (tvisi64(&tmp))
+      return (lua_Integer)i64V(&tmp);
     if (tvisint(&tmp))
       return tvisi47w(&tmp) ? (lua_Integer)intV47(&tmp) : intV(&tmp);
     n = numV(&tmp);
@@ -677,13 +679,17 @@ LUA_API lua_Integer lua_tointegerx(lua_State *L, int idx, int *ok)
   } else if (LJ_LIKELY(tvisnum(o))) {
     n = numV(o);
   } else {
-    if (!(tvisstr(o) && lj_strscan_number(strV(o), &tmp))) {
+    if (!(tvisstr(o) && lj_strscan_number64(L, strV(o), &tmp))) {
       if (ok) *ok = 0;
       return 0;
     }
+    if (tvisi64(&tmp)) {  /* 5.4: numeric strings keep exact int64 */
+      if (ok) *ok = 1;
+      return (lua_Integer)i64V(&tmp);
+    }
     if (tvisint(&tmp)) {
       if (ok) *ok = 1;
-      return intV(&tmp);
+      return tvisi47w(&tmp) ? (lua_Integer)intV47(&tmp) : intV(&tmp);
     }
     n = numV(&tmp);
   }
@@ -790,6 +796,18 @@ LUALIB_API int luaL_checkoption(lua_State *L, int idx, const char *def,
     if (strcmp(lst[i], s) == 0)
       return (int)i;
   lj_err_argv(L, idx, LJ_ERR_INVOPTM, s);
+}
+
+LUA_API void lua_pushglobaltable(lua_State *L)
+{
+  settabV(L, L->top, tabref(L->env));  /* 5.4 C API name */
+  incr_top(L);
+}
+
+LUA_API lua_Unsigned lua_rawlen(lua_State *L, int idx)
+{
+  /* 5.4 name and type for the same primitive as lua_objlen. */
+  return (lua_Unsigned)lua_objlen(L, idx);
 }
 
 LUA_API size_t lua_objlen(lua_State *L, int idx)
@@ -1184,6 +1202,13 @@ LUA_API int lua_getmetatable(lua_State *L, int idx)
   settabV(L, L->top, mt);
   incr_top(L);
   return 1;
+}
+
+LUALIB_API void luaL_checkversion_(lua_State *L, lua_Number ver, size_t sz)
+{
+  UNUSED(L);
+  lj_assertL((lua_Integer)ver == LUA_VERSION_NUM && sz == LUAL_BUFFERSIZE,
+	     "C library built for another Lua version");
 }
 
 LUALIB_API int luaL_getmetafield(lua_State *L, int idx, const char *field)

@@ -18,10 +18,22 @@
 /* extra error code for `luaL_load' */
 #define LUA_ERRFILE     (LUA_ERRERR+1)
 
+/* 5.4 binary-compatibility check; we accept the same version only. */
+LUALIB_API void (luaL_checkversion_) (lua_State *L, lua_Number ver, size_t sz);
+#define luaL_checkversion(L)	luaL_checkversion_(L, LUA_VERSION_NUM, LUAL_BUFFERSIZE)
+
 typedef struct luaL_Reg {
   const char *name;
   lua_CFunction func;
 } luaL_Reg;
+
+/* Lua 5.4 file-stream ABI used by C modules via LUA_FILEHANDLE. */
+#define LUA_FILEHANDLE          "FILE*"
+
+typedef struct luaL_Stream {
+  FILE *f;
+  lua_CFunction closef;
+} luaL_Stream;
 
 LUALIB_API void (luaL_openlib) (lua_State *L, const char *libname,
                                 const luaL_Reg *l, int nup);
@@ -104,6 +116,11 @@ LUALIB_API void (luaL_setmetatable) (lua_State *L, const char *tname);
 		((void)((cond) || luaL_argerror(L, (numarg), (extramsg))))
 #define luaL_checkstring(L,n)	(luaL_checklstring(L, (n), NULL))
 #define luaL_optstring(L,n,d)	(luaL_optlstring(L, (n), (d), NULL))
+#define luaL_intop(op,v1,v2)	\
+	((lua_Integer)((lua_Unsigned)(v1) op (lua_Unsigned)(v2)))
+#define luaL_checkunsigned(L,a)	((lua_Unsigned)luaL_checkinteger(L,a))
+#define luaL_optunsigned(L,a,d)	\
+	((lua_Unsigned)luaL_optinteger(L,a,(lua_Integer)(d)))
 #define luaL_checkint(L,n)	((int)luaL_checkinteger(L, (n)))
 #define luaL_optint(L,n,d)	((int)luaL_optinteger(L, (n), (d)))
 #define luaL_checklong(L,n)	((long)luaL_checkinteger(L, (n)))

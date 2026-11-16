@@ -72,6 +72,24 @@ static void test_getseti(void)
   lua_close(L);
 }
 
+static void test_stream_abi(void)
+{
+  lua_State *L = newL();
+  luaL_dostring(L, "P = os.tmpname(); f = io.open(P, 'w')");
+  lua_getglobal(L, "f");
+  {
+    luaL_Stream *s = (luaL_Stream *)lua_touserdata(L, -1);
+    ok(s != NULL && s->f != NULL && s->closef != NULL,
+       "io.open handle is a luaL_Stream {f, closef}");
+  }
+  lua_pop(L, 1);
+  luaL_dostring(L, "f:close(); os.remove(P)");
+  /* 5.4 debug: library C functions have no visible upvalues. */
+  ok(luaL_dostring(L, "assert(debug.getinfo(print, 'u').nups == 0)") == LUA_OK,
+     "debug.getinfo(print,'u').nups == 0");
+  lua_close(L);
+}
+
 static void test_len(void)
 {
   lua_State *L = newL();
@@ -443,7 +461,7 @@ static void test_rotate(void)
 
 int main(void)
 {
-  test_absindex(); test_getseti(); test_len(); test_compare();
+  test_absindex(); test_getseti(); test_stream_abi(); test_len(); test_compare();
   test_stringtonumber(); test_getsubtable(); test_isinteger(); test_rotate();
   test_newuserdatauv(); test_iuservalue(); test_warning(); test_warnf(); test_resume54(); test_lauxlib54();
   printf("== capi: %d checks, %d failures ==\n", checks, failures);

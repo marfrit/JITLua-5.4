@@ -29,10 +29,13 @@
 #include "lj_i64.h"
 #include "lj_strscan.h"
 
-/* Userdata payload for I/O file. */
+/* Userdata payload for I/O file. The first two fields match PUC's luaL_Stream
+** ({FILE *f; lua_CFunction closef}), which C modules inspect via LUA_FILEHANDLE
+** (Lua 5.4 ABI). Internal type flags follow after that prefix. */
 typedef struct IOFileUD {
-  FILE *fp;		/* File handle. */
-  uint32_t type;	/* File type. */
+  FILE *fp;		/* File handle (luaL_Stream.f). */
+  lua_CFunction closef;	/* luaL_Stream.closef (NULL for standard handles). */
+  uint32_t type;	/* LuaJIT-internal file type/flags. */
 } IOFileUD;
 
 #define IOFILE_TYPE_FILE	0	/* Regular file. */
@@ -41,6 +44,8 @@ typedef struct IOFileUD {
 #define IOFILE_TYPE_MASK	3
 
 #define IOFILE_FLAG_CLOSE	4	/* Close after io.lines() iterator. */
+
+static int lj_cf_io_method_close(lua_State *L);  /* luaL_Stream.closef */
 
 #define IOSTDF_UD(L, id)	(&gcref(G(L)->gcroot[(id)])->ud)
 #define IOSTDF_IOF(L, id)	((IOFileUD *)uddata(IOSTDF_UD(L, (id))))
@@ -106,6 +111,7 @@ static IOFileUD *io_file_new(lua_State *L)
   /* NOBARRIER: The GCudata is new (marked white). */
   setgcrefr(ud->metatable, curr_func(L)->c.env);
   iof->fp = NULL;
+  iof->closef = NULL;
   iof->type = IOFILE_TYPE_FILE;
   return iof;
 }
@@ -117,6 +123,7 @@ static IOFileUD *io_file_open(lua_State *L, const char *mode)
   iof->fp = fopen(fname, mode);
   if (iof->fp == NULL)
     lj_err_callerv(L, LJ_ERR_IOOPENF, fname, strerror(errno));  /* 5.4 wording */
+  iof->closef = lj_cf_io_method_close;  /* luaL_Stream ABI for C modules */
   return iof;
 }
 
@@ -506,6 +513,7 @@ LJLIB_CF(io_open)
   luaL_argcheck(L, io_checkmode(mode), 2, "invalid mode");
   iof = io_file_new(L);
   iof->fp = fopen(fname, mode);
+  if (iof->fp != NULL) iof->closef = lj_cf_io_method_close;
   return iof->fp != NULL ? 1 : luaL_fileresult(L, 0, fname);
 }
 
@@ -517,6 +525,7 @@ LJLIB_CF(io_popen)
   const char *mode = s ? strdata(s) : "r";
   IOFileUD *iof = io_file_new(L);
   iof->type = IOFILE_TYPE_PIPE;
+  iof->closef = NULL;
 #if LJ_TARGET_POSIX
   fflush(NULL);
   iof->fp = popen(fname, mode);
@@ -646,6 +655,7 @@ static GCobj *io_std_new(lua_State *L, FILE *fp, const char *name)
   /* NOBARRIER: The GCudata is new (marked white). */
   setgcref(ud->metatable, gcV(L->top-3));
   iof->fp = fp;
+  iof->closef = NULL;  /* PUC standard streams are not luaL_Stream-closeable */
   iof->type = IOFILE_TYPE_STDF;
   lua_setfield(L, -2, name);
   return obj2gco(ud);

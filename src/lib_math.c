@@ -88,7 +88,18 @@ LJLIB_ASM_(math_cos)		LJLIB_REC(math_call IRCALL_cos)
 LJLIB_ASM_(math_tan)		LJLIB_REC(math_call IRCALL_tan)
 LJLIB_ASM_(math_asin)		LJLIB_REC(math_call IRCALL_asin)
 LJLIB_ASM_(math_acos)		LJLIB_REC(math_call IRCALL_acos)
-LJLIB_ASM_(math_atan)		LJLIB_REC(math_call IRCALL_atan)
+LJLIB_ASM(math_atan)		LJLIB_REC(math_call IRCALL_atan)
+{
+  lua_Number y = lj_lib_checknum(L, 1);
+  lua_Number x;
+  if (L->base+1 < L->top) {  /* 5.4: math.atan(y, x) is atan2(y, x) */
+    x = lj_lib_checknum(L, 2);
+    setnumV(L->base-1-LJ_FR2, atan2(y, x));
+  } else {
+    setnumV(L->base-1-LJ_FR2, atan(y));
+  }
+  return FFH_RES(1);
+}
 LJLIB_ASM_(math_sinh)		LJLIB_REC(math_call IRCALL_sinh)
 LJLIB_ASM_(math_cosh)		LJLIB_REC(math_call IRCALL_cosh)
 LJLIB_ASM_(math_tanh)		LJLIB_REC(math_call IRCALL_tanh)
@@ -195,6 +206,7 @@ static int math_minmax(lua_State *L, int ismax)
 {
   int i, n = (int)(L->top - L->base);
   cTValue *best;
+  luaL_checkany(L, 1);  /* PUC: math.max()/math.min() -> "value expected" */
   for (i = 1; i <= n; i++) lj_lib_checknumber(L, i);
   best = L->base;
   for (i = 1; i < n; i++) {

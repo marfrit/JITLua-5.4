@@ -3144,8 +3144,20 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
   case BC_DIVVN: case BC_DIVNV: case BC_DIVVV:
     |  ins_arithfp fdiv
     break;
-  case BC_MODVN: case BC_MODNV: case BC_MODVV:
-    |  ins_arithdn ins_arithmodi, ins_arithmod
+  case BC_MODVN:  // C fmod via lj_meta_arith: exact for large |x/y|
+    |  decode_RB RB, INS
+    |   decode_RC RC, INS
+    |  b ->vmeta_arith_vn
+    break;
+  case BC_MODNV:
+    |  decode_RB RB, INS
+    |   decode_RC RC, INS
+    |  b ->vmeta_arith_nv
+    break;
+  case BC_MODVV:
+    |  decode_RB RB, INS
+    |   decode_RC RC, INS
+    |  b ->vmeta_arith_vv
     break;
   case BC_POW:
     |  // NYI: (partial) integer arithmetic.

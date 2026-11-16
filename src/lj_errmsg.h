@@ -216,6 +216,7 @@ ERRDEF(BUFFER_LEFTOV,	"left-over data in buffer")
 
 /* Lua 5.4 number conversion errors. */
 ERRDEF(NUMNOINT,	"number has no integer representation")
+ERRDEF(NUMNOINTCTX,	"number (%s " LUA_QS ") has no integer representation")
 ERRDEF(VALRNG,	"value out of range")
 ERRDEF(STRREP,	"resulting string too large")
 ERRDEF(TABINSPOS,	"position out of bounds")

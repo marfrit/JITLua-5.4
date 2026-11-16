@@ -618,7 +618,11 @@ int lj_debug_getinfo(lua_State *L, const char *what, lj_Debug *ar, int ext)
     } else if (*what == 'l') {
       ar->currentline = frame ? debug_frameline(L, fn, nextframe) : -1;
     } else if (*what == 'u') {
-      ar->nups = (int)lj_debug_nupvalues(fn);  /* 5.4 view: incl. _ENV. */
+      /* 5.4: Lua functions include the _ENV view; library C functions expose
+      ** no implementation upvalues (PUC's print has nups 0); user-created C
+      ** closures keep their real count. */
+      ar->nups = isluafunc(fn) ? (int)lj_debug_nupvalues(fn) :
+		 (fn->c.ffid != 0 ? 0 : fn->c.nupvalues);
       if (ext) {
 	if (isluafunc(fn)) {
 	  GCproto *pt = funcproto(fn);

@@ -111,6 +111,16 @@
 
 /* Note: changing the following defines breaks the Lua 5.1 ABI. */
 #define LUA_INTEGER	ptrdiff_t
+/* Lua 5.4 C-API surface (PUC luaconf.h): the boxes use an LP64 ptrdiff_t, so
+** integers are printed as long. */
+#define LUA_INTEGER_FRMLEN	"l"
+#define LUA_INTEGER_FMT		"%" LUA_INTEGER_FRMLEN "d"
+#define LUAI_UACINT		LUA_INTEGER
+#define LUA_UNSIGNED		unsigned long  /* LP64 ptrdiff_t; matches the "l" format */
+#define LUA_MAXINTEGER		((LUA_INTEGER)((~(LUA_UNSIGNED)0) >> 1))
+#define LUA_MININTEGER		((LUA_INTEGER)(-LUA_MAXINTEGER - 1))
+#define LUA_MAXUNSIGNED		(~(LUA_UNSIGNED)0)
+#define lua_integer2str(s,sz,n)	sprintf((s), sz, LUA_INTEGER_FMT, (LUAI_UACINT)(n))
 #define LUA_IDSIZE	60	/* Size of lua_Debug.short_src. */
 /*
 ** Size of lauxlib and io.* on-stack buffers. Weird workaround to avoid using

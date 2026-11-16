@@ -407,6 +407,7 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov CARG1, L
   |  mov CARG2, RA
   |  lsr CARG3w, RCw, #3
+  |  sub CARG3w, CARG3w, #1		// RC = (nresults+1)*8 here.
   |  mov CARG4, #1
   |  bl extern lj_dispatch_pret		// (lua_State *L, TValue *res, int n, int prepend)
   |  mov RA, CRET1

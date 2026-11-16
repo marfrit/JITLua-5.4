@@ -419,7 +419,7 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov L:RB->base, BASE
   |  mov MULTRES, RDd
   |  lea CARG2, [BASE+RA+8]
-  |  mov CARG3d, RDd
+  |  lea CARG3d, [RD-1]			// RD = nresults+1 here.
   |  mov CARG4d, 1
   |  mov CARG1, L:RB
   |  call extern lj_dispatch_pret	// (lua_State *L, TValue *res, int n, int prepend)

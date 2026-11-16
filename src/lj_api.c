@@ -381,10 +381,16 @@ LUA_API int lua_lessthan(lua_State *L, int idx1, int idx2)
   int64_t a, b;
   if (o1 == niltv(L) || o2 == niltv(L)) {
     return 0;
-  } else if (lj_i64_getint(o1, &a) && lj_i64_getint(o2, &b)) {
-    return a < b;  /* 5.4 integers: int32, widened or boxed (table.sort). */
+  } else if (tvisint(o1) && tvisint(o2)) {
+    /* Inline integers (int32 or widened 47-bit), exact and inline: this is
+    ** table.sort's default comparator, so no call for the common case. */
+    a = tvisi47w(o1) ? intV47(o1) : (int64_t)intV(o1);
+    b = tvisi47w(o2) ? intV47(o2) : (int64_t)intV(o2);
+    return a < b;
   } else if (tvisnumber(o1) && tvisnumber(o2)) {
     return numberVnum(o1) < numberVnum(o2);
+  } else if (lj_i64_getint(o1, &a) && lj_i64_getint(o2, &b)) {
+    return a < b;  /* A boxed integer on at least one side. */
   } else {
     TValue *base = lj_meta_comp(L, o1, o2, 0);
     if ((uintptr_t)base <= 1) {

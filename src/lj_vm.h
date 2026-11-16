@@ -82,6 +82,7 @@ LJ_ASMF LJ_CONSTF double lj_vm_log2(double);
 #endif
 #if !(defined(_LJ_DISPATCH_H) && LJ_TARGET_MIPS)
 LJ_ASMF int32_t LJ_FASTCALL lj_vm_modi(int32_t, int32_t);
+LJ_FUNC double lj_vm_modnum(double a, double b);
 #endif
 
 #if LJ_HASJIT

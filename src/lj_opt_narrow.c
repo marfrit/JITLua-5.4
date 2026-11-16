@@ -581,13 +581,12 @@ TRef lj_opt_narrow_mod(jit_State *J, TRef rb, TRef rc, TValue *vb, TValue *vc)
     emitir(IRTGI(IR_NE), rc, lj_ir_kint(J, 0));
     return emitir(IRTI(IR_MOD), rb, rc);
   }
-  /* b % c ==> b - floor(b/c)*c */
+  /* 5.4 float modulo: fmod with the divisor's sign (exact, keeps -0.0),
+  ** not the floor formula b - floor(b/c)*c. */
   rb = lj_ir_tonum(J, rb);
   rc = lj_ir_tonum(J, rc);
-  tmp = emitir(IRTN(IR_DIV), rb, rc);
-  tmp = emitir(IRTN(IR_FPMATH), tmp, IRFPM_FLOOR);
-  tmp = emitir(IRTN(IR_MUL), tmp, rc);
-  return emitir(IRTN(IR_SUB), rb, tmp);
+  UNUSED(tmp);
+  return lj_ir_call(J, IRCALL_lj_vm_modnum, rb, rc);
 }
 
 /* -- Predictive narrowing of induction variables ------------------------- */

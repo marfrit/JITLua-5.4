@@ -350,8 +350,13 @@ static TRef rec_i64_arith(jit_State *J, TRef rb, TRef rc,
       !(tref_isintany(rc) || tref_isnum(rc)))
     lj_trace_err(J, LJ_TRERR_NYIBC);
   /* 5.4: a float operand, '/' and '^' give a float result. */
-  if (tref_isnum(rb) || tref_isnum(rc) || op == IR_DIV || op == IR_POW)
-    return emitir(IRTN(op), rec_i64_tonum(J, rb), rec_i64_tonum(J, rc));
+  if (tref_isnum(rb) || tref_isnum(rc) || op == IR_DIV || op == IR_POW) {
+    rb = rec_i64_tonum(J, rb);
+    rc = rec_i64_tonum(J, rc);
+    if (op == IR_MOD)  /* No float IR_MOD exists: 5.4 fmod-based modulo. */
+      return lj_ir_call(J, IRCALL_lj_vm_modnum, rb, rc);
+    return emitir(IRTN(op), rb, rc);
+  }
   {
     int64_t a = rec_i64_value(J, vb), b = rec_i64_value(J, vc), r;
     rb = rec_i64_sext(J, rb);

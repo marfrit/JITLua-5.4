@@ -74,6 +74,18 @@ double lj_vm_foldarith(double x, double y, int op)
 
 /* -- Helper functions for generated machine code ------------------------- */
 
+/* Lua 5.4 float modulo (luai_nummod): fmod, then adjust to the divisor's
+** sign. Exact for any magnitude (the floor formula b - floor(b/c)*c loses
+** precision for large quotients and gives +0.0 where 5.4 keeps -0.0). The
+** JIT calls this for every float '%' (lj_opt_narrow_mod, rec_i64_arith).
+*/
+double lj_vm_modnum(double a, double b)
+{
+  double m = fmod(a, b);
+  if ((m > 0) ? b < 0 : (m < 0 && b != m)) m += b;
+  return m;
+}
+
 #if (LJ_HASJIT && !(LJ_TARGET_ARM || LJ_TARGET_ARM64 || LJ_TARGET_PPC)) || LJ_TARGET_MIPS
 int32_t LJ_FASTCALL lj_vm_modi(int32_t a, int32_t b)
 {

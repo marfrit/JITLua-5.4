@@ -7,7 +7,7 @@ tests/corpus/puc54/literals.lua	A	IMPL-DEFINED: long strings are interned in the
 tests/corpus/puc54/sort.lua	A	IMPL-DEFINED: functional asserts pass; table.sort prints comparison counters/timings that differ from PUC
 tests/corpus/puc54/calls.lua	A	PERF: our side exceeds 60s (triage; raise timeout)
 tests/corpus/puc54/closure.lua	B	PERF: JIT-on side exceeds 60s while JIT-off finishes (mode A now passes; triage the slowdown)
-tests/corpus/puc54/db.lua	A	P5: debug.getinfo(2) fields (func/nups) and getlocal naming after dbg-hooks; Fable lib_debug area
+tests/corpus/puc54/db.lua	A	P5: debug.getinfo(1,"t").istailcall must be true without a hook; Fable tail marks exist only while a call hook is installed (db.lua:619). nups/getlocal now match.
 tests/corpus/puc54/heavy.lua	A	PERF: reference exceeds 60s (triage; raise timeout)
 tests/corpus/puc54/main.lua	A	P5: corpus lacks its built libs/*.so fixtures (PUC also stops there); progname/argv and traceback naming differ
 tests/corpus/puc54/math.lua	A,B	A: random stats differ (PRNG); B: JIT integer floor division with a negative divisor yields nil (recorder int64 path, Fable area)

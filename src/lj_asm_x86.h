@@ -476,7 +476,8 @@ static Reg asm_fuseload(ASMState *as, IRRef ref, RegSet allow)
   } else if (mayfuse(as, ref)) {
     RegSet xallow = (allow & RSET_GPR) ? allow : RSET_GPR;
     if (ir->o == IR_SLOAD) {
-      if (!(ir->op2 & (IRSLOAD_PARENT|IRSLOAD_CONVERT)) &&
+      /* An int64 slot (IRSLOAD_I64) is decoded, not the raw TValue word. */
+      if (!(ir->op2 & (IRSLOAD_PARENT|IRSLOAD_CONVERT|IRSLOAD_I64)) &&
 	  noconflict(as, ref, IR_RETF, 2) &&
 	  !(LJ_GC64 && irt_isaddr(ir->t))) {
 	as->mrm.base = (uint8_t)ra_alloc1(as, REF_BASE, xallow);

@@ -145,8 +145,15 @@ static void lex_number(LexState *ls, TValue *tv)
       }
     }
     if (ok && ndig > 0) {
-      setudataV(ls->L, tv, lj_i64_box(ls->L, (int64_t)u));
-      return;  /* boxed integer literal: nothing else to convert */
+      /* A hex literal that wraps into int32 (0xffffffffffffffff == -1) is an
+      ** inline int32: a box must never hold an int32-range value (the JIT's
+      ** representation rule, ADR-001b step 3, and raw-word equality rely on
+      ** that). */
+      if (LJ_DUALNUM && (int64_t)(int32_t)u == (int64_t)u)
+	setintV(tv, (int32_t)u);
+      else
+	setudataV(ls->L, tv, lj_i64_box(ls->L, (int64_t)u));
+      return;  /* integer literal: nothing else to convert */
     }
   }
   if (LJ_DUALNUM && fmt == STRSCAN_INT) {

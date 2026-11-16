@@ -3312,19 +3312,15 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  mov RB, [BASE+RD*8]
     |.if DUALNUM
     |  checkint RB, >5
+    |  // Lua 5.4 (ADR-001b): -0 is the integer 0; -(-2^31) is an int64 result
+    |  // computed by the C helper via vmeta_unm (checkint already sends a
+    |  // widened 47-bit operand to >5, where ja takes it to vmeta_unm).
     |  neg RBd
-    |  jz >3
-    |  jo >4
+    |  jo ->vmeta_unm
     |  setint RB
     |9:
     |  mov [BASE+RA*8], RB
     |  ins_next
-    |3:
-    |  mov64 RB, U64x(80000000,00000000)  // -0.
-    |  jmp <9
-    |4:
-    |  mov64 RB, U64x(41e00000,00000000)  // 2^31.
-    |  jmp <9
     |5:
     |  ja ->vmeta_unm
     |.else

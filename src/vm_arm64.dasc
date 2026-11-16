@@ -2713,12 +2713,13 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  bhi ->vmeta_unm
     |  eor TMP0, TMP0, #U64x(80000000,00000000)
     |  bne >5
+    |  // Lua 5.4 (ADR-001b): -0 is the integer 0; a widened 47-bit operand and
+    |  // -(-2^31) (an int64 result) go to the C helper via vmeta_unm.
+    |  tst TMP0, #U64x(00007fff,00000000)
+    |  bne ->vmeta_unm
     |  negs TMP0w, TMP0w
-    |   movz CARG3, #0x41e0, lsl #48	// 2^31.
-    |   add_TISNUM TMP0, TMP0
-    |  csel TMP0, TMP0, CARG3, vc
-    |   movz CARG3, #0x8000, lsl #48	// -0.
-    |  csel TMP0, TMP0, CARG3, ne
+    |  bvs ->vmeta_unm
+    |  add_TISNUM TMP0, TMP0
     |5:
     |  str TMP0, [BASE, RA, lsl #3]
     |  ins_next

@@ -226,7 +226,10 @@ TValue *lj_meta_arith(lua_State *L, TValue *ra, cTValue *rb, cTValue *rc,
   cTValue *b, *c;
   /* Lua 5.4 exact 64-bit semantics (ADR-001b): a boxed integer operand, or an
   ** int32 overflow that landed here, is handled by the C helper. */
-  if (mm < MM__MAX) {
+  if (mm == MM_unm) {  /* Unary minus: wraps, -mininteger == mininteger. */
+    if (lj_i64_unop(L, ra, rb, I64_UNM))
+      return NULL;  /* Handled. */
+  } else if (mm < MM__MAX) {
     I64Op iop = lj_i64_op_from_mm(mm);
     if (iop != I64__MAX &&
 	(tvisi64(rb) || tvisi64(rc) || tvisint(rb) || tvisint(rc) ||

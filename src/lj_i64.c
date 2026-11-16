@@ -157,9 +157,9 @@ void LJ_FASTCALL lj_i64_freetab(global_State *g)
 
 void lj_i64_push(lua_State *L, int64_t v)
 {
-  ptrdiff_t ofs = L->top - L->base;  /* the box allocation may move the stack */
-  GCudata *ud = lj_i64_box(L, v);
-  setudataV(L, L->base + ofs, ud);
+  /* Canonical encoding: a box never holds an int32-range (or, on GC64, a
+  ** widenable) value. lj_i64_toTValue stores base-relative. */
+  lj_i64_toTValue(L, L->top, v);
   incr_top(L);
 }
 

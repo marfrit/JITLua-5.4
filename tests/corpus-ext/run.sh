@@ -46,7 +46,11 @@ extract() {
   [ "$have" = "$sum" ] || { say "sha256 mismatch for $file: $have"; return 1; }
   mkdir -p "$OUT/$name"
   case "$file" in
-    *.src.rock) unzip -p "$DL/$file" '*.tar.gz' | tar xz -C "$OUT/$name" ;;
+    *.src.rock)  # a zip holding the release tarball; no unzip on the boxes
+      python3 -c 'import sys, zipfile
+z = zipfile.ZipFile(sys.argv[1])
+n = [m for m in z.namelist() if m.endswith(".tar.gz")][0]
+sys.stdout.buffer.write(z.read(n))' "$DL/$file" | tar xz -C "$OUT/$name" ;;
     *) tar xzf "$DL/$file" -C "$OUT/$name" ;;
   esac
   [ -d "$OUT/$name/$top" ] || { say "unexpected layout for $name"; return 1; }

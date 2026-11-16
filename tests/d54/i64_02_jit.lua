@@ -103,6 +103,22 @@ for i = 1, 2000 do
 end
 p("cmp", lt, le, gt, eq, ne)
 
+-- Equality across representations: widened vs widened with equal low words,
+-- box literal vs computed value, int32 vs widened, integers vs equal floats.
+local e1, e2, e3, e4, e5, e6, e7 = 0, 0, 0, 0, 0, 0, 0
+for i = 1, 1000 do
+  local w1, w2 = (1 << 40) + 5, (1 << 41) + 5
+  local bx = 0x7fffffffffffffff
+  if w1 == w2 then e1 = e1 + 1 end
+  if w1 ~= 5 then e2 = e2 + 1 end
+  if bx == math.maxinteger then e3 = e3 + 1 end
+  if (1 << 40) == 1099511627776 then e4 = e4 + 1 end
+  if w1 == 1099511627781.0 then e5 = e5 + 1 end
+  if bx ~= 9.2233720368547758e18 then e6 = e6 + 1 end
+  if 2147483648 == (1 << 31) then e7 = e7 + 1 end
+end
+p("eq", e1, e2, e3, e4, e5, e6, e7)
+
 -- Mixed arithmetic: float operands, '/', '^', '%' with negative divisors.
 local f1, f2, f3, f4, f5, f6 = 0, 0, 0, 0, 0, 0
 for i = 1, 1000 do

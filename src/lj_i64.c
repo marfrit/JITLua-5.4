@@ -322,9 +322,11 @@ int LJ_FASTCALL lj_i64_arith(lua_State *L, TValue *ra, cTValue *rb,
     }
     return 1;
   }
-  /* Mixed or float: numeric comparison semantics need both to be numbers. */
-  if (tvisnumber(rb) && tvisnumber(rc)) {
-    i64_floatop(L, ra, numberVnum(rb), numberVnum(rc), op);
+  /* Mixed or float: both operands become floats. The exact int64 value of a
+  ** widened or boxed operand is used (numberVnum would read a low word). */
+  if ((ia || tvisnum(rb)) && (ib || tvisnum(rc))) {
+    i64_floatop(L, ra, ia ? (lua_Number)a : numV(rb),
+		ib ? (lua_Number)b : numV(rc), op);
     return 1;
   }
   return 0;  /* Let the caller handle strings, metamethods and errors. */

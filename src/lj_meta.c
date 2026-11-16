@@ -467,6 +467,22 @@ TValue *lj_meta_equal(lua_State *L, GCobj *o1, GCobj *o2, int ne)
   return (TValue *)(intptr_t)ne;
 }
 
+/* Exact 5.4 equality for the VM's slow path (ADR-001b): either operand may be
+** a widened 47-bit inline integer or an interned int64 box, which compare by
+** value against any number. Same return convention as lj_meta_equal: 0/1 is
+** the branch decision, a TValue * requests the __eq metamethod call. The raw
+** TValue words are passed so the VM need not re-derive slot pointers. */
+TValue *lj_meta_equal_any(lua_State *L, uint64_t a, uint64_t b, int ne)
+{
+  TValue ta, tb;
+  ta.u64 = a; tb.u64 = b;
+  if (a == b) return (TValue *)(intptr_t)(1 ^ ne);
+  if (itype(&ta) == itype(&tb) && (tvistab(&ta) || tvisudata(&ta)) &&
+      !tvisi64(&ta) && !tvisi64(&tb))
+    return lj_meta_equal(L, gcV(&ta), gcV(&tb), ne);
+  return (TValue *)(intptr_t)(lj_obj_equal(&ta, &tb) ^ ne);
+}
+
 #if LJ_HASFFI
 TValue * LJ_FASTCALL lj_meta_equal_cd(lua_State *L, BCIns ins)
 {

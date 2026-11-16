@@ -612,3 +612,28 @@ one). Options for the next attempt:
 The parser bookkeeping (active close stack, per-scope entry counts, return
 paths, proto pair map, dump refusal) is reverted again and ready to re-apply
 from this note. No new design question for Markus: (a) is the least invasive.
+
+## Session 25 — <close> fourth attempt: pc hand-off + cpcall run, but two defects
+
+New since session 24: the UCLO C helper invokes __close inside `lua_cpcall`
+(a real C frame, so lua_call is legal), level is passed as an integer (the
+TValue* hand-off was garbage), and the x64 call args respect the POSIX ABI
+aliases (CARG1=rdi, CARG2=rsi, CARG3=rdx=BASE; PC is rbx, callee-save; capture
+the UCLO pc in TMPR before branchPC).
+Measured working: reverse-order close at scope exit (`c,b,a` with nil error
+args), close before return, nested inner-first order, `math.fmod/abs` style
+plain pop, and direct returns all call __close.
+Defects:
+1. Inside such a __close, an upvalue captured by the metatable closure reads as
+   the wrong type ("attempt to concatenate upvalue 'tag' (a table value)" in the
+   test), so a cpcall from the UCLO helper corrupts closure upvalues. This is
+   the blocker for enabling the feature.
+2. break/goto converted to UCLO by parser fixups do not match the recorded pc
+   pairs; a pass-2 fallback (close every active slot >= level, sentinel prevents
+   doubles) closed the break case but likely contributes to (1), and the
+   slot-reuse risk stays.
+Error-path closes (error in the body) are still not wired; nil to-be-closed
+values are skipped instead of erroring at declaration.
+Next: isolate (1) with a minimal cpcall+upvalue C test (probably L->top/frame
+placement inside the UCLO handler), then choose between cpcall and a VM-side
+metamethod continuation; keep the parser/proto map and both VM hooks.

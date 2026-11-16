@@ -1125,6 +1125,19 @@ static void asm_ahuvload(ASMState *as, IRIns *ir)
   Reg idx, tmp;
   int32_t ofs = 0;
   RegSet gpr = RSET_GPR, allow = irt_isnum(ir->t) ? RSET_FPR : RSET_GPR;
+  if (irt_isint64(ir->t)) {  /* 5.4 int64 value (ADR-001b part 2). */
+    Reg dest = ra_used(ir) ? ra_dest(as, ir, gpr) : ra_scratch(as, gpr);
+    tmp = ra_scratch(as, rset_exclude(gpr, dest));
+    asm_i64decode(as, dest, tmp);
+    idx = asm_fuseahuref(as, ir->op1, &ofs,
+			 rset_exclude(rset_exclude(gpr, dest), tmp), A64I_LDRx);
+    if (ir->o == IR_VLOAD) ofs += 8 * ir->op2;
+    if (ofs & FUSE_REG)
+      emit_dnm(as, (A64I_LDRx^A64I_LS_R)|A64I_LS_UXTWx|A64I_LS_SH, tmp, idx, (ofs & 31));
+    else
+      emit_lso(as, A64I_LDRx, tmp, idx, ofs);
+    return;
+  }
   lj_assertA(irt_isnum(ir->t) || irt_ispri(ir->t) || irt_isaddr(ir->t) ||
 	     irt_isint(ir->t),
 	     "bad load type %d", irt_type(ir->t));
@@ -1171,6 +1184,19 @@ static void asm_ahustore(ASMState *as, IRIns *ir)
 {
   if (ir->r != RID_SINK) {
     RegSet allow = RSET_GPR;
+    if (irt_isint64(ir->t)) {
+      /* 5.4 int64 store: the canonical TValue (int32 / widened / interned
+      ** box) is written by lj_i64_tvstore(L, slot, v). */
+      const CCallInfo *ci = &lj_ir_callinfo[IRCALL_lj_i64_tvstore];
+      IRRef args[3];
+      args[0] = ASMREF_L;
+      args[1] = ir->op1;
+      args[2] = ir->op2;
+      ra_evictset(as, RSET_SCRATCH);
+      as->gcsteps++;
+      asm_gencall(as, ci, args);
+      return;
+    }
     Reg idx, src = RID_NONE, tmp = RID_TMP, type = RID_NONE;
     int32_t ofs = 0;
     if (irt_isnum(ir->t)) {

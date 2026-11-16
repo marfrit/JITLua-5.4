@@ -48,6 +48,8 @@
 ** and exits can re-encode a value from its type alone (lj_snap.c). */
 #define tref_isi64(tr)		(tref_istype((tr), IRT_I64))
 #define tvisi64any(o)		(tvisi64((o)) || tvisi47w((o)))
+/* IR type of a loaded TValue, with int64 values as IRT_I64. */
+#define itype2irt_i64(o)	(tvisi64any((o)) ? IRT_I64 : itype2irt((o)))
 
 /* Pass IR on to next optimization in chain (FOLD). */
 #define emitir(ot, a, b)	(lj_ir_set(J, (ot), (a), (b)), lj_opt_fold(J))
@@ -441,7 +443,40 @@ static void rec_i64_comp(jit_State *J, TRef ra, TRef rc, cTValue *av,
 {
   int64_t a, c;
   int irop = (int)op - (int)BC_ISLT + (int)IR_LT, res;
-  /* int64 vs. float needs the exact mathematical compare: interpreter only. */
+  if (tref_isnum(ra) || tref_isnum(rc)) {
+    /* int64 vs. float: exact compare via lj_i64_cmpnum (-1/0/1, 2 = NaN),
+    ** then an int compare on its result. */
+    int swap = tref_isnum(ra);  /* cmpnum(int64, num): the int64 is first. */
+    TRef ti = swap ? rc : ra, tn = swap ? ra : rc, cmp;
+    cTValue *iv = swap ? cv : av, *nv = swap ? av : cv;
+    int32_t k;
+    IROp cop;
+    if (!tref_isintany(ti) || tvisnan(nv)) lj_trace_err(J, LJ_TRERR_NYIBC);
+    k = lj_i64_cmpnum(rec_i64_value(J, iv), numV(nv));
+    cmp = lj_ir_call(J, IRCALL_lj_i64_cmpnum, rec_i64_sext(J, ti), tn);
+    rec_comp_prep(J);
+    /* ra OP rc in terms of cmp = cmpnum(int64 side, num side). */
+    if (!swap) {
+      res = irop == IR_LT ? k < 0 : irop == IR_GE ? (k == 0 || k == 1) :
+	    irop == IR_LE ? k <= 0 : k == 1;
+    } else {  /* num OP int64 <=> int64 OP' num with the mirrored test. */
+      res = irop == IR_LT ? k == 1 : irop == IR_GE ? k <= 0 :
+	    irop == IR_LE ? (k == 0 || k == 1) : k < 0;
+    }
+    /* Guard the taken direction with the matching int compare on cmp. */
+    {
+      int which = !swap ? irop : (irop == IR_LT ? IR_GT : irop == IR_GE ? IR_LE :
+				  irop == IR_LE ? IR_GE : IR_LT);
+      switch (which) {  /* True condition for the mirrored/unmirrored op. */
+      case IR_LT: cop = res ? IR_LT : IR_GE; emitir(IRTG(cop, IRT_INT), cmp, lj_ir_kint(J, 0)); break;
+      case IR_LE: cop = res ? IR_LE : IR_GT; emitir(IRTG(cop, IRT_INT), cmp, lj_ir_kint(J, 0)); break;
+      case IR_GT: cop = res ? IR_EQ : IR_NE; emitir(IRTG(cop, IRT_INT), cmp, lj_ir_kint(J, 1)); break;
+      default:    cop = res ? IR_ULE : IR_UGT; emitir(IRTG(cop, IRT_INT), cmp, lj_ir_kint(J, 1)); break;
+      }
+    }
+    rec_comp_fixup(J, J->pc, ((int)op ^ (res ? irop : (irop ^ 1))) & 1);
+    return;
+  }
   if (!tref_isintany(ra) || !tref_isintany(rc))
     lj_trace_err(J, LJ_TRERR_NYIBC);
   a = rec_i64_value(J, av);
@@ -469,7 +504,7 @@ static int rec_i64_bcok(BCOp op)
   case BC_ADDVN: case BC_SUBVN: case BC_MULVN: case BC_DIVVN: case BC_MODVN:
   case BC_ADDNV: case BC_SUBNV: case BC_MULNV: case BC_DIVNV: case BC_MODNV:
   case BC_ADDVV: case BC_SUBVV: case BC_MULVV: case BC_DIVVV: case BC_MODVV:
-  case BC_POW: case BC_BNOT: case BC_BAND: case BC_BOR: case BC_BXOR:
+  case BC_POW: case BC_IDIV: case BC_BNOT: case BC_BAND: case BC_BOR: case BC_BXOR:
   case BC_BSHL: case BC_BSHR: case BC_BSAR:
   case BC_TGETV: case BC_TGETS: case BC_TGETB: case BC_TGETR:
   case BC_TSETV: case BC_TSETS: case BC_TSETB: case BC_TSETR:
@@ -1828,10 +1863,9 @@ TRef lj_record_idx(jit_State *J, RecordIndex *ix)
     }
   }
 
-  /* ADR-001b step 3: int64 keys (hashing a widened/boxed value), int64 stores
-  ** (canonical encoding + barrier) and loads of such values are not recorded
-  ** yet; the interpreter handles them exactly. */
-  if (tref_isi64(ix->key) || tvisi64any(&ix->keyv) || tref_isi64(ix->val))
+  /* ADR-001b: int64 keys (hashing a widened/boxed value) are not recorded;
+  ** the interpreter handles them exactly. */
+  if (tref_isi64(ix->key) || tvisi64any(&ix->keyv))
     lj_trace_err(J, LJ_TRERR_NYIBC);
 
   /* Record the key lookup. */
@@ -1840,11 +1874,9 @@ TRef lj_record_idx(jit_State *J, RecordIndex *ix)
   loadop = xrefop == IR_AREF ? IR_ALOAD : IR_HLOAD;
   /* The lj_meta_tset() inconsistency is gone, but better play safe. */
   oldv = xrefop == IR_KKPTR ? (cTValue *)ir_kptr(IR(tref_ref(xref))) : ix->oldv;
-  if (tvisi64any(oldv))
-    lj_trace_err(J, LJ_TRERR_NYIBC);  /* See above. */
 
   if (ix->val == 0) {  /* Indexed load */
-    IRType t = itype2irt(oldv);
+    IRType t = itype2irt_i64(oldv);
     TRef res;
     if (oldv == niltvg(J2G(J))) {
       emitir(IRTG(IR_EQ, IRT_PGC), xref, lj_ir_kkptr(J, niltvg(J2G(J))));
@@ -1913,7 +1945,7 @@ TRef lj_record_idx(jit_State *J, RecordIndex *ix)
 	  TRef mtref = emitir(IRT(IR_FLOAD, IRT_TAB), ix->tab, IRFL_TAB_META);
 	  emitir(IRTG(IR_EQ, IRT_TAB), mtref, lj_ir_knull(J, IRT_TAB));
 	} else {
-	  IRType t = itype2irt(oldv);
+	  IRType t = itype2irt_i64(oldv);
 	  emitir(IRTG(loadop, t), xref, 0);  /* Guard for non-nil value. */
 	}
       }
@@ -1924,7 +1956,8 @@ TRef lj_record_idx(jit_State *J, RecordIndex *ix)
     if (!LJ_DUALNUM && tref_isinteger(ix->val))
       ix->val = emitir(IRTN(IR_CONV), ix->val, IRCONV_NUM_INT);
     emitir(IRT(loadop+IRDELTA_L2S, tref_type(ix->val)), xref, ix->val);
-    if (keybarrier || tref_isgcv(ix->val))
+    /* An int64 store may intern a box (a GC object): barrier as for GC values. */
+    if (keybarrier || tref_isgcv(ix->val) || tref_isi64(ix->val))
       emitir(IRT(IR_TBAR, IRT_NIL), ix->tab, 0);
     /* Invalidate neg. metamethod cache for stores with certain string keys. */
     if (!nommstr(J, ix->key)) {
@@ -1942,13 +1975,13 @@ static IRType rec_next_types(GCtab *t, uint32_t idx)
   for (; idx < t->asize; idx++) {
     cTValue *a = arrayslot(t, idx);
     if (LJ_LIKELY(!tvisnil(a)))
-      return (LJ_DUALNUM ? IRT_INT : IRT_NUM) + (itype2irt(a) << 8);
+      return (LJ_DUALNUM ? IRT_INT : IRT_NUM) + (itype2irt_i64(a) << 8);
   }
   idx -= t->asize;
   for (; idx <= t->hmask; idx++) {
     Node *n = &noderef(t->node)[idx];
     if (!tvisnil(&n->val))
-      return itype2irt(&n->key) + (itype2irt(&n->val) << 8);
+      return itype2irt_i64(&n->key) + (itype2irt_i64(&n->val) << 8);
   }
   return IRT_NIL + (IRT_NIL << 8);
 }
@@ -2095,11 +2128,8 @@ noconstify:
     uref = tref_ref(emitir(IRT(IR_UREFC, t), fn, uv));
     needbarrier = 1;
   }
-  /* ADR-001b step 3: int64 upvalue loads/stores are not recorded yet. */
-  if (tvisi64any(uvval(uvp)) || tref_isi64(val))
-    lj_trace_err(J, LJ_TRERR_NYIBC);
   if (val == 0) {  /* Upvalue load */
-    IRType t = itype2irt(uvval(uvp));
+    IRType t = itype2irt_i64(uvval(uvp));
     TRef res = emitir(IRTG(IR_ULOAD, t), uref, 0);
     if (irtype_ispri(t)) res = TREF_PRI(t);  /* Canonicalize primitive refs. */
     return res;
@@ -2108,7 +2138,7 @@ noconstify:
     if (!LJ_DUALNUM && tref_isinteger(val))
       val = emitir(IRTN(IR_CONV), val, IRCONV_NUM_INT);
     emitir(IRT(IR_USTORE, tref_type(val)), uref, val);
-    if (needbarrier && tref_isgcv(val))
+    if (needbarrier && (tref_isgcv(val) || tref_isi64(val)))
       emitir(IRT(IR_OBAR, IRT_NIL), uref, val);
     J->needsnap = 1;
     return 0;
@@ -2274,7 +2304,7 @@ static void rec_varg(jit_State *J, BCReg dst, ptrdiff_t nresults)
 	vbase = emitir(IRT(IR_ADD, IRT_PGC), vbase,
 		       lj_ir_kintpgc(J, frofs-8*(1+LJ_FR2)));
 	for (i = 0; i < nload; i++) {
-	  IRType t = itype2irt(&J->L->base[i-1-LJ_FR2-nvararg]);
+	  IRType t = itype2irt_i64(&J->L->base[i-1-LJ_FR2-nvararg]);
 	  J->base[dst+i] = lj_record_vload(J, vbase, (MSize)i, t);
 	}
       } else {
@@ -2663,9 +2693,17 @@ void lj_record_ins(jit_State *J)
       break;
     }
 #endif
-    /* int64 vs. float equality is exact in 5.4: interpreter only. */
-    if ((tref_isi64(ra) && tref_isnum(rc)) || (tref_isnum(ra) && tref_isi64(rc)))
-      lj_trace_err(J, LJ_TRERR_NYIBC);
+    if ((tref_isi64(ra) && tref_isnum(rc)) || (tref_isnum(ra) && tref_isi64(rc))) {
+      /* int64 vs. float equality is exact in 5.4: lj_i64_cmpnum == 0. */
+      int swap = tref_isnum(ra);
+      TRef cmp = lj_ir_call(J, IRCALL_lj_i64_cmpnum,
+			    rec_i64_sext(J, swap ? rc : ra), swap ? ra : rc);
+      int diff = !lj_obj_equal(rav, rcv);
+      rec_comp_prep(J);
+      emitir(IRTG(diff ? IR_NE : IR_EQ, IRT_INT), cmp, lj_ir_kint(J, 0));
+      rec_comp_fixup(J, J->pc, ((int)op & 1) == !diff);
+      break;
+    }
     /* Emit nothing for two non-table, non-udata consts. */
     if (!(tref_isk2(ra, rc) && !(tref_istab(ra) || tref_isudata(ra)))) {
       int diff;
@@ -2764,6 +2802,25 @@ void lj_record_ins(jit_State *J)
       rc = lj_opt_narrow_mod(J, rb, rc, rbv, rcv);
     else
       rc = rec_mm_arith(J, &ix, MM_mod);
+    break;
+
+  case BC_IDIV:  /* 5.4 floor division. */
+    if (tref_isintany(rb) && tref_isintany(rc)) {
+      int64_t a = rec_i64_value(J, rbv), b = rec_i64_value(J, rcv);
+      TRef ra64, rc64;
+      if (b == 0) lj_trace_err(J, LJ_TRERR_BADTYPE);  /* Interpreter raises. */
+      ra64 = rec_i64_sext(J, rb);
+      rc64 = rec_i64_sext(J, rc);
+      emitir(IRTG(IR_NE, IRT_I64), rc64, lj_ir_kint64(J, 0));
+      rc = rec_i64_narrow(J, lj_ir_call(J, IRCALL_lj_i64_idiv, ra64, rc64),
+			  lj_i64_idiv(a, b));
+    } else if ((tref_isnum(rb) || tref_isintany(rb)) &&
+	       (tref_isnum(rc) || tref_isintany(rc))) {
+      rc = emitir(IRTN(IR_FPMATH), emitir(IRTN(IR_DIV), rec_i64_tonum(J, rb),
+					   rec_i64_tonum(J, rc)), IRFPM_FLOOR);
+    } else {
+      lj_trace_err(J, LJ_TRERR_NYIBC);
+    }
     break;
 
   case BC_POW:

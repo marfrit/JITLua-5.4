@@ -276,6 +276,15 @@ int64_t lj_i64_mod(int64_t a, int64_t b)
   return r;
 }
 
+int32_t lj_i64_cmpnum(int64_t a, double b)
+{
+  long double x = (long double)a, y = (long double)b;
+  if (x < y) return -1;
+  if (x == y) return 0;
+  if (x > y) return 1;
+  return 2;  /* NaN */
+}
+
 int64_t lj_i64_idiv(int64_t a, int64_t b)
 {
   int64_t q;

@@ -202,6 +202,7 @@ typedef struct CCallInfo {
   _(ANY,	lj_i64_shr,		2,   N, I64, XA_64) \
   _(ANY,	lj_i64_mod,		2,   N, I64, XA_64) \
   _(ANY,	lj_i64_idiv,		2,   N, I64, XA_64) \
+  _(ANY,	lj_i64_cmpnum,		2,   N, INT, XA_64|XA_FP) \
   _(ANY,	log10,			1,   N, NUM, XA_FP) \
   _(ANY,	exp,			1,   N, NUM, XA_FP) \
   _(ANY,	sin,			1,   N, NUM, XA_FP) \

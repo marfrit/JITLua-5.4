@@ -41,6 +41,8 @@ LJ_FUNC int64_t lj_i64_shl(int64_t a, int64_t n);
 LJ_FUNC int64_t lj_i64_shr(int64_t a, int64_t n);
 LJ_FUNC int64_t lj_i64_mod(int64_t a, int64_t b);
 LJ_FUNC int64_t lj_i64_idiv(int64_t a, int64_t b);
+/* Exact int64 vs. double compare: -1 less, 0 equal, 1 greater, 2 unordered. */
+LJ_FUNC int32_t lj_i64_cmpnum(int64_t a, double b);
 
 /* Push a boxed integer onto the stack. */
 LJ_FUNC void lj_i64_push(lua_State *L, int64_t v);

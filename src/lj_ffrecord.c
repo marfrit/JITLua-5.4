@@ -1669,9 +1669,14 @@ void lj_ffrecord_func(jit_State *J)
     ** test the TValue (tvisnumber) rather than the ref, so they would treat
     ** it as an int32. Leave such calls to the interpreter. */
     BCReg i;
-    for (i = 0; i < J->maxslot; i++)
-      if (tref_istype(J->base[i], IRT_I64))
-	lj_trace_err(J, LJ_TRERR_BADTYPE);
+    uint32_t ffid = J->fn->c.ffid;
+    /* Handlers that only copy, compare or type-dispatch their arguments. */
+    int generic = ffid == FF_type || ffid == FF_select || ffid == FF_assert ||
+		  ffid == FF_pcall || ffid == FF_xpcall || ffid == FF_rawequal;
+    if (!generic)
+      for (i = 0; i < J->maxslot; i++)
+	if (tref_istype(J->base[i], IRT_I64))
+	  lj_trace_err(J, LJ_TRERR_BADTYPE);
   }
   (recff_func[m >> 8])(J, &rd);  /* Call recff_* handler. */
   if (rd.nres >= 0) {

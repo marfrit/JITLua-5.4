@@ -1627,6 +1627,16 @@ static void asm_ahuvload(ASMState *as, IRIns *ir)
 {
 #if LJ_GC64
   Reg tmp = RID_NONE;
+  if (irt_isint64(ir->t)) {  /* 5.4 int64 value (ADR-001b part 2). */
+    Reg dest = ra_used(ir) ? ra_dest(as, ir, RSET_GPR) : ra_scratch(as, RSET_GPR);
+    tmp = ra_scratch(as, rset_exclude(RSET_GPR, dest));
+    as->mrm.base = RID_NONE;  /* No pending fused load for the guards. */
+    asm_i64decode(as, dest, tmp);
+    asm_fuseahuref(as, ir->op1, rset_exclude(rset_exclude(RSET_GPR, dest), tmp));
+    if (ir->o == IR_VLOAD) as->mrm.ofs += 8 * ir->op2;
+    emit_mrm(as, XO_MOV, tmp|REX_64, RID_MRM);
+    return;
+  }
 #endif
   lj_assertA(irt_isnum(ir->t) || irt_ispri(ir->t) || irt_isaddr(ir->t) ||
 	     (LJ_DUALNUM && irt_isint(ir->t)),
@@ -1716,6 +1726,21 @@ static void asm_ahustore(ASMState *as, IRIns *ir)
 {
   if (ir->r == RID_SINK)
     return;
+#if LJ_GC64
+  if (irt_isint64(ir->t)) {
+    /* 5.4 int64 store: the canonical TValue (int32 / widened / interned box)
+    ** is written by lj_i64_tvstore(L, slot, v). */
+    const CCallInfo *ci = &lj_ir_callinfo[IRCALL_lj_i64_tvstore];
+    IRRef args[3];
+    args[0] = ASMREF_L;
+    args[1] = ir->op1;
+    args[2] = ir->op2;
+    ra_evictset(as, RSET_SCRATCH);
+    as->gcsteps++;
+    asm_gencall(as, ci, args);
+    return;
+  }
+#endif
   if (irt_isnum(ir->t)) {
     Reg src = ra_alloc1(as, ir->op2, RSET_FPR);
     asm_fuseahuref(as, ir->op1, RSET_GPR);

@@ -1,6 +1,9 @@
 --! coroutine.close and <close> in coroutines: the relevant sections of the
 --! PUC 5.4.7 test suite's coroutine.lua (lines 132-277 and 444-475 of the
---! vendored file), unchanged except for this header and the final print.
+--! vendored file), unchanged except for this header, the final print and one
+--! assertion: inside a __close handler run on the error path, level 2 is the
+--! unwound Lua function in this port (PUC: the pcall C function) -- LuaJIT
+--! has no frame for pcall(); a documented divergence.
 local debug = require'debug'
 local function func2close (f)
   return setmetatable({}, {__close = f})
@@ -108,7 +111,7 @@ do
   local co = coroutine.create(function () return pcall(foo) end)
   local st1, st2, err = coroutine.resume(co)
   assert(st1 and not st2 and err == 43)
-  assert(X == 43 and Y.what == "C")
+  assert(X == 43 and Y.what == "Lua")  -- PUC: "C" (pcall); see header
 
   -- recovering from errors in __close metamethods
   local track = {}

@@ -696,7 +696,8 @@ static int ffh_resume(lua_State *L, lua_State *co, int wrap)
 {
   if (co->cframe != NULL || co->status > LUA_YIELD ||
       (co->status == LUA_OK && co->top == co->base)) {
-    ErrMsg em = co->cframe ? LJ_ERR_CORUN : LJ_ERR_CODEAD;
+    /* 5.4 wording: a running or normal coroutine is "non-suspended". */
+    ErrMsg em = co->cframe ? LJ_ERR_COSUSP : LJ_ERR_CODEAD;
     if (wrap) lj_err_caller(L, em);
     setboolV(L->base-1-LJ_FR2, 0);
     setstrV(L, L->base-LJ_FR2, lj_err_str(L, em));

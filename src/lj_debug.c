@@ -89,7 +89,11 @@ static BCPos debug_framepc(lua_State *L, GCfunc *fn, cTValue *nextframe)
 	if (frame_islua(f)) {
 	  f = frame_prevl(f);
 	} else {
-	  if (frame_isc(f) || (frame_iscont(f) && frame_iscont_fficb(f)))
+	  if (frame_isc(f) || (frame_iscont(f) && frame_iscont_fficb(f)) ||
+	      /* 5.4 __close on the error path: a protected call frame placed
+	      ** directly on a Lua frame (no C function in between) owns the
+	      ** innermost cframe; the frames below belong to the previous one. */
+	      (frame_typep(f) == FRAME_CP && frame_islua(frame_prevd(f))))
 	    cf = cframe_raw(cframe_prev(cf));
 	  f = frame_prevd(f);
 	}
@@ -701,7 +705,11 @@ LUALIB_API void luaL_traceback (lua_State *L, lua_State *L1, const char *msg,
     if (ar.currentline > 0)
       lua_pushfstring(L, "%d:", ar.currentline);
     if (*ar.namewhat) {
-      lua_pushfstring(L, " in function " LUA_QS, ar.name);
+      /* Lua 5.4 wording for metamethod frames ("in metamethod 'close'"). */
+      if (*ar.namewhat == 'm' && ar.namewhat[1] == 'e')
+	lua_pushfstring(L, " in metamethod " LUA_QS, ar.name);
+      else
+	lua_pushfstring(L, " in function " LUA_QS, ar.name);
     } else {
       if (*ar.what == 'm') {
 	lua_pushliteral(L, " in main chunk");

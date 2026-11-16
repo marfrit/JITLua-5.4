@@ -658,3 +658,108 @@ Checksums on both arches, JIT == -joff == PUC: B1 343592796160, B2
 4047905256, B2b 299440, B3 1196193376. No regression against part 2 (arm64
 B1 16.5 / B2 1520.6 / B2b 130.7 / B3 23.7 ms; x64 B1 30.2 / B2 3124.3 / B2b
 662.3 / B3 47.6 ms).
+
+## Step 4 (2026-11-16, branch `i64-ffuncs`): the standard library with int64, GC drive, GC stress
+
+Characterisation first (`tmp/probef2.lua` against PUC): the interpreter
+itself was wrong in several library paths before any recorder work.
+
+### Interpreter
+
+- `lj_lib_checknum/checknumber/checkint` take boxed and widened 5.4
+  integers (`checknum` read a widened value through its low word; a box was
+  "number expected, got number"); `checkint` saturates an integer outside
+  int32 (positions clamp as in PUC, counts are rejected by the callee).
+- `math.min/max` are finished in C with exact 5.4 comparisons (int64 vs
+  float via `lj_i64_cmpnum`) and return the winning argument as is; the asm
+  fast path cannot take a box, and `FFH_RETRY` would only come back.
+  `math.floor/ceil` return an integer argument unchanged (`2^60+1` lost its
+  `+1` through a double). `math.fmod(x, -1)` is 0 (`mininteger % -1`
+  trapped), zero divisor wording "zero". `math.random` returns integers of
+  any size.
+- `..` and `table.concat` format boxed integers (and `table.concat` no
+  longer prints the low word of a widened one); `string.format("%q")`
+  prints them (mininteger as `0x8000000000000000`, like lstrlib).
+- String to number (`STRSCAN_OPT_TOI64`, `lj_strscan_number64`): integer
+  syntax yields an integer of any size (decimal overflow becomes a float,
+  hexadecimal wraps modulo 2^64, also for more than 16 digits); used by
+  arithmetic coercion (`"1152921504606846976" + 0`), `tonumber` (with an
+  explicit base the value wraps, as l_str2int does) and the argument
+  checkers. `%d` of a float outside int64 errors on arm64 too (the
+  conversion saturates there).
+- 5.4 wording and checks: `string.rep` "resulting string too large" before
+  allocating (a saturated count used to run into "not enough memory"),
+  `string.char` "value out of range", `table.insert` "position out of
+  bounds" (new bounds check).
+- **GC drive:** pure int64 arithmetic allocates boxes and nothing else, and
+  the VM's arithmetic fallbacks had no GC check: a 300k-iteration xorshift
+  loop under `-joff` went from 1 MB to 131 MB. `lj_meta_arith` and
+  `lj_meta_bitop` now run a GC step after a boxed result (`L->top =
+  curr_topL(L)` like `lj_meta_cat`); the arm64 VM reloads BASE after both
+  helpers because the step may move the stack (x64 already did).
+
+### Recorder
+
+- `lj_ir_tonum` converts an IRT_I64 ref to a double (what `lj_lib_checknum`
+  does), which makes the FP math fast functions (sqrt, exp, sin, log,
+  atan2, ldexp, ...) take int64 arguments. `lj_ir_tostr` formats one
+  exactly through the new `lj_strfmt_i64` IR call: `tostring()`, string
+  concatenation and `string.format("%s")`; `%d/%i/%x/%X/%o/%u` go through
+  `lj_strfmt_putfxint`.
+- `math.abs` → `lj_i64_abs` (wraps for mininteger; the result stays I64,
+  since |v| of a value outside int32 is outside int32). `math.min/max` with
+  integer arguments only → `lj_i64_min/max`, result narrowed back to int32
+  under a guard when the runtime result fits; mixed int64/float arguments
+  stay in the interpreter.
+- `tonumber`: an int64 argument is returned as is; a constant string folds
+  to the exact 5.4 result; a runtime string with integer syntax has no IR
+  (STRTO yields a double) and aborts -- which also ends `tonumber("5")`
+  compiling to `5.0` where the interpreter returns the integer 5.
+- Still NYI: positions/counts given as int64 (`string.sub(s, 2^60)`,
+  `string.rep`, `select(2^40, ...)`), `math.min/max` with mixed arguments,
+  `string.format` with width/precision on `%s` of an int64.
+
+### GC stress mode
+
+`tests/harness.sh --gc-stress` runs every arm (PUC, -joff, -jon at each
+opt level, dump/reload) with `collectgarbage("setpause", 0)`, so a value
+that is alive only by luck gets collected under the test. `ci-box.sh` runs
+the `i64_`, `close_`, `coro_`, `gc_` and `bits_` tests that way in modes A,
+B@0, B@3 and R. Both GC bugs of the day (barrier CSE across LOOP, dead-white
+box handed out by the intern hash) would have shown up here.
+
+Test: `tests/d54/i64_05_lib.lua` (library semantics plus hot loops for every
+recorder path; `-jv`: 16 traces, the aborts are the documented NYIs).
+
+### Gates (commit 6bd96596, 2026-11-16)
+
+`tests/ci-box.sh` on both boxes, identical: modes A+B 83 PASS / 0 FAIL /
+12 XFAIL / 1 XPASS (math_02_random A -- `math.random(0)` now returns an
+int64; the known-bad entry is removed in the follow-up commit), mode B at
+opt 0-3 188 PASS / 0 FAIL / 4 XFAIL (math_os_01 B), mode R 48 PASS, GC
+stress (new) 57 PASS / 0 FAIL / 3 XFAIL, C API 34 + i64 14/14, fuzz
+160/160.
+
+Benchmark gate `tests/bench/run.sh`, median of 3 (x64 from a bench-only
+rerun: the run inside the gate overlapped another job on the NUC and showed
+every JIT arm, int32-only B3 included, 1.5-2x slower with the FFI and PUC
+arms unchanged):
+
+| bench (arm64, escher) | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
+|---|---|---|---|---|
+| B1 FNV-1a-64, 10 MiB | **16.6 ms** (1.05x FFI) | 3995.9 ms (was 12036: the GC step keeps the box heap small) | 15.8 ms | 296.4 ms |
+| B2 1e6 64-bit values | **1496.6 ms, 79 MB** | 4508.5 ms, 190 MB (was 522 MB) | 823.0 ms, 31.6 MB | 579.1 ms, 16.4 MB |
+| B2b 1e6 ~2^41 values | **148.9 ms, 8.2 MB** | 344.7 ms, 79 MB | 140.7 ms (float) | 175.6 ms |
+| B3 int32 control (fnv / table) | **23.0 / 215.2 ms** | 2281.8 / 614.5 ms | 43.7 / 203.5 ms | 307.6 / 276.2 ms |
+
+| bench (x64, pve2 NUC) | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
+|---|---|---|---|---|
+| B1 | **30.5 ms** (1.04x FFI) | 13407.0 ms | 29.2 ms | 1342.0 ms |
+| B2 | **3211.6 ms, 79 MB** | 7581.8 ms, 110 MB (was 522 MB) | 2591.2 ms, 31.6 MB | 2153.2 ms, 16.4 MB |
+| B2b | **677.8 ms, 8.2 MB** | 1048.6 ms, 15.5 MB (was 79 MB) | 612.1 ms (float) | 727.2 ms |
+| B3 | **47.7 / 955.5 ms** | 7844.4 / 1920.0 ms | 96.9 / 857.3 ms | 1310.3 / 997.6 ms |
+
+Checksums on both arches, JIT == -joff == PUC: B1 343592796160, B2
+4047905256, B2b 299440, B3 1196193376. JIT arms unchanged against part 3;
+the interpreter arms got faster and leaner (arm64 B1 -joff 12036 -> 3996
+ms, B2 -joff 522 -> 190 MB) because the GC now runs during box arithmetic.

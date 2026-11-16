@@ -835,3 +835,26 @@ Gates at 87dfc75e, both arches identical: A+B 81 PASS / 0 FAIL / 13 XFAIL /
 fuzz 160/160. Bench unchanged against part 2: arm64 B1 16.5, B2 1520.6, B2b
 130.7, B3 23.7 / 212.9 ms; x64 B1 30.2, B2 3124.3, B2b 662.3, B3 47.6 /
 955.6 ms; checksums equal.
+
+## Session 30 (branch i64-ffuncs) — standard library with int64, GC drive, GC stress harness
+
+Interpreter: lj_lib_checknum/checknumber/checkint take boxed/widened
+integers (checknum read a widened value's low word); math.min/max exact in
+C; floor/ceil keep integers; fmod(x,-1)=0 and "zero" wording; random
+returns int64; `..`/table.concat/%q format boxes; string->number keeps
+integer syntax as integers of any size (hex wraps), tonumber with base
+wraps; 5.4 wording for string.rep/char and table.insert bounds. GC: a boxed
+arithmetic result now drives the collector (300k xorshift steps under -joff
+went 1 MB -> 131 MB before); arm64 VM reloads BASE after lj_meta_arith/
+bitop. Recorder: tostring/tonumber/string.format/math.abs/min/max/FP math
+and `..` take int64 arguments (lj_strfmt_i64, lj_i64_abs/min/max IR calls;
+lj_ir_tonum/tostr understand IRT_I64). Harness: --gc-stress (setpause 0 in
+every arm), wired into ci-box.sh for the i64/close/coro/gc/bits tests.
+Details: docs/adr-001b-boxed-i64.md "Step 4".
+Gates at 6bd96596, both arches identical: A+B 83 PASS / 0 FAIL / 12 XFAIL
+/ 1 XPASS (math_02_random A, now removed from known-bad), opt 0-3 188
+PASS (+4 XFAIL math_os_01 B), R 48, GC stress 57/0/3, C API + i64 14/14,
+fuzz 160/160. Bench JIT arms unchanged (arm64 B1 16.6, B2 1496.6, B2b
+148.9, B3 23.0 / 215.2 ms; x64 B1 30.5, B2 3211.6, B2b 677.8, B3 47.7 /
+955.5 ms); -joff arms faster/leaner from the GC drive (arm64 B1 12036 ->
+3996 ms, B2 522 -> 190 MB).

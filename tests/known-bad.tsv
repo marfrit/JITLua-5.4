@@ -28,5 +28,4 @@ tests/d54/err_02_tailname.lua	A	P1.8b: tail-call error names -- LuaJIT reuses th
 tests/d54/gc_01_tbc_gc.lua	A	P1/P4: <close>/__close, generational GC options
 tests/d54/lex_01_literals.lua	A	P1: 5.4 literal classification (int vs float, overflow)
 tests/d54/math_os_01.lua	A,B	P5: os/date/random exactness; JIT random recorder yields float bounds/different sequence (triage)
-tests/d54/math_02_random.lua	A	P5.5 done: xoshiro256** sequence matches PUC for every seeded call; only math.random(0) still returns a float -- needs a 64-bit integer in the value model (ADR-001)
 tests/d54/tbl_03_border_divergence.lua	A	IMPL-DEFINED: runtime-built sparse tables may report any legal border (5.4 manual 3.4.7); LuaJIT's array-growth policy differs from PUC's alimit hint

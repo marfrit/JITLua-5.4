@@ -25,6 +25,7 @@ LJ_FUNCA_NORET void LJ_FASTCALL lj_err_throw(lua_State *L, int errcode);
 LJ_FUNC_NORET void lj_err_mem(lua_State *L);
 LJ_FUNC_NORET void LJ_FASTCALL lj_err_stkov(lua_State *L);
 LJ_FUNC_NORET void LJ_FASTCALL lj_err_run(lua_State *L);
+LJ_FUNC const char *lj_err_funcname_loaded(lua_State *L, GCfunc *fn, char *buf, MSize bufsz);
 #if LJ_HASJIT
 LJ_FUNCA_NORET void LJ_FASTCALL lj_err_trace(lua_State *L, int errcode);
 #endif

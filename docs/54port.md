@@ -76,7 +76,12 @@ x64/x86 (`-DLUAJIT_NUMMODE=2`, otherwise those targets have no integer type) ·
 tonumber 5.4 rules · debug.upvalueid/upvaluejoin · table borders + rawlen ·
 `__len` on tables (any value) · `__pairs` · `__name` type names ·
 C API: absindex, isinteger, geti/seti, len, compare, stringtonumber, rotate,
-luaL_len, luaL_getsubtable (34-check C harness).
+luaL_len, luaL_getsubtable (34-check C harness) · 5.4 debug hooks (line
+events per PUC's rules, "tail call" events, call/return events for C and
+fast functions incl. pcall/xpcall/coroutine.resume/wrap, hooks disable the
+JIT, per-coroutine hooks via the weak `_HOOKKEY` registry table,
+getinfo `t`/`r`, "hook '?'" frames; see phase0-status session 35 for the
+three deliberate differences).
 
 ## Fuzzing
 `tests/fuzz/gen.py` (seeded, valid 5.4, deterministic) + `tests/fuzz/fuzz.py`

@@ -835,6 +835,8 @@ LJ_NOINLINE void LJ_FASTCALL lj_err_throw(lua_State *L, int errcode)
 {
   global_State *g = G(L);
   lj_trace_abort(g);
+  g->tailofs = 0;  /* A CALLT that never reached its callee (5.4 hooks). */
+  g->ffretry = 0;
   L->status = LUA_OK;
 #if LJ_UNWIND_EXT
   err_raise_ext(g, errcode);
@@ -1159,8 +1161,8 @@ LJ_NOINLINE void lj_err_caller(lua_State *L, ErrMsg em)
 ** pushglobalfuncname/findfield.  Used when the caller's bytecode gives no
 ** name (e.g. pcall(string.format, ...)).  Returns "lib.name" in buf or NULL.
 */
-static const char *err_funcname_loaded(lua_State *L, GCfunc *fn,
-				       char *buf, MSize bufsz)
+const char *lj_err_funcname_loaded(lua_State *L, GCfunc *fn,
+				   char *buf, MSize bufsz)
 {
   cTValue *tv;
   GCtab *loaded;
@@ -1208,7 +1210,7 @@ LJ_NORET LJ_NOINLINE static void err_argmsg(lua_State *L, int narg,
   const char *ftype = lj_debug_funcname(L, L->base - 1, &fname);
   char namebuf[128];
   if (!ftype) {  /* No name from the caller's code: search loaded modules. */
-    const char *n = err_funcname_loaded(L, curr_func(L), namebuf,
+    const char *n = lj_err_funcname_loaded(L, curr_func(L), namebuf,
 					sizeof(namebuf));
     if (n) { fname = n; ftype = "global"; }
   }

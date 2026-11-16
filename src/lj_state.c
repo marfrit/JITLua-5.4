@@ -18,6 +18,7 @@
 #include "lj_tab.h"
 #include "lj_func.h"
 #include "lj_meta.h"
+#include "lj_debug.h"
 #include "lj_state.h"
 #include "lj_frame.h"
 #if LJ_HASFFI
@@ -283,6 +284,9 @@ LUA_API lua_State *lua_newstate(lua_Alloc allocf, void *allocd)
   L->dummy_ffid = FF_C;
   setmref(L->tbclist, NULL);
   L->tbcn = L->tbcsize = 0;
+  setmref(L->tailbits, NULL);
+  L->tailbitsz = L->tailhi = L->tailepoch = 0;
+  setmref(L->hookff, NULL);
   setmref(L->glref, g);
   g->gc.currentwhite = LJ_GC_WHITE0 | LJ_GC_FIXED;
   g->strempty.marked = LJ_GC_WHITE0;
@@ -377,6 +381,9 @@ lua_State *lj_state_new(lua_State *L)
   setgcrefnull(L1->openupval);
   setmref(L1->tbclist, NULL);
   L1->tbcn = L1->tbcsize = 0;
+  setmref(L1->tailbits, NULL);
+  L1->tailbitsz = L1->tailhi = L1->tailepoch = 0;
+  setmref(L1->hookff, NULL);
   setmrefr(L1->glref, L->glref);
   setgcrefr(L1->env, L->env);
   stack_init(L1, L);  /* init stack */
@@ -399,6 +406,7 @@ void LJ_FASTCALL lj_state_free(global_State *g, lua_State *L)
     lj_assertG(gcref(L->openupval) == NULL, "stale open upvalues");
   }
   lj_meta_tbcfree(g, L);
+  lj_debug_tailfree(g, L);
   lj_mem_freevec(g, tvref(L->stack), L->stacksize, TValue);
   lj_mem_freet(g, L);
 }

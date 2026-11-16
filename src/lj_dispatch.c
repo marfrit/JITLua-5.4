@@ -111,7 +111,11 @@ void LJ_FASTCALL lj_dispatch_update(global_State *g, int nolock)
   uint8_t oldmode = g->dispatchmode;
   uint8_t mode = 0;
 #if LJ_HASJIT
-  mode |= (G2J(g)->flags & JIT_F_ON) ? DISPMODE_JIT : 0;
+  /* 5.4 debug hooks must see every line/count/call/return: while any hook
+  ** event is set the JIT neither counts nor enters traces (debug.sethook
+  ** also flushes existing traces, see lib_debug.c). */
+  mode |= ((G2J(g)->flags & JIT_F_ON) && !(g->hookmask & HOOK_EVENTMASK)) ?
+	    DISPMODE_JIT : 0;
   mode |= G2J(g)->state != LJ_TRACE_IDLE ?
 	    (DISPMODE_REC|DISPMODE_INS|DISPMODE_CALL) : 0;
 #endif
@@ -161,6 +165,11 @@ void LJ_FASTCALL lj_dispatch_update(global_State *g, int nolock)
 	  disp[BC_RET0] = lj_vm_rethook;
 	  disp[BC_RET1] = lj_vm_rethook;
 	}
+	/* 5.4 "tail call" events: lj_dispatch_ins notes CALLT/CALLMT. */
+	if ((mode & DISPMODE_CALL)) {
+	  disp[BC_CALLT] = lj_vm_rethook;
+	  disp[BC_CALLMT] = lj_vm_rethook;
+	}
       } else {
 	/* The recording dispatch also checks for hooks. */
 	ASMFunction f = (mode & DISPMODE_PROF) ? lj_vm_profhook :
@@ -186,6 +195,13 @@ void LJ_FASTCALL lj_dispatch_update(global_State *g, int nolock)
 	disp[BC_RET] = disp[GG_LEN_DDISP+BC_RET];
 	disp[BC_RET0] = disp[GG_LEN_DDISP+BC_RET0];
 	disp[BC_RET1] = disp[GG_LEN_DDISP+BC_RET1];
+      }
+      if ((mode & DISPMODE_CALL)) {
+	disp[BC_CALLT] = lj_vm_rethook;
+	disp[BC_CALLMT] = lj_vm_rethook;
+      } else {
+	disp[BC_CALLT] = disp[GG_LEN_DDISP+BC_CALLT];
+	disp[BC_CALLMT] = disp[GG_LEN_DDISP+BC_CALLMT];
       }
     }
 
@@ -342,6 +358,9 @@ LUA_API int lua_sethook(lua_State *L, lua_Hook func, int mask, int count)
   g->hookf = func;
   g->hookcount = g->hookcstart = (int32_t)count;
   g->hookmask = (uint8_t)((g->hookmask & ~HOOK_EVENTMASK) | mask);
+  g->hookepoch++;  /* Invalidates the threads' tail-call marks. */
+  g->tailofs = 0;
+  g->ffretry = 0;
   lj_trace_abort(g);  /* Abort recording on any hook change. */
   lj_dispatch_update(g, 0);
   return 1;
@@ -363,7 +382,8 @@ LUA_API int lua_gethookcount(lua_State *L)
 }
 
 /* Call a hook. */
-static void callhook(lua_State *L, int event, BCLine line)
+static void callhook(lua_State *L, int event, BCLine line,
+		     MSize ftransfer, MSize ntransfer)
 {
   global_State *g = G(L);
   lua_Hook hookf = g->hookf;
@@ -372,8 +392,14 @@ static void callhook(lua_State *L, int event, BCLine line)
     lj_trace_abort(g);  /* Abort recording on any hook call. */
     ar.event = event;
     ar.currentline = line;
+    ar.istailcall = 0;
+    ar.ftransfer = (unsigned short)ftransfer;
+    ar.ntransfer = (unsigned short)ntransfer;
     /* Top frame, nextframe = NULL. */
     ar.i_ci = (int)((L->base-1) - tvref(L->stack));
+    g->hookbase = (MSize)ar.i_ci;  /* lj_debug_funcname: 'hook' frames. */
+    g->hookftransfer = ftransfer;  /* debug.getinfo(2, "r") in the hook. */
+    g->hookntransfer = ntransfer;
     lj_state_checkstack(L, 1+LUA_MINSTACK);
 #if LJ_HASPROFILE && !LJ_PROFILE_SIGPROF
     lj_profile_hook_enter(g);
@@ -434,23 +460,136 @@ void LJ_FASTCALL lj_dispatch_ins(lua_State *L, const BCIns *pc)
     }
   }
 #endif
+  {
+    BCOp op = bc_op(pc[-1]);
+    /* 5.4 "tail call" event: remember that the next function entry replaces
+    ** this frame (consumed and cleared by lj_dispatch_call). */
+    if ((op == BC_CALLT || op == BC_CALLMT) && !hook_active(g))
+      g->tailofs = (MSize)((char *)L->base - (char *)tvref(L->stack));
+  }
   if ((g->hookmask & LUA_MASKCOUNT) && g->hookcount == 0) {
     g->hookcount = g->hookcstart;
-    callhook(L, LUA_HOOKCOUNT, -1);
+    callhook(L, LUA_HOOKCOUNT, -1, 0, 0);
     L->top = L->base + slots;  /* Fix top again. */
   }
   if ((g->hookmask & LUA_MASKLINE)) {
     BCPos npc = proto_bcpos(pt, pc) - 1;
-    BCPos opc = proto_bcpos(pt, oldpc) - 1;
-    BCLine line = lj_debug_line(pt, npc);
-    if (pc <= oldpc || opc >= pt->sizebc || line != lj_debug_line(pt, opc)) {
-      callhook(L, LUA_HOOKLINE, line);
+    int stripped = proto_lineinfo(pt) == NULL;
+    BCLine line = stripped ? -1 : lj_debug_line(pt, npc);  /* 5.4: nil. */
+    BCOp op = bc_op(pc[-1]);
+    int newline;
+    if (op == BC_LOOP || op == BC_ILOOP || op == BC_JLOOP) {
+      /* LuaJIT's loop-counting op for while/repeat has no PUC counterpart:
+      ** no line event, and the previous pc stays the reference. */
+      setcframe_pc(cf, oldpc);
+      newline = 0;
+    } else if (oldpc <= proto_bc(pt) || oldpc > proto_bc(pt) + pt->sizebc) {
+      /* The previous instruction ran in another function (or there is
+      ** none): entering this one (first body instruction, after the FUNC*
+      ** header at 0) is a new line; returning into it continues the call's
+      ** line unless the line changed (PUC 5.4 rethook sets oldpc to the
+      ** call). */
+      newline = npc <= 1 || (!stripped && line != lj_debug_line(pt, npc-1));
+    } else {
+      BCPos opc = proto_bcpos(pt, oldpc) - 1;
+      newline = pc <= oldpc || (!stripped && line != lj_debug_line(pt, opc));
+    }
+    if (newline) {
+      callhook(L, LUA_HOOKLINE, line, 0, 0);
       L->top = L->base + slots;  /* Fix top again. */
     }
   }
-  if ((g->hookmask & LUA_MASKRET) && bc_isret(bc_op(pc[-1])))
-    callhook(L, LUA_HOOKRET, -1);
+  if ((g->hookmask & LUA_MASKRET)) {
+    BCIns ins = pc[-1];
+    BCOp op = bc_op(ins);
+    if (bc_isret(op)) {  /* 5.4 'r': results are at RA.. (RET0: none). */
+      MSize n = op == BC_RET0 ? 0 : op == BC_RET1 ? 1 :
+		op == BC_RETM ? bc_d(ins) + cframe_multres_n(cf) - 1 :
+		bc_d(ins) - 1;
+      callhook(L, LUA_HOOKRET, -1, n ? bc_a(ins) + 1 : 0, n);
+    }
+  }
   ERRNO_RESTORE
+}
+
+/* Return hook for C functions (5.4: C functions get return events, also
+** debug.sethook itself). Called from the FUNCC/FUNCCW VM code right after
+** the function returned n results, if LUA_MASKRET is set by then.
+*/
+/* Return hook for ASM fast functions, called from fff_res with the n results
+** already in place at base-2 (over the function and link slots). The frame
+** is reconstituted for the hook (the results move up two slots) and the
+** results are moved back afterwards. The function comes from the call hook
+** (L->hookff); fast functions that reach fff_res run no Lua code in between.
+*/
+int LJ_FASTCALL lj_dispatch_ffret(lua_State *L, int n, const BCIns *pc)
+{
+  global_State *g = G(L);
+  GCfunc *fn;
+  if (hook_active(g)) return n;  /* Fast functions called by the hook. */
+  fn = mref(L->hookff, GCfunc);
+  setmref(L->hookff, NULL);
+  if (fn && (g->hookmask & LUA_MASKRET) && n >= 0) {
+    ERRNO_SAVE
+    ptrdiff_t baseofs = savestack(L, L->base);
+    TValue *base;
+    L->top = L->base + n;
+    lj_state_checkstack(L, (MSize)n + 2 + LUA_MINSTACK);
+    base = restorestack(L, baseofs);
+    memmove(base, base-2, (size_t)n*sizeof(TValue));
+    setfuncV(L, base-2, fn);
+    setframe_pc(base-1, pc);
+    L->top = base + n;
+    callhook(L, LUA_HOOKRET, -1, n ? 1 : 0, (MSize)n);
+    base = restorestack(L, baseofs);
+    memmove(base-2, base, (size_t)n*sizeof(TValue));
+    ERRNO_RESTORE
+  }
+  return n;
+}
+
+/* Return hook for pcall/xpcall/coroutine.resume/wrap (5.4: C functions with
+** a return event). Called from the VM with the n results at res and the
+** frame still intact, L->base set to the function's base. The VM prepends
+** the status boolean afterwards (that may overwrite the frame link), so the
+** hook sees it via a temporary copy of the results shifted up by one slot
+** (prepend = 0/1; 2 for none). Returns res, which moves if the hook grew
+** the stack.
+*/
+TValue * LJ_FASTCALL lj_dispatch_pret(lua_State *L, TValue *res, int n,
+				      int prepend)
+{
+  global_State *g = G(L);
+  if ((g->hookmask & LUA_MASKRET) && !hook_active(g)) {
+    ERRNO_SAVE
+    ptrdiff_t resofs = savestack(L, res);
+    L->top = res + n;
+    if (prepend < 2) {
+      lj_state_checkstack(L, (MSize)n + 1 + LUA_MINSTACK);
+      res = restorestack(L, resofs);
+      memmove(res+1, res, (size_t)n*sizeof(TValue));
+      setboolV(res, prepend);
+      n++;
+      L->top = res + n;
+    }
+    callhook(L, LUA_HOOKRET, -1, (MSize)(res - L->base) + 1, (MSize)n);
+    res = restorestack(L, resofs);
+    if (prepend < 2)
+      memmove(res, res+1, (size_t)(n-1)*sizeof(TValue));
+    ERRNO_RESTORE
+  }
+  return res;
+}
+
+int LJ_FASTCALL lj_dispatch_cret(lua_State *L, int n)
+{
+  if (n >= 0 && (G(L)->hookmask & LUA_MASKRET)) {  /* Not a yield. */
+    ERRNO_SAVE
+    MSize ftransfer = n ? (MSize)((L->top - n) - L->base) + 1 : 0;
+    callhook(L, LUA_HOOKRET, -1, ftransfer, (MSize)n);
+    ERRNO_RESTORE
+  }
+  return n;
 }
 
 /* Initialize call. Ensure stack space and return # of missing parameters. */
@@ -482,6 +621,8 @@ ASMFunction LJ_FASTCALL lj_dispatch_call(lua_State *L, const BCIns *pc)
   jit_State *J = G2J(g);
 #endif
   int missing = call_init(L, fn);
+  int retry = (int)g->ffretry;  /* Fast function re-dispatched after FFH_RETRY. */
+  g->ffretry = 0;
 #if LJ_HASJIT
   J->L = L;
   if ((uintptr_t)pc & 1) {  /* Marker for hot call. */
@@ -504,14 +645,28 @@ ASMFunction LJ_FASTCALL lj_dispatch_call(lua_State *L, const BCIns *pc)
 	       "unbalanced stack after hot instruction");
   }
 #endif
-  if ((g->hookmask & LUA_MASKCALL)) {
+  if ((g->hookmask & LUA_MASKCALL) && !hook_active(g)) {
     int i;
-    for (i = 0; i < missing; i++)  /* Add missing parameters. */
-      setnilV(L->top++);
-    callhook(L, LUA_HOOKCALL, -1);
-    /* Preserve modifications of missing parameters by lua_setlocal(). */
-    while (missing-- > 0 && tvisnil(L->top - 1))
-      L->top--;
+    MSize ofs = (MSize)((char *)L->base - (char *)tvref(L->stack));
+    int tail = g->tailofs == ofs && isluafunc(fn);  /* 5.4: C callees "call". */
+    MSize nparams = isluafunc(fn) ? funcproto(fn)->numparams :
+				    (MSize)(L->top - L->base);
+    /* An ASM fast function whose fallback handler returned FFH_RETRY is
+    ** re-dispatched through its header: that is the same call, no second
+    ** event. Its return event comes from lj_dispatch_ffret() (hookff). */
+    int isasmff = bc_op(pc[-1]) >= BC__MAX;
+    setmref(L->hookff, isasmff ? fn : NULL);
+    g->tailofs = 0;
+    if (!retry) {
+      lj_debug_tailmark(L, ofs / sizeof(TValue), tail);
+      for (i = 0; i < missing; i++)  /* Add missing parameters. */
+	setnilV(L->top++);
+      callhook(L, tail ? LUA_HOOKTAILCALL : LUA_HOOKCALL, -1, nparams ? 1 : 0,
+	       nparams);
+      /* Preserve modifications of missing parameters by lua_setlocal(). */
+      while (missing-- > 0 && tvisnil(L->top - 1))
+	L->top--;
+    }
   }
 #if LJ_HASJIT
 out:

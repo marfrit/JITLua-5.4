@@ -2516,9 +2516,17 @@ static void expr_unop(LexState *ls, ExpDesc *v, int eflags)
     expr_simple(ls, v, eflags);
     return;
   }
-  lj_lex_next(ls);
-  expr_binop(ls, v, UNARY_PRIORITY, eflags);
-  bcemit_unop(ls->fs, op, v);
+  {
+    BCLine opline = ls->linenumber;  /* Line of the operator token. */
+    BCPos pc;
+    lj_lex_next(ls);
+    expr_binop(ls, v, UNARY_PRIORITY, eflags);
+    pc = ls->fs->pc;
+    bcemit_unop(ls->fs, op, v);
+    /* 5.4 line events (PUC luaK_fixline): the operator instruction carries
+    ** the operator's line, not the line of the last operand token. */
+    if (ls->fs->pc > pc) ls->fs->bcbase[ls->fs->pc-1].line = opline;
+  }
 }
 
 /* Parse binary expressions with priority higher than the limit. */
@@ -2531,11 +2539,19 @@ static BinOpr expr_binop(LexState *ls, ExpDesc *v, uint32_t limit, int eflags)
   while (opr != OPR_NOBINOPR && priority[opr].left > limit) {
     ExpDesc v2;
     BinOpr nextop;
+    BCLine opline = ls->linenumber;  /* Line of the operator token. */
+    BCPos pc;
     lj_lex_next(ls);
     bcemit_binop_left(ls->fs, opr, v);
     /* Parse binary expression with higher priority. */
     nextop = expr_binop(ls, &v2, priority[opr].right, eflags);
+    pc = ls->fs->pc;
     bcemit_binop(ls->fs, opr, v, &v2);
+    /* 5.4 line events (PUC luaK_fixline): an arithmetic, concat or compare
+    ** instruction carries the operator's line; and/or emit no instruction
+    ** here and a constant-folded operation emits none either. */
+    if (opr != OPR_AND && opr != OPR_OR && ls->fs->pc > pc)
+      ls->fs->bcbase[ls->fs->pc-1].line = opline;
     opr = nextop;
   }
   synlevel_end(ls);
@@ -3208,12 +3224,16 @@ static void parse_for(LexState *ls, BCLine line)
 /* Parse condition and 'then' block. */
 static BCPos parse_then(LexState *ls)
 {
-  BCPos condexit;
+  ExpDesc v;
   lj_lex_next(ls);  /* Skip 'if' or 'elseif'. */
-  condexit = expr_cond(ls);
+  expr(ls, &v, 0);
+  if (v.k == VKNIL) v.k = VKFALSE;
+  /* 5.4 line events: PUC emits the conditional jump after consuming 'then',
+  ** so a line hook reports the 'then' line (db.lua: "if\ncond\nthen"). */
   lex_check(ls, TK_then);
+  bcemit_branch_t(ls->fs, &v);
   parse_block(ls);
-  return condexit;
+  return v.f;
 }
 
 /* Parse 'if' statement. */

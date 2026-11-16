@@ -412,6 +412,23 @@ static void build_subroutines(BuildCtx *ctx)
   |  sub BASE, PC			// Restore caller base.
   |  lea RA, [RA+PC-8]			// Rebase RA and prepend one result.
   |  mov PC, [BASE-8]			// Fetch PC of previous frame.
+  |  test byte [DISPATCH+DISPATCH_GL(hookmask)], LUA_MASKRET
+  |  jz >9
+  |  // 5.4: return hook for pcall/xpcall, with the pcall frame still intact.
+  |  mov L:RB, SAVE_L
+  |  mov L:RB->base, BASE
+  |  mov MULTRES, RDd
+  |  lea CARG2, [BASE+RA+8]
+  |  mov CARG3d, RDd
+  |  mov CARG4d, 1
+  |  mov CARG1, L:RB
+  |  call extern lj_dispatch_pret	// (lua_State *L, TValue *res, int n, int prepend)
+  |  mov BASE, L:RB->base
+  |  mov RA, RD
+  |  sub RA, BASE
+  |  sub RA, 8
+  |  mov RDd, MULTRES
+  |9:
   |  // Prepending may overwrite the pcall frame, so do it at the end.
   |  mov_true ITYPE
   |  mov aword [BASE+RA], ITYPE		// Prepend true to results.
@@ -528,11 +545,22 @@ static void build_subroutines(BuildCtx *ctx)
   |->vm_unwind_ff_eh:			// Landing pad for external unwinder.
   |  endbr
   |  mov L:RB, SAVE_L
-  |  mov RDd, 1+1			// Really 1+2 results, incr. later.
   |  mov BASE, L:RB->base
   |  mov DISPATCH, L:RB->glref		// Setup pointer to dispatch table.
   |  add DISPATCH, GG_G2DISP
   |  mov PC, [BASE-8]			// Fetch PC of previous frame.
+  |  test byte [DISPATCH+DISPATCH_GL(hookmask)], LUA_MASKRET
+  |  jz >9
+  |  // 5.4: return hook for pcall/xpcall; the error message is at BASE.
+  |  set_vmstate INTERP
+  |  mov CARG2, BASE
+  |  mov CARG3d, 1
+  |  xor CARG4d, CARG4d
+  |  mov CARG1, L:RB
+  |  call extern lj_dispatch_pret	// (lua_State *L, TValue *res, int n, int prepend)
+  |  mov BASE, L:RB->base
+  |9:
+  |  mov RDd, 1+1			// Really 1+2 results, incr. later.
   |  mov_false RA
   |  mov RB, [BASE]
   |  mov [BASE-16], RA			// Prepend false to error message.
@@ -1695,10 +1723,30 @@ static void build_subroutines(BuildCtx *ctx)
   |6:
   |.if resume
   |  lea RDd, [PCd+2]			// nresults+1 = 1 + true + results.
-  |  mov_true ITYPE			// Prepend true to results.
-  |  mov [BASE-8], ITYPE
   |.else
   |  lea RDd, [PCd+1]			// nresults+1 = 1 + results.
+  |.endif
+  |  // 5.4: return hook, with the frame (below the results at BASE) intact.
+  |  test byte [DISPATCH+DISPATCH_GL(hookmask)], LUA_MASKRET
+  |  jz >1
+  |  mov L:RB, SAVE_L
+  |  mov MULTRES, RDd
+  |.if resume
+  |  lea CARG3d, [RD-2]
+  |  mov CARG4d, 1
+  |.else
+  |  lea CARG3d, [RD-1]
+  |  mov CARG4d, 2
+  |.endif
+  |  mov CARG2, BASE
+  |  mov CARG1, L:RB
+  |  call extern lj_dispatch_pret	// (lua_State *L, TValue *res, int n, int prepend)
+  |  mov BASE, L:RB->base
+  |  mov RDd, MULTRES
+  |1:
+  |.if resume
+  |  mov_true ITYPE			// Prepend true to results.
+  |  mov [BASE-8], ITYPE
   |.endif
   |7:
   |  mov PC, SAVE_PC
@@ -1714,14 +1762,24 @@ static void build_subroutines(BuildCtx *ctx)
   |
   |8:  // Coroutine returned with error (at co->top-1).
   |.if resume
-  |  mov_false ITYPE			// Prepend false to results.
-  |  mov [BASE-8], ITYPE
   |  mov RA, L:PC->top
   |  sub RA, 8
   |  // Keep the error object below top for coroutine.close (5.4 returns it).
   |  // Copy error message.
   |  mov RD, [RA]
   |  mov [BASE], RD
+  |  test byte [DISPATCH+DISPATCH_GL(hookmask)], LUA_MASKRET
+  |  jz >1
+  |  mov L:RB, SAVE_L
+  |  mov CARG3d, 1
+  |  xor CARG4d, CARG4d
+  |  mov CARG2, BASE
+  |  mov CARG1, L:RB
+  |  call extern lj_dispatch_pret	// (lua_State *L, TValue *res, int n, int prepend)
+  |  mov BASE, L:RB->base
+  |1:
+  |  mov_false ITYPE			// Prepend false to results.
+  |  mov [BASE-8], ITYPE
   |  mov RDd, 1+2			// nresults+1 = 1 + false + error.
   |  jmp <7
   |.else
@@ -1798,6 +1856,9 @@ static void build_subroutines(BuildCtx *ctx)
   |->fff_res:
   |  mov MULTRES, RDd
   |->fff_res_:
+  |  test byte [DISPATCH+DISPATCH_GL(hookmask)], LUA_MASKRET
+  |  jnz >9				// 5.4: return hook for fast functions.
+  |4:
   |  test PCd, FRAME_TYPE
   |  jnz >7
   |5:
@@ -1817,6 +1878,18 @@ static void build_subroutines(BuildCtx *ctx)
   |7:  // Non-standard return case.
   |  mov RA, -16			// Results start at BASE+RA = BASE-16.
   |  jmp ->vm_return
+  |
+  |9:  // Return hook: results stay at BASE-16, PC is preserved.
+  |  mov L:RB, SAVE_L
+  |  mov L:RB->base, BASE
+  |  lea CARG2d, [RD-1]
+  |  mov CARG3, PC
+  |  mov CARG1, L:RB
+  |  call extern lj_dispatch_ffret	// (lua_State *L, int n, const BCIns *pc)
+  |  mov BASE, L:RB->base
+  |  add RDd, 1
+  |  mov MULTRES, RDd
+  |  jmp <4
   |
   |.macro math_round, func
   |  .ffunc_1 math_ .. func
@@ -2247,6 +2320,7 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov LFUNC:RB, [BASE-16]
   |  jne ->vm_call_tail			// Returned -1?
   |  cleartp LFUNC:RB
+  |  mov dword [DISPATCH+DISPATCH_GL(ffretry)], 1  // 5.4 call hooks: not a new call.
   |  ins_callt				// Returned 0: retry fast path.
   |
   |// Reconstruct previous base for vmeta_call during tailcall.
@@ -5137,6 +5211,9 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
       |  call aword [DISPATCH+DISPATCH_GL(wrapf)]
     }
     |  // nresults returned in eax (RD).
+    |  test byte [DISPATCH+DISPATCH_GL(hookmask)], LUA_MASKRET
+    |  jnz >8				// 5.4: return hook for C functions.
+    |7:
     |  mov BASE, L:RB->base
     |  mov [DISPATCH+DISPATCH_GL(cur_L)], L:RB
     |  set_vmstate INTERP
@@ -5145,6 +5222,11 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  add RA, L:RB->top		// RA = (L->top-(L->base+nresults))*8
     |  mov PC, [BASE-8]			// Fetch PC of caller.
     |  jmp ->vm_returnc
+    |8:
+    |  mov CARG2d, RDd
+    |  mov CARG1, L:RB
+    |  call extern lj_dispatch_cret	// (lua_State *L, int nresults)
+    |  jmp <7
     break;
 
   /* ---------------------------------------------------------------------- */

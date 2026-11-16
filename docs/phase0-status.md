@@ -1007,3 +1007,96 @@ by their low word (lua_lessthan bug) -- the exact 64-bit comparison is the
 (the int32 path is the same single compare plus one or/test on the tag
 words). Earlier version 62541a67 (lj_i64_getint call per operand) cost
 15-40 % on both and was replaced.
+
+## Session 35 (branch dbg-hooks) — 5.4 debug hooks under the JIT
+
+Debuggers and profilers set hooks with debug.sethook; LuaJIT 2.1 kept most
+of the 5.1 behaviour (line events on every instruction with a new line,
+hooks ignored inside compiled loops, no return events for C functions, no
+tail-call events, one global hook). PUC-Lua 5.4.7 testes/db.lua was the
+characterization: its 266 line-event cases (if/then, loops, large gaps
+between lines, returns into the caller) all failed before, 0 after; the
+whole file now runs to the two places that need no-hook tail-call
+tracking (below) and the `nups` count for `_ENV`.
+
+What changed (interpreter, both VMs, debug library):
+
+* Line events follow PUC 5.4 luaG_traceexec: an event when the line
+  changes or the pc goes backwards (loops), none for LuaJIT's LOOP/ILOOP
+  counting op, entering a function fires for its first instruction,
+  returning into the caller continues the call's line (PUC's rethook sets
+  oldpc to the call), the line that calls debug.sethook gets no event of
+  its own (the saved pc is set to the calling instruction), stripped
+  chunks fire the first instruction with line nil. The parser attaches
+  the operator's line to arithmetic/concat/compare instructions
+  (luaK_fixline) and emits the `if`/`elseif` branch after `then`, so
+  multi-line conditions report the line PUC reports. The "previous pc
+  belongs to another function" test compares addresses with the proto's
+  bytecode range instead of a truncated index.
+* Hooks disable the JIT: while any hook event is set the dispatch table
+  neither counts nor enters traces (`lj_dispatch_update`), and
+  debug.sethook flushes all traces so a hook set inside a hot loop fires
+  for the rest of the loop (the patched loop bytecodes fall back to the
+  interpreter). A hook set by a function called from a running trace takes
+  effect at the next interpreter instruction after the trace exit.
+* "tail call" events (LUA_HOOKTAILCALL = 4, 5.4's name for the slot of
+  LuaJIT's unused tail-return event): with a call hook set, CALLT/CALLMT
+  dispatch through the ins hook (`lj_vm_rethook` as the stub), which notes
+  the frame base in `g->tailofs`; `lj_dispatch_call` consumes it (cleared
+  by errors and by lua_sethook). Tail calls to C functions are plain
+  "call" events, as in PUC. `debug.getinfo(level, "t").istailcall` comes
+  from a per-thread bitmap of frame bases marked by the tail-call event
+  and cleared by any later plain call at or below that base; the bitmap is
+  valid for the current hook epoch only (`g->hookepoch`, bumped by
+  lua_sethook), so it is exact under a debugger and false otherwise.
+* Return events for every kind of function: Lua (as before), C functions
+  (`lj_dispatch_cret`, called from FUNCC/FUNCCW after the function
+  returned -- so debug.sethook's own return is the first event, as in
+  PUC), ASM fast functions (`lj_dispatch_ffret` from `fff_res`: the
+  function object is remembered by the call event in `L->hookff`, the frame
+  is reconstituted for the hook by moving the results up two slots and
+  back), pcall/xpcall (`lj_dispatch_pret` from vm_returnp and from the
+  error unwind, before the status boolean overwrites the frame link; the
+  hook sees the boolean through a temporary copy of the results) and
+  coroutine.resume/wrap (same helper, normal and error paths). A fast
+  function whose fallback handler returns FFH_RETRY is re-dispatched
+  through its header; `g->ffretry` (set by the VM on that path) suppresses
+  the second call event.
+* `debug.getinfo` options `t` (istailcall) and `r` (ftransfer/ntransfer;
+  the values are the call arguments resp. the results, indexed the way
+  debug.getlocal(2, i) in the hook sees them -- the index itself differs
+  from PUC for C functions that return in place), getlocal names
+  "(temporary)" / "(C temporary)" / "(vararg)".
+* Functions called by the hook machinery are "hook '?'" frames
+  (`namewhat == "hook"`, `g->hookbase`), and debug.traceback uses PUC's
+  pushfuncname wording throughout ("in function 'string.rep'" for
+  functions found in package.loaded, "in local 'f'", "in upvalue 'g'",
+  "in field 'x'", "in method 'm'", "in metamethod 'close'", "in hook '?'",
+  "in function <file:line>", "in ?" for C functions without a name).
+* Per-coroutine hooks: `debug.sethook(co, f, mask)` and `debug.gethook(co)`
+  keep the hook function per thread in the registry's `_HOOKKEY` table
+  (weak keys, as PUC) and the mask/count per thread in a second weak
+  table; the global hook mask is the union over all threads, the hook
+  function filters by the running thread's own mask. C-API hooks
+  (lua_sethook with another function) still show as "external hook".
+
+Three deliberate differences from PUC, all documented in the test header:
+istailcall is false when no call hook was set at the time of the call (a
+frame-link bit would cost a masked load on every return path in both VMs
+and in the JIT's RETF guard); PUC's count hook clobbers its oldpc with the
+hook function's pcs and then fires an extra line event -- not replicated,
+so count hooks and line hooks are not combined in the test; and `nups`
+does not count an `_ENV` upvalue for functions that only use globals
+(LuaJIT's GGET model; db.lua expects 2 for such a function). Library note
+for the C API owner: `debug.getinfo(print, "u").nups` is 1 here (db.lua
+711 expects 0).
+
+Test: debug_02_hooks (12 sections, A vs PUC and B JIT vs interpreter,
+including a hook set inside a compiled loop, a count hook armed mid-loop
+and a call hook set by a function called from a running trace).
+Files: lj_dispatch.c/.h, lj_debug.c/.h, lib_debug.c, lj_parse.c, lj_obj.h
+(lua_State: tailbits/tailhi/tailepoch/hookff; global_State: hookbase,
+hookepoch, hookftransfer/ntransfer, tailofs, ffretry), lj_state.c,
+lj_err.c/.h (lj_err_funcname_loaded exported), lua.h (LUA_HOOKTAILCALL,
+lua_Debug istailcall/ftransfer/ntransfer), vm_arm64.dasc, vm_x64.dasc.
+

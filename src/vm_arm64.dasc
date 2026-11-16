@@ -400,6 +400,18 @@ static void build_subroutines(BuildCtx *ctx)
   |
   |  // Return from pcall or xpcall fast func.
   |  ldr PC, [RB, FRAME_PC]		// Fetch PC of previous frame.
+  |  ldrb TMP2w, GL->hookmask
+  |  tbz TMP2w, #LUA_HOOKRET, >9
+  |  // 5.4: return hook for pcall/xpcall, with the pcall frame still intact.
+  |  str RB, L->base
+  |  mov CARG1, L
+  |  mov CARG2, RA
+  |  lsr CARG3w, RCw, #3
+  |  mov CARG4, #1
+  |  bl extern lj_dispatch_pret		// (lua_State *L, TValue *res, int n, int prepend)
+  |  mov RA, CRET1
+  |  ldr RB, L->base
+  |9:
   |   mov_true TMP0
   |  mov BASE, RB
   |  // Prepending may overwrite the pcall frame, so do it at the end.
@@ -500,13 +512,23 @@ static void build_subroutines(BuildCtx *ctx)
   |   ldr GL, L->glref			// Setup pointer to global state.
   |->vm_unwind_ff_eh:			// Landing pad for external unwinder.
   |  bti_tailcall
-  |    mov RC, #16			// 2 results: false + error message.
   |  ldr BASE, L->base
+  |  ldr PC, [BASE, FRAME_PC]		// Fetch PC of previous frame.
+  |   st_vmstate ST_INTERP
+  |  ldrb TMP2w, GL->hookmask
+  |  tbz TMP2w, #LUA_HOOKRET, >9
+  |  // 5.4: return hook for pcall/xpcall; the error message is at BASE.
+  |  mov CARG1, L
+  |  mov CARG2, BASE
+  |  mov CARG3, #1
+  |  mov CARG4, #0
+  |  bl extern lj_dispatch_pret		// (lua_State *L, TValue *res, int n, int prepend)
+  |  ldr BASE, L->base
+  |9:
+  |    mov RC, #16			// 2 results: false + error message.
   |    mov_false TMP0
   |  sub RA, BASE, #8			// Results start at BASE-8.
-  |  ldr PC, [BASE, FRAME_PC]		// Fetch PC of previous frame.
   |    str TMP0, [BASE, #-8]		// Prepend false to error message.
-  |   st_vmstate ST_INTERP
   |  b ->vm_returnc
   |
   |//-----------------------------------------------------------------------
@@ -1422,6 +1444,20 @@ static void build_subroutines(BuildCtx *ctx)
   |   add RB, RB, #8
   |  bne <5
   |6:
+  |  // 5.4: return hook, with the frame (below the results at BASE) intact.
+  |  ldrb TMP2w, GL->hookmask
+  |  tbz TMP2w, #LUA_HOOKRET, >1
+  |  mov CARG1, L
+  |  mov CARG2, BASE
+  |  lsr CARG3w, RCw, #3
+  |.if resume
+  |  mov CARG4, #1
+  |.else
+  |  mov CARG4, #2
+  |.endif
+  |  bl extern lj_dispatch_pret		// (lua_State *L, TValue *res, int n, int prepend)
+  |  mov BASE, CRET1
+  |1:
   |.if resume
   |  mov_true TMP1
   |   add RC, RC, #16
@@ -1441,12 +1477,21 @@ static void build_subroutines(BuildCtx *ctx)
   |8:  // Coroutine returned with error (at co->top-1).
   |.if resume
   |  ldr TMP0, [CARG4, #-8]!
-  |   mov_false TMP1
   |    mov RC, #(2+1)*8
   |  add CARG4, CARG4, #8
   |  str CARG4, L:RA->top		// Keep the error object below top for
   |				// coroutine.close (5.4 returns it).
   |  str TMP0, [BASE]			// Copy error message.
+  |  ldrb TMP2w, GL->hookmask
+  |  tbz TMP2w, #LUA_HOOKRET, >1
+  |  mov CARG1, L
+  |  mov CARG2, BASE
+  |  mov CARG3, #1
+  |  mov CARG4, #0
+  |  bl extern lj_dispatch_pret		// (lua_State *L, TValue *res, int n, int prepend)
+  |  mov BASE, CRET1
+  |1:
+  |   mov_false TMP1
   |  b <7
   |.else
   |  mov CARG1, L
@@ -1514,6 +1559,9 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov RC, #(1+1)*8
   |->fff_res:
   |  // RC = (nresults+1)*8, PC = return.
+  |  ldrb TMP2w, GL->hookmask
+  |  tbnz TMP2w, #LUA_HOOKRET, >9	// 5.4: return hook for fast functions.
+  |4:
   |  ands CARG1, PC, #FRAME_TYPE
   |   str RCw, SAVE_MULTRES
   |   sub RA, BASE, #16
@@ -1533,6 +1581,16 @@ static void build_subroutines(BuildCtx *ctx)
   |   add RC, RC, #8
   |  str TISNIL, [TMP1, #-8]
   |  b <5
+  |
+  |9:  // Return hook: results stay at BASE-16, RC/PC are preserved.
+  |  str BASE, L->base
+  |  mov CARG1, L
+  |  lsr CARG2w, RCw, #3
+  |  sub CARG2w, CARG2w, #1
+  |  mov CARG3, PC
+  |  bl extern lj_dispatch_ffret	// (lua_State *L, int n, const BCIns *pc)
+  |  ldr BASE, L->base
+  |  b <4
   |
   |.macro math_extern, func
   |  .ffunc_n math_ .. func
@@ -1863,6 +1921,8 @@ static void build_subroutines(BuildCtx *ctx)
   |   sub NARGS8:RC, CARG1, BASE
   |  bne ->vm_call_tail			// Returned -1?
   |    and CFUNC:CARG3, CARG3, #LJ_GCVMASK
+  |  mov TMP0w, #1
+  |  str TMP0w, GL->ffretry		// 5.4 call hooks: not a new call.
   |  ins_callt				// Returned 0: retry fast path.
   |
   |// Reconstruct previous base for vmeta_call during tailcall.
@@ -4418,6 +4478,9 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |    st_vmstate TMP0w
     |  blr_auth CARG4			// (lua_State *L [, lua_CFunction f])
     |  // Returns nresults.
+    |  ldrb TMP2w, GL->hookmask
+    |  tbnz TMP2w, #LUA_HOOKRET, >8	// 5.4: return hook for C functions.
+    |7:
     |  ldp BASE, TMP1, L->base
     |    str L, GL->cur_L
     |   sbfiz RC, CRET1, #3, #32
@@ -4425,6 +4488,11 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  ldr PC, [BASE, FRAME_PC]
     |   sub RA, TMP1, RC		// RA = L->top - nresults*8
     |  b ->vm_returnc
+    |8:
+    |  mov CARG2w, CRET1w
+    |  mov CARG1, L
+    |  bl extern lj_dispatch_cret	// (lua_State *L, int nresults)
+    |  b <7
     break;
 
   /* ---------------------------------------------------------------------- */

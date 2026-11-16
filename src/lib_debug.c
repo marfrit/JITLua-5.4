@@ -18,6 +18,9 @@
 #include "lj_err.h"
 #include "lj_debug.h"
 #include "lj_lib.h"
+#include "lj_frame.h"
+#include "lj_state.h"
+#include "lj_trace.h"
 
 /* ------------------------------------------------------------------------ */
 
@@ -112,7 +115,7 @@ LJLIB_CF(debug_getinfo)
   lj_Debug ar;
   int arg, opt_f = 0, opt_L = 0;
   lua_State *L1 = getthread(L, &arg);
-  const char *options = luaL_optstring(L, arg+2, "flnSu");
+  const char *options = luaL_optstring(L, arg+2, "flnSrtu");
   if (lua_isnumber(L, arg+1)) {
     if (!lua_getstack(L1, (int)lua_tointeger(L, arg+1), (lua_Debug *)&ar)) {
       setnilV(L->top-1);
@@ -123,6 +126,11 @@ LJLIB_CF(debug_getinfo)
     setfuncV(L1, L1->top++, funcV(L->base+arg));
   } else {
     lj_err_arg(L, arg+1, LJ_ERR_NOFUNCL);
+  }
+  ar.ftransfer = ar.ntransfer = 0;
+  if (strchr(options, 'r') && hook_active(G(L))) {  /* Hook transfer info. */
+    ar.ftransfer = (unsigned short)G(L)->hookftransfer;
+    ar.ntransfer = (unsigned short)G(L)->hookntransfer;
   }
   if (!lj_debug_getinfo(L1, options, &ar, 1))
     lj_err_arg(L, arg+2, LJ_ERR_INVOPT);
@@ -147,6 +155,13 @@ LJLIB_CF(debug_getinfo)
     case 'n':
       settabss(L, "name", ar.name);
       settabss(L, "namewhat", ar.namewhat);
+      break;
+    case 't':
+      settabsb(L, "istailcall", ar.istailcall);
+      break;
+    case 'r':
+      settabsi(L, "ftransfer", ar.ftransfer);
+      settabsi(L, "ntransfer", ar.ntransfer);
       break;
     case 'f': opt_f = 1; break;
     case 'L': opt_L = 1; break;
@@ -287,18 +302,61 @@ LJLIB_CF(debug_setuservalue)
 
 #define KEY_HOOK	(U64x(81000000,00000000)|'h')
 
+/* 5.4: hooks are per thread. The registry's "_HOOKKEY" table (weak keys, as
+** in PUC) maps thread -> hook function; the KEY_HOOK table maps thread ->
+** mask | count<<4. LuaJIT's hook machinery is global, so the installed mask
+** is the union over all threads and hookf() filters by the running thread's
+** own mask.
+*/
+static void hook_gettable(lua_State *L, int masks)
+{
+  if (masks) (L->top++)->u64 = KEY_HOOK; else lua_pushliteral(L, "_HOOKKEY");
+  lua_rawget(L, LUA_REGISTRYINDEX);
+}
+
+static void hook_mktable(lua_State *L, int masks)
+{
+  hook_gettable(L, masks);
+  if (!lua_istable(L, -1)) {
+    lua_pop(L, 1);
+    lua_createtable(L, 0, 2);
+    lua_createtable(L, 0, 1);
+    lua_pushliteral(L, "k");
+    lua_setfield(L, -2, "__mode");
+    lua_setmetatable(L, -2);
+    if (masks) (L->top++)->u64 = KEY_HOOK; else lua_pushliteral(L, "_HOOKKEY");
+    lua_pushvalue(L, -2);
+    lua_rawset(L, LUA_REGISTRYINDEX);
+  }
+}
+
 static void hookf(lua_State *L, lua_Debug *ar)
 {
   static const char *const hooknames[] =
-    {"call", "return", "line", "count", "tail return"};
-  (L->top++)->u64 = KEY_HOOK;
-  lua_rawget(L, LUA_REGISTRYINDEX);
+    {"call", "return", "line", "count", "tail call"};
+  int ev = (int)ar->event;
+  int bit = ev == LUA_HOOKTAILCALL ? LUA_MASKCALL : (1 << ev);
+  lua_Integer m;
+  hook_gettable(L, 1);
+  if (!lua_istable(L, -1)) { lua_pop(L, 1); return; }
+  lua_pushthread(L);
+  lua_rawget(L, -2);
+  m = lua_tointeger(L, -1);
+  lua_pop(L, 2);
+  if (!(m & bit)) return;  /* Not an event this thread's hook asked for. */
+  hook_gettable(L, 0);
+  if (!lua_istable(L, -1)) { lua_pop(L, 1); return; }
+  lua_pushthread(L);
+  lua_rawget(L, -2);
+  lua_remove(L, -2);
   if (lua_isfunction(L, -1)) {
-    lua_pushstring(L, hooknames[(int)ar->event]);
+    lua_pushstring(L, hooknames[ev]);
     if (ar->currentline >= 0)
       lua_pushinteger(L, ar->currentline);
     else lua_pushnil(L);
     lua_call(L, 2, 0);
+  } else {
+    lua_pop(L, 1);
   }
 }
 
@@ -324,38 +382,80 @@ static char *unmakemask(int mask, char *smask)
 
 LJLIB_CF(debug_sethook)
 {
-  int arg, mask, count;
-  lua_Hook func;
-  (void)getthread(L, &arg);
+  int arg, mask, count, umask = 0, ucount = 0;
+  lua_State *L1 = getthread(L, &arg);
   if (lua_isnoneornil(L, arg+1)) {
     lua_settop(L, arg+1);
-    func = NULL; mask = 0; count = 0;  /* turn off hooks */
+    mask = 0; count = 0;  /* turn off hooks */
   } else {
     const char *smask = luaL_checkstring(L, arg+2);
     luaL_checktype(L, arg+1, LUA_TFUNCTION);
     count = luaL_optint(L, arg+3, 0);
-    func = hookf; mask = makemask(smask, count);
+    mask = makemask(smask, count);
   }
-  (L->top++)->u64 = KEY_HOOK;
+  hook_mktable(L, 0);  /* _HOOKKEY[L1] = func */
+  setthreadV(L, L->top, L1); incr_top(L);
   lua_pushvalue(L, arg+1);
-  lua_rawset(L, LUA_REGISTRYINDEX);
-  lua_sethook(L, func, mask, count);
+  lua_rawset(L, -3);
+  lua_pop(L, 1);
+  hook_mktable(L, 1);  /* KEY_HOOK[L1] = mask | count<<4 */
+  setthreadV(L, L->top, L1); incr_top(L);
+  if (mask) lua_pushinteger(L, (lua_Integer)mask | ((lua_Integer)count << 4));
+  else lua_pushnil(L);
+  lua_rawset(L, -3);
+  lua_pushnil(L);  /* Union of all threads' masks, smallest count. */
+  while (lua_next(L, -2)) {
+    lua_Integer m = lua_tointeger(L, -1);
+    int c = (int)(m >> 4);
+    umask |= (int)(m & HOOK_EVENTMASK);
+    if (c > 0 && (ucount == 0 || c < ucount)) ucount = c;
+    lua_pop(L, 1);
+  }
+  lua_pop(L, 1);
+#if LJ_HASJIT
+  /* 5.4: a hook must fire inside loops that are already compiled -- flush
+  ** the traces (the patched loop bytecodes revert to the interpreter) and
+  ** the dispatch update below keeps the JIT out while the hook is set. */
+  if (umask) lj_trace_flushall(L);
+#endif
+  lua_sethook(L, umask ? hookf : NULL, umask, ucount);
+  /* PUC lua_sethook sets oldpc to the current instruction: the line that
+  ** called debug.sethook gets no line event of its own. Our reference is
+  ** the pc saved in the C frame, which is stale until the first dispatch. */
+  if (umask && frame_islua(L->base-1) && L->cframe)
+    setcframe_pc(cframe_raw(L->cframe), frame_pc(L->base-1));
   return 0;
 }
 
 LJLIB_CF(debug_gethook)
 {
   char buff[5];
-  int mask = lua_gethookmask(L);
+  int arg, mask, count;
+  lua_State *L1 = getthread(L, &arg);
   lua_Hook hook = lua_gethook(L);
+  lua_Integer m;
   if (hook != NULL && hook != hookf) {  /* external hook? */
     lua_pushliteral(L, "external hook");
-  } else {
-    (L->top++)->u64 = KEY_HOOK;
-    lua_rawget(L, LUA_REGISTRYINDEX);   /* get hook */
+    lua_pushstring(L, unmakemask(lua_gethookmask(L), buff));
+    lua_pushinteger(L, lua_gethookcount(L));
+    return 3;
   }
+  hook_gettable(L, 0);
+  if (lua_istable(L, -1)) {
+    setthreadV(L, L->top, L1); incr_top(L);
+    lua_rawget(L, -2);
+    lua_remove(L, -2);
+  }
+  if (lua_isnil(L, -1)) return 1;  /* No hook for this thread. */
+  hook_gettable(L, 1);
+  setthreadV(L, L->top, L1); incr_top(L);
+  lua_rawget(L, -2);
+  m = lua_tointeger(L, -1);
+  lua_pop(L, 2);
+  mask = (int)(m & HOOK_EVENTMASK);
+  count = (int)(m >> 4);
   lua_pushstring(L, unmakemask(mask, buff));
-  lua_pushinteger(L, lua_gethookcount(L));
+  lua_pushinteger(L, count);
   return 3;
 }
 

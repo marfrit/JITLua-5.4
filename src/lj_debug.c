@@ -206,7 +206,7 @@ static TValue *debug_localname(lua_State *L, const lua_Debug *ar,
 	  frame = frame_prevd(frame);
 	}
 	if (frame + slot1+LJ_FR2 < nextframe) {
-	  *name = "(*vararg)";
+	  *name = "(vararg)";  /* 5.4 name (5.1: "(*vararg)"). */
 	  return frame+slot1;
 	}
       }
@@ -217,8 +217,69 @@ static TValue *debug_localname(lua_State *L, const lua_Debug *ar,
       (*name = debug_varname(funcproto(fn), pc, slot1-1)) != NULL)
     ;
   else if (slot1 > 0 && frame + slot1+LJ_FR2 < nextframe)
-    *name = "(*temporary)";
+    *name = isluafunc(fn) ? "(temporary)" : "(C temporary)";  /* 5.4 names. */
   return frame+slot1;
+}
+
+/* -- 5.4 tail-call frame marks ------------------------------------------- */
+
+/* Marks are kept per thread while a call hook is installed: the "tail call"
+** event marks the callee's base slot, a plain call clears everything from
+** its base upwards. Frames entered while no call hook was set are never
+** marked, so istailcall is exact under a debugger and false otherwise.
+*/
+static void debug_tailclear(lua_State *L, MSize ofs)
+{
+  MSize hi = L->tailhi;
+  if (ofs < hi) {
+    uint32_t *bits = mref(L->tailbits, uint32_t);
+    MSize w = ofs >> 5, wend = (hi + 31) >> 5;
+    bits[w] &= (1u << (ofs & 31)) - 1u;
+    for (w++; w < wend; w++) bits[w] = 0;
+    L->tailhi = ofs;
+  }
+}
+
+void lj_debug_tailmark(lua_State *L, MSize ofs, int tail)
+{
+  global_State *g = G(L);
+  if (L->tailepoch != g->hookepoch) {  /* Marks from an earlier hook phase. */
+    if (L->tailbitsz)
+      memset(mref(L->tailbits, void), 0, L->tailbitsz*sizeof(uint32_t));
+    L->tailhi = 0;
+    L->tailepoch = g->hookepoch;
+  }
+  if (tail) {
+    uint32_t *bits;
+    MSize need = (ofs >> 5) + 1;
+    if (need > L->tailbitsz) {
+      MSize nsz = need < 8 ? 8 : need * 2;
+      bits = (uint32_t *)lj_mem_realloc(L, mref(L->tailbits, void),
+				       L->tailbitsz*sizeof(uint32_t),
+				       nsz*sizeof(uint32_t));
+      memset(bits + L->tailbitsz, 0, (nsz - L->tailbitsz)*sizeof(uint32_t));
+      setmref(L->tailbits, bits);
+      L->tailbitsz = nsz;
+    }
+    debug_tailclear(L, ofs+1);
+    mref(L->tailbits, uint32_t)[ofs >> 5] |= 1u << (ofs & 31);
+    if (L->tailhi <= ofs) L->tailhi = ofs+1;
+  } else {
+    debug_tailclear(L, ofs);
+  }
+}
+
+int lj_debug_istailcall(lua_State *L, cTValue *frame)
+{
+  MSize ofs = (MSize)((frame+1) - tvref(L->stack));
+  return L->tailepoch == G(L)->hookepoch && ofs < L->tailhi &&
+	 ((mref(L->tailbits, uint32_t)[ofs >> 5] >> (ofs & 31)) & 1u);
+}
+
+void lj_debug_tailfree(global_State *g, lua_State *L)
+{
+  if (L->tailbitsz)
+    lj_mem_freevec(g, mref(L->tailbits, void), L->tailbitsz, uint32_t);
 }
 
 /* Get name of upvalue. */
@@ -312,6 +373,13 @@ const char *lj_debug_funcname(lua_State *L, cTValue *frame, const char **name)
   if (frame_isvarg(frame))
     frame = frame_prevd(frame);
   pframe = frame_prev(frame);
+  /* 5.4: a function called by the hook machinery is a "hook '?'" frame
+  ** (PUC CIST_HOOKED), not whatever the hooked frame's instruction names. */
+  if (hook_active(G(L)) &&
+      pframe == tvref(L->stack) + G(L)->hookbase) {
+    *name = "?";
+    return "hook";
+  }
   fn = frame_func(pframe);
   pc = debug_framepc(L, fn, frame);
   if (pc != NO_BCPOS) {
@@ -514,6 +582,13 @@ int lj_debug_getinfo(lua_State *L, const char *what, lj_Debug *ar, int ext)
       opt_f = 1;
     } else if (*what == 'L') {
       opt_L = 1;
+    } else if (*what == 't') {  /* 5.4 */
+      ar->istailcall = frame ? (unsigned char)lj_debug_istailcall(L, frame) : 0;
+    } else if (*what == 'r') {  /* 5.4: only meaningful inside a hook. */
+      if (!frame || !hook_active(G(L)) ||
+	  (MSize)(frame - tvref(L->stack)) != G(L)->hookbase) {
+	ar->ftransfer = ar->ntransfer = 0;
+      }  /* else: filled in by the hook caller (lj_dispatch.c). */
     } else {
       return 0;  /* Bad option. */
     }
@@ -704,21 +779,24 @@ LUALIB_API void luaL_traceback (lua_State *L, lua_State *L1, const char *msg,
       lua_pushfstring(L, "\n\t%s:", ar.short_src);
     if (ar.currentline > 0)
       lua_pushfstring(L, "%d:", ar.currentline);
-    if (*ar.namewhat) {
-      /* Lua 5.4 wording for metamethod frames ("in metamethod 'close'"). */
-      if (*ar.namewhat == 'm' && ar.namewhat[1] == 'e')
-	lua_pushfstring(L, " in metamethod " LUA_QS, ar.name);
-      else
-	lua_pushfstring(L, " in function " LUA_QS, ar.name);
-    } else {
-      if (*ar.what == 'm') {
+    {
+      /* Lua 5.4 lauxlib pushfuncname: a function found in package.loaded is
+      ** "function 'lib.name'" (globals without the _G. prefix); otherwise
+      ** the call-site kind and name ("local 'f'", "field 'x'", "method 'm'",
+      ** "upvalue 'u'", "metamethod 'close'", "hook '?'"); else main chunk,
+      ** "function <src:line>", or "?" for a C function. */
+      char namebuf[128];
+      const char *gname = lj_err_funcname_loaded(L, fn, namebuf, sizeof(namebuf));
+      if (gname)
+	lua_pushfstring(L, " in function " LUA_QS, gname);
+      else if (*ar.namewhat)
+	lua_pushfstring(L, " in %s " LUA_QS, ar.namewhat, ar.name);
+      else if (*ar.what == 'm')
 	lua_pushliteral(L, " in main chunk");
-      } else if (*ar.what == 'C') {
-	lua_pushfstring(L, " at %p", fn->c.f);
-      } else {
-	lua_pushfstring(L, " in function <%s:%d>",
-			ar.short_src, ar.linedefined);
-      }
+      else if (*ar.what != 'C')
+	lua_pushfstring(L, " in function <%s:%d>", ar.short_src, ar.linedefined);
+      else
+	lua_pushliteral(L, " in ?");
     }
     if ((int)(L->top - L->base) - top >= 15)
       lua_concat(L, (int)(L->top - L->base) - top);

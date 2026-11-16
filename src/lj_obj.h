@@ -675,6 +675,12 @@ typedef struct global_State {
   int32_t hookcount;	/* Instruction hook countdown. */
   int32_t hookcstart;	/* Start count for instruction hook counter. */
   lua_Hook hookf;	/* Hook function. */
+  MSize hookbase;	/* Stack offset of the frame a hook is running for (5.4 'hook' frames). */
+  MSize hookepoch;	/* Incremented by lua_sethook; validates thread tail marks. */
+  MSize hookftransfer;	/* 5.4 getinfo 'r' for the running hook. */
+  MSize hookntransfer;
+  MSize tailofs;	/* Base offset (bytes) of a pending tail call, 0 if none. */
+  MSize ffretry;	/* Set by the VM when a fast function retries after its fallback. */
   lua_CFunction wrapf;	/* Wrapper for C function calls. */
   lua_CFunction panic;	/* Called as a last resort for errors. */
   BCIns bc_cfunc_int;	/* Bytecode for internal C function calls. */
@@ -730,6 +736,14 @@ struct lua_State {
   MRef tbclist;		/* int32_t[] of stack offsets. */
   MSize tbcn;		/* Number of pending to-be-closed slots. */
   MSize tbcsize;	/* Allocated size of tbclist. */
+  /* 5.4 debug.getinfo 't' (istailcall): one bit per stack slot, marking the
+  ** base of frames entered by a tail call. Maintained only while a call hook
+  ** is set (hookepoch), see lj_debug_tailmark(). */
+  MRef tailbits;	/* uint32_t[] bitmap. */
+  MSize tailbitsz;	/* Allocated words. */
+  MSize tailhi;		/* One past the highest set bit. */
+  MSize tailepoch;	/* g->hookepoch the marks belong to. */
+  MRef hookff;		/* ASM fast function that got the last call hook. */
 };
 
 #define G(L)			(mref(L->glref, global_State))

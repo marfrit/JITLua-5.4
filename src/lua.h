@@ -330,6 +330,7 @@ LUA_API void lua_setlevel	(lua_State *from, lua_State *to);
 #define LUA_HOOKLINE	2
 #define LUA_HOOKCOUNT	3
 #define LUA_HOOKTAILRET 4
+#define LUA_HOOKTAILCALL 4	/* 5.4 name; LuaJIT's tail return event. */
 
 
 /*
@@ -392,6 +393,9 @@ struct lua_Debug {
   int linedefined;	/* (S) */
   int lastlinedefined;	/* (S) */
   char short_src[LUA_IDSIZE]; /* (S) */
+  unsigned char istailcall;	/* (t) 5.4 */
+  unsigned short ftransfer;	/* (r) 5.4: index of first value transferred */
+  unsigned short ntransfer;	/* (r) 5.4: number of transferred values */
   /* private part */
   int i_ci;  /* active function */
 };

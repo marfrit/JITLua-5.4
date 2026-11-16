@@ -523,6 +523,10 @@ static void LJ_FASTCALL recff_ipairs_aux(jit_State *J, RecordFFData *rd)
   if (tref_istab(ix.tab)) {
     if (!tvisnumber(&rd->argv[1]))  /* No support for string coercion. */
       lj_trace_err(J, LJ_TRERR_BADTYPE);
+    if (tabref(tabV(&rd->argv[0])->metatable)) {  /* 5.3+: __index path. */
+      recff_nyiu(J, rd);
+      return;
+    }
     setintV(&ix.keyv, numberVint(&rd->argv[1])+1);
     settabV(J->L, &ix.tabv, tabV(&rd->argv[0]));
     ix.val = 0; ix.idxchain = 0;

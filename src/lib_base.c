@@ -122,11 +122,24 @@ LJLIB_ASM(pairs)		LJLIB_REC(xpairs 0)
   return ffh_pairs(L, MM_pairs);
 }
 
+/* 5.3+: ipairs respects __index (t[i] with metamethods, stop at the first
+** nil). The ASM fast path handles tables without a metatable; a table with
+** one lands here, as do non-integer keys. */
 LJLIB_NOREGUV LJLIB_ASM(ipairs_aux)	LJLIB_REC(.)
 {
-  lj_lib_checktab(L, 1);
-  lj_lib_checkint(L, 2);
-  return FFH_UNREACHABLE;
+  GCtab *t = lj_lib_checktab(L, 1);
+  int32_t i = lj_lib_checkint(L, 2) + 1;
+  if (!tabref(t->metatable)) return FFH_RETRY;  /* Fast path (int key now). */
+  L->top = L->base + 2;
+  lua_pushinteger(L, (lua_Integer)i);
+  lua_gettable(L, 1);  /* Runs __index. */
+  setintV(L->base-1-LJ_FR2, i);
+  if (tvisnil(L->top-1)) {
+    setnilV(L->base-1-LJ_FR2);
+    return FFH_RES(1);
+  }
+  copyTV(L, L->base-LJ_FR2, L->top-1);
+  return FFH_RES(2);
 }
 
 LJLIB_PUSH(lastcl)

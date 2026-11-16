@@ -1520,6 +1520,7 @@ static void build_subroutines(BuildCtx *ctx)
   |.ffunc_2 ipairs_aux
   |  mov TAB:RB, [BASE]
   |  checktab TAB:RB, ->fff_fallback
+  |  cmp aword TAB:RB->metatable, 0; jne ->fff_fallback  // 5.3+: __index.
   |.if DUALNUM
   |  mov RA, [BASE+8]
   |  checkint RA, ->fff_fallback

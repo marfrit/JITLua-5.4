@@ -1287,6 +1287,8 @@ static void build_subroutines(BuildCtx *ctx)
   |.ffunc_2 ipairs_aux
   |  checktab CARG1, ->fff_fallback
   |   checkint CARG2, ->fff_fallback
+  |  ldr TMP2, TAB:CARG1->metatable
+  |  cbnz TMP2, ->fff_fallback		// 5.3+: __index on the table.
   |  ldr TMP1w, TAB:CARG1->asize
   |   ldr CARG3, TAB:CARG1->array
   |    ldr TMP0w, TAB:CARG1->hmask

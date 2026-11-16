@@ -659,3 +659,33 @@ word of a widened operand.
 
 Rule for the future: a box never holds an int32-range value (canonical
 encoding); every producer must go through lj_i64_toTValue/lj_i64_tvstore.
+
+## Session 27 (branch close-tbc) — <close> / __close LANDED on arm64 + x64
+
+Design (fifth attempt; the previous four are above): no C-side call from the
+UCLO handler at all.
+- Runtime list per thread (`L->tbclist`, stack offsets, innermost last). New
+  `BC_TBC A` registers slot A at the declaration (nil/false ignored, a value
+  without __close errors with the variable name). The parser marks a scope
+  with <close> variables like a scope with upvalues, so the existing UCLO is
+  emitted at every exit (block end, break/goto via gola_close, return via
+  `fs->ntbc`); `return f()` in such a scope is not a tail call (5.4).
+- UCLO pops ONE pending slot at or above its level, builds an ordinary
+  metamethod call frame `__close(value, nil)` with the new continuation
+  `lj_cont_tbc`, whose return PC is the UCLO itself: the VM re-executes the
+  UCLO until nothing is pending, then closes upvalues and jumps. MULTRES is
+  parked in an extra slot below the continuation and restored by the
+  continuation (CALLM + UCLO + RETM).
+- Error path: `err_unwind` runs the pending handlers once the catching frame
+  is known (pcall(), lua_pcall, lua_cpcall, C frames with a catcher below),
+  with L->top still above the discarded frames and the catching frame as the
+  caller (PUC order; an error in a handler replaces the error object). A
+  dying coroutine keeps its variables; `coroutine.close` runs them with the
+  error object; `coroutine.wrap` closes before propagating an error.
+- Generic for: the 4th (closing) value lives in a hidden slot below the
+  iterator triple; `BC_TBCCLO` at the loop-exit label closes it (break and
+  fall-through); the recorder specialises BC_TBC/BC_TBCCLO on nil/false so
+  pairs/ipairs loops still compile. Functions with explicit <close>
+  variables stay in the interpreter (UCLO aborts recording).
+Tests: close_01_semantics, close_02_paths (new), close_03_puc_locals (the
+<close> sections of PUC's locals.lua, verbatim) in mode A (vs PUC) and B.

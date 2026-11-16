@@ -1,7 +1,8 @@
 --! 5.4 to-be-closed variables: the <close> sections of the PUC 5.4.7 test
---! suite's locals.lua (lines 206-580 and 860-1045 of the vendored file),
---! unchanged except for this header and the final print. Sections needing
---! the PUC test library (T), hooks, warnings or os.exit are left out.
+--! suite's locals.lua (lines 206-571, 861-1046 and 1047-1057 of the vendored
+--! file), unchanged except for this header and the final print. Sections
+--! needing the PUC test library (T), hooks or a forced stack overflow are
+--! left out.
 
 print"testing to-be-closed variables"
 
@@ -32,6 +33,7 @@ do
   end
   a[#a + 1] = "out"
   assert(a[1] == "in" and a[2] == "y" and a[3] == "x" and a[4] == "out")
+end
 
 do
   local X = false
@@ -141,7 +143,6 @@ do
   -- bug in 5.4.3: previous condition (calls cannot be tail in the
   -- scope of to-be-closed variables) must be valid for tbc variables
   -- created by 'for' loops.
-  -- created by 'for' loops.
 
   local closed = false
 
@@ -181,7 +182,6 @@ do
 end
 
 
-do print("testing errors in __close")
 do print("testing errors in __close")
 
   -- original error is in __close
@@ -370,16 +370,6 @@ do   -- tbc inside close methods
 end
 
 
-local function checktable (t1, t2)
-  assert(#t1 == #t2)
-  for i = 1, #t1 do
-    assert(t1[i] == t2[i])
-  end
-end
-
-
-
-
 do
   -- yielding inside closing metamethods while returning
   -- (bug in 5.4.3)
@@ -565,4 +555,15 @@ do
   assert(not st and string.find(msg, "%w+%.%w+:%d+: YYY"))
 
 end
+
+
+-- a suspended coroutine should not close its variables when collected
+local co
+co = coroutine.wrap(function()
+  -- should not run
+  local x <close> = func2close(function () os.exit(false) end)
+  co = nil
+  coroutine.yield()
+end)
+co()                 -- start coroutine
 print("OK")

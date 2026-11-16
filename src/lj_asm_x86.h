@@ -2935,13 +2935,19 @@ static void asm_stack_restore(ASMState *as, SnapShot *snap)
 	RegSet allow = rset_exclude(RSET_GPR, RID_BASE);
 	Reg src = ra_alloc1(as, ref, allow);
 #if LJ_GC64
-	Reg tmp = ra_scratch(as, rset_exclude(allow, src));
-	uint64_t tag;
-	emit_rmro(as, XO_MOVto, tmp|REX_64, RID_BASE, ofs);
-	tag = (LJ_DUALNUM && !irt_is64(ir->t) && irt_isinteger(ir->t)) ?
-	      LJ_TISNUM : irt_toitype(ir->t);
-	emit_rr(as, XO_OR, tmp|REX_64, src|REX_64);
-	emit_loadu64(as, tmp, tag << 47);
+	if (LJ_DUALNUM && !irt_is64(ir->t) && irt_isinteger(ir->t)) {
+	  /* An int32 ref may sit in a register with a dirty upper half (the
+	  ** checked int64->int32 CONV leaves the sign extension there), so
+	  ** build the TValue with two 32-bit stores, like ASTORE/HSTORE do,
+	  ** instead of OR-ing the tag into the 64-bit register. */
+	  emit_movmroi(as, RID_BASE, ofs+4, LJ_TISNUM << 15);
+	  emit_movtomro(as, src, RID_BASE, ofs);
+	} else {
+	  Reg tmp = ra_scratch(as, rset_exclude(allow, src));
+	  emit_rmro(as, XO_MOVto, tmp|REX_64, RID_BASE, ofs);
+	  emit_rr(as, XO_OR, tmp|REX_64, src|REX_64);
+	  emit_loadu64(as, tmp, (uint64_t)irt_toitype(ir->t) << 47);
+	}
 #else
 	emit_movtomro(as, REX_64IR(ir, src), RID_BASE, ofs);
 #endif

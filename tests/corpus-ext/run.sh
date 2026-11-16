@@ -17,10 +17,13 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$ROOT"
 LUAJIT=${LUAJIT:-$ROOT/src/luajit}
 REF=${REF:-$ROOT/tests/ref/bin/lua54ref}
-OUT=${CORPUS_EXT_OUT:-/tmp/corpus-ext}
+# A private scratch dir per run: two corpus runs on one box host (the soak
+# next to a gate) interleaved their per-arm outputs in a shared /tmp dir.
+OUT=${CORPUS_EXT_OUT:-$(mktemp -d /tmp/corpus-ext.XXXXXX)}
 DL=$ROOT/.dlcache
 ONLY=${1:-}
 rm -rf "$OUT"; mkdir -p "$OUT"
+trap 'rm -rf "$OUT"' EXIT
 
 fail=0; ndiff=0; nsame=0
 say() { printf '%s\n' "$*"; }

@@ -33,3 +33,4 @@ tests/d54/math_02_random.lua	A	P5.5 done: xoshiro256** sequence matches PUC for 
 tests/d54/meta_01_matrix.lua	A	P1: remaining 5.4 arithmetic-error wording (type-first / "attempt to add a 'string' with a 'table'")
 tests/d54/numeric_02_arith.lua	A	P1: remaining 5.4 coercion-failure wording ("attempt to add a 'string' with a 'number'")
 tests/d54/tbl_03_border_divergence.lua	A	IMPL-DEFINED: runtime-built sparse tables may report any legal border (5.4 manual 3.4.7); LuaJIT's array-growth policy differs from PUC's alimit hint
+tests/d54/close_01_semantics.lua	A,B	P1: <close> parked (VM __close call context corrupts closure upvalues; see docs/phase0-status.md)

@@ -689,3 +689,13 @@ UCLO handler at all.
   variables stay in the interpreter (UCLO aborts recording).
 Tests: close_01_semantics, close_02_paths (new), close_03_puc_locals (the
 <close> sections of PUC's locals.lua, verbatim) in mode A (vs PUC) and B.
+Also: io file handles get __close (io.lines' 4th return value is the file),
+5.4 traceback wording "in metamethod 'close'", "cannot resume non-suspended
+coroutine". Documented divergences: inside a __close handler on the error
+path, level 2 is the unwound Lua function (PUC: the pcall C function); a
+yield from such a handler crosses the C-level protected call (PUC resumes it).
+Gates at aa4ab2cd (close-tbc, includes main d7da0bd2), both arches identical:
+A+B 71 PASS / 0 FAIL / 13 XFAIL / 0 XPASS, opt 0-3 164 PASS (+4 XFAIL
+math_os_01 B from main), R 42, C API + i64 14/14, fuzz 160/160.
+Bench unchanged: arm64 B1 13.7 ms (FFI 8.9 this run, 15.2 the run before),
+B3 22.9 / 214 ms; x64 B1 30.2 (FFI 29.3), B3 52.3 / 1564 ms; checksums equal.

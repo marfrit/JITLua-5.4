@@ -1343,3 +1343,12 @@ The observable is only debug identity; un-interning long strings would be a
 large VM change. The corpus copies of literals.lua:231 and pm.lua:436 therefore
 assert the values but not `%p` identity, with the reason inline; both known-bad
 rows are removed.
+
+Session 41 (same day): lex_number now follows PUC read_numeral (digits/xdigits/
+dot, one exponent with optional sign, exactly one trailing letter/underscore;
+the 0x 'x' is saved explicitly), and an <eof> near-token is unquoted. This made
+corpus literals.lua byte-identical. Corpus A now passes for files, literals, pm,
+constructs, goto, big, tpack, utf8, bitwise, verybig and all d54 tests except
+the documented rows. Remaining corpus: db (istailcall without a hook), sort
+(IMPL-DEFINED counters/timings), main (missing libs fixtures; PUC stops there),
+and PERF rows.

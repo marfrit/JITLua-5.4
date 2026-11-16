@@ -923,7 +923,7 @@ recorder dispatches BC_BNOT/BAND/BOR/BXOR/BSHL/BSHR with a non-number
 operand through rec_mm_arith (BSAR is LuaJIT-only). bits_02_metamethods
 passes in A and B (removed from known-bad); a hot loop over metamethod bit
 operators compiles.
-GATESLINE
+Gated together with session 32 (rand-rec contains bits-mm): see below.
 
 ## Session 32 (branch rand-rec, on bits-mm) — math.random in the JIT, widened-int C API fixes
 
@@ -939,4 +939,15 @@ math.modf pushes the integral part as an integer when it fits (lmathlib
 pushnumint), which was the last A difference of math_os_01. The C API
 box test anchored nothing and passed by allocator address reuse; it now
 keeps the value on the stack across the collection.
-GATESLINE2
+Also: a NaN prints with its sign like printf (math.sqrt(-1) is -nan on x86,
+nan on arm64; math_os_01 A differed on x64 only). Gates at 5d32b00c
+(rand-rec = bits-mm + this), both arches: A+B 89 PASS / 0 FAIL / 10 XFAIL
+/ 1 XPASS, opt 0-3 196 PASS / 0 FAIL / 0 XFAIL / 4 XPASS (the XPASSes are
+DeepSeek's dump_03_version B entry, which passes), R 50, GC stress 58/0/2,
+C API 81 + i64 14/14, fuzz 160/160. bits_02_metamethods and math_os_01 left
+known-bad. Bench JIT arms unchanged: arm64 B1 16.5, B2 941.9, B2b 127.3,
+B3 23.6 / 209.5 ms; x64 B1 30.3, B2 3208.1, B2b 658.8, B3 47.8 / 940.1 ms. Deferred: err_02_tailname (PUC keeps
+the Lua caller's frame alive when a C function is tail-called, so
+lua_getinfo finds 'rep' from the TAILCALL; LuaJIT's CALLT replaces the
+frame -- matching it means non-tail calls to C functions in the VM, not a
+cheap change).

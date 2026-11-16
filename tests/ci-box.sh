@@ -50,6 +50,9 @@ say "harness: GC stress (pause 0 in every arm), int64 + close tests, modes A+B+R
 tests/harness.sh --mode all --opt-levels 0,3 --gc-stress --corpus tests/d54 \
   --filter 'i64_' --filter 'close_' --filter 'coro_' --filter 'gc_' --filter 'bits_' --timeout 300 | tail -12
 
+say "JIT tooling smoke (-jv/-jdump/-jbc/-jp over the int64 tests)"
+sh tests/jitutil-smoke.sh | tail -4
+
 say "C API"
 tests/capi/run.sh | tail -3
 

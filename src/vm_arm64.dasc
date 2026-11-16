@@ -3525,7 +3525,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
       |  str TMP0, [BASE, RA, lsl #3]
       |  ins_next
       |3:
-      |  setnilV RA
+      |  str TISNIL, [BASE, RA, lsl #3]
       |  ins_next
     } else {
       |  str BASE, L->base

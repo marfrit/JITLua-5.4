@@ -253,7 +253,8 @@ local function timesort (a, n, func, msg, pre)
   table.sort(a, func)
   x = (os.clock() - x) * 1000
   pre = pre or ""
-  print(string.format("%ssorting %d %s elements in %.2f msec.", pre, n, msg, x))
+  -- No timing print: os.clock and the comparison count are implementation-
+  -- defined across arms; `check` still verifies the order.
   check(a, func)
 end
 
@@ -277,8 +278,7 @@ end
 local x = os.clock(); local i = 0
 table.sort(a, function(x,y) i=i+1; return y<x end)
 x = (os.clock() - x) * 1000
-print(string.format("Invert-sorting other %d elements in %.2f msec., with %i comparisons",
-      limit, x, i))
+-- No timing/comparison print (implementation-defined across arms).
 check(a, function(x,y) return y<x end)
 
 

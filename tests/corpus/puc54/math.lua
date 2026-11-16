@@ -848,8 +848,8 @@ do
   assert(math.random(0) == res)
   math.randomseed(x, y)    -- again should repeat the state
   assert(math.random(0) == res)
-  -- keep the random seed for following tests
-  print(string.format("random seeds: %d, %d", x, y))
+  -- keep the random seed for following tests. Not printed: the seed is drawn
+  -- from the OS per process, so differential arms cannot agree on it.
 end
 
 do   -- test random for floats
@@ -884,8 +884,8 @@ do   -- test random for floats
       goto doagain
     end
   end
-  print(string.format("float random range in %d calls: [%f, %f]",
-                      totalrounds, low, up))
+  -- No print: the call count/range is PRNG/process-dependent (IMPL-DEFINED);
+  -- the distribution assertions above already verify the range.
 end
 
 
@@ -917,10 +917,7 @@ do   -- test random for full integers
       goto doagain
     end
   end
-  print(string.format(
-     "integer random range in %d calls: [minint + %.0fppm, maxint - %.0fppm]",
-      totalrounds, (minint - low) / minint * 1e6,
-                   (maxint - up) / maxint * 1e6))
+  -- No print: PRNG/process-dependent statistics (IMPL-DEFINED).
 end
 
 do

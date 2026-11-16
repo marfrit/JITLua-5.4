@@ -1383,3 +1383,21 @@ changes were needed.
 Both boxes: ci-box A+B 107 PASS/5 XFAIL, opt 224, R 56, GC 59+1X, capi 101,
 i64 14, fuzz 160/0; corpus-ext 15 arms SAME / 0 unexpected. Reference banner is
 now `Lua 5.4.9 Copyright (C) 1994-2026 Lua.org, PUC-Rio`.
+
+
+## Session 43 — math and sort corpus pass; adaptation policy
+
+math.lua and sort.lua now pass modes A and B on x64 and arm64; their known-bad
+rows are removed. Both only printed process-/implementation-defined values that
+no differential harness can compare: math printed the OS-drawn random seed and
+PRNG statistics (all its distribution assertions pass), sort printed os.clock
+timings and the comparator call count (all order assertions pass). The corpus
+adaptations now omit those prints while keeping every assertion; they are
+reapplied by tests/ref/corpus-adapt.py after fetch-ref --corpus, alongside the
+constructs/literals/pm adaptations.
+
+Remaining known-bad after this: corpus calls (hang at xpcall(loop,loop)
+C-stack-overflow handling, >600s; VM owner), closure (JIT-on slowdown), db
+(istailcall without a hook), main (missing libs fixtures + interactive prompt
+environment), heavy (PUC reference timeout); d54 only the documented border/
+fork/tailname/table-__gc rows.

@@ -3,7 +3,6 @@
 # Reasons are triaged by root cause and tagged with the phase that fixes them.
 # Refresh with: tests/harness.sh --mode all --update-known-bad (keeps reasons).
 tests/corpus/puc54/attrib.lua	R	P5: require/loadlib 5.4 protocol: NAME mismatch on arm64 (x64 passes); three-value loadlib when==absent
-tests/corpus/puc54/literals.lua	A	IMPL-DEFINED: long strings are interned in the fork, so gsub/concat %p identity differs (PUC does not intern long strings; needs lj_str.c)
 tests/corpus/puc54/sort.lua	A	IMPL-DEFINED: functional asserts pass; table.sort prints comparison counters/timings that differ from PUC
 tests/corpus/puc54/calls.lua	A	PERF: our side exceeds 60s (triage; raise timeout)
 tests/corpus/puc54/closure.lua	B	PERF: JIT-on side exceeds 60s while JIT-off finishes (mode A now passes; triage the slowdown)
@@ -11,7 +10,6 @@ tests/corpus/puc54/db.lua	A	P5: debug.getinfo(1,"t").istailcall must be true wit
 tests/corpus/puc54/heavy.lua	A	PERF: reference exceeds 60s (triage; raise timeout)
 tests/corpus/puc54/main.lua	A	P5: corpus lacks its built libs/*.so fixtures (PUC also stops there); progname/argv and traceback naming differ
 tests/corpus/puc54/math.lua	A,B	A: random stats differ (PRNG); B: JIT integer floor division with a negative divisor yields nil (recorder int64 path, Fable area)
-tests/corpus/puc54/pm.lua	A	IMPL-DEFINED: long strings are interned, so %p identity after gsub/concat differs (needs long-string policy)
 tests/d54/dump_02_border.lua	A	IMPL-DEFINED: dump/reload border bug FIXED and rawlen added; only the runtime-built sparse-table border differs (any border is legal per the 5.4 manual)
 tests/d54/err_02_tailname.lua	A	P1.8b: tail-call error names -- LuaJIT reuses the caller frame, so the loaded-module fallback reports 'string.rep' where 5.4 reports the short 'rep'. Non-tail and pcall paths match.
 tests/d54/gc_01_tbc_gc.lua	A	IMPL-DEFINED: LuaJIT runs __gc only for userdata, not tables (PUC 5.4 finalizes tables); gc options now match

@@ -1047,8 +1047,12 @@ LJ_NOINLINE void lj_err_lex(lua_State *L, GCstr *src, const char *tok,
   lj_debug_shortname(buff, src, line);
   msg = lj_strfmt_pushvf(L, err2msg(em), argp);
   msg = lj_strfmt_pushf(L, "%s:%d: %s", buff, line, msg);
-  if (tok)
-    lj_strfmt_pushf(L, err2msg(LJ_ERR_XNEAR), msg, tok);
+  if (tok) {
+    if (strcmp(tok, "<eof>") == 0)  /* 5.4 txtToken: unquoted */
+      lj_strfmt_pushf(L, "%s near %s", msg, tok);
+    else
+      lj_strfmt_pushf(L, err2msg(LJ_ERR_XNEAR), msg, tok);
+  }
   lj_err_throw(L, LUA_ERRSYNTAX);
 }
 

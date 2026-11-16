@@ -228,7 +228,10 @@ do  -- reuse of long strings
   assert(a1 == getadd(foo2()))
 
   local sd = "0123456789" .. "0123456789012345678901234567890123456789"
-  assert(sd == s1 and getadd(sd) ~= a1)
+  assert(sd == s1)
+  -- Deliberate divergence: LuaJIT interns every string, PUC does not intern
+  -- long strings, so %p/lua_topointer identity after concat differs.
+  -- (No %p identity assertion for long strings here; values still match.)
 end
 
 

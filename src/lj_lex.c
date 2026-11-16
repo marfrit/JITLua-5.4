@@ -101,11 +101,30 @@ static void lex_number(LexState *ls, TValue *tv)
   if ((c = ls->c) == '0') {
     lex_save(ls, c);
     c = lex_next(ls);
-    if ((c | 0x20) == 'x') xp = 'p';
+    if ((c | 0x20) == 'x') { xp = 'p'; lex_save(ls, c); lex_next(ls); }
   }
-  while (lj_char_isident(ls->c) || ls->c == '.' ||
-	 ((ls->c == '-' || ls->c == '+') && (c | 0x20) == xp)) {
+  /* PUC 5.4 read_numeral: digits/hex digits and '.', one exponent mark with
+  ** optional sign, then (if a letter/underscore follows) exactly one more char
+  ** to force the malformed-number error with PUC's token text ('1p'). */
+  for (;;) {
     c = ls->c;
+    if ((xp == 'p' && (c == 'p' || c == 'P')) ||
+	(xp == 'e' && (c == 'e' || c == 'E'))) {
+      lex_save(ls, c);
+      lex_next(ls);
+      c = ls->c;
+      if (c == '-' || c == '+') {  /* optional exponent sign */
+	lex_save(ls, c);
+	lex_next(ls);
+      }
+    } else if (lj_char_isxdigit(ls->c) || ls->c == '.') {
+      lex_save(ls, ls->c);
+      lex_next(ls);
+    } else {
+      break;
+    }
+  }
+  if (lj_char_isalpha(ls->c) || ls->c == '_') {  /* numeral touching a word */
     lex_save(ls, ls->c);
     lex_next(ls);
   }

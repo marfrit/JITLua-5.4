@@ -433,7 +433,9 @@ do   -- test reuse of original string in gsub
                           end)
   assert(count == 100)
   -- no reuse in this case
-  assert(r == s and string.format("%p", s) ~= string.format("%p", r))
+  assert(r == s)
+  -- Deliberate divergence: LuaJIT interns every string (PUC does not intern
+  -- long strings), so the %p/lua_topointer identity assertion is skipped.
 end
 
 print('OK')

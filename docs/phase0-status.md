@@ -924,3 +924,19 @@ operand through rec_mm_arith (BSAR is LuaJIT-only). bits_02_metamethods
 passes in A and B (removed from known-bad); a hot loop over metamethod bit
 operators compiles.
 GATESLINE
+
+## Session 32 (branch rand-rec, on bits-mm) — math.random in the JIT, widened-int C API fixes
+
+recff_math_random now calls lj_math_random_f/_0/_i, which step the
+xoshiro256** RandState exactly as the interpreter does (integer bounds only,
+interval guarded, results narrowed to int32 when both bounds fit): the B
+half of math_os_01 passes and a hot loop over math.random compiles.
+Found on the way: numberVnum() and lua_tointeger/lua_tointegerx read the
+low word of a widened 47-bit integer (tvisint is true for both forms), so
+math.random(1<<40, ...) in the interpreter returned values without the
+lower bound -- fixed at the root (numberVnum feeds many library paths).
+math.modf pushes the integral part as an integer when it fits (lmathlib
+pushnumint), which was the last A difference of math_os_01. The C API
+box test anchored nothing and passed by allocator address reuse; it now
+keeps the value on the stack across the collection.
+GATESLINE2

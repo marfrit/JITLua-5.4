@@ -414,6 +414,8 @@ TRef LJ_FASTCALL lj_ir_tonum(jit_State *J, TRef tr)
   if (!tref_isnum(tr)) {
     if (tref_isinteger(tr))
       tr = emitir(IRTN(IR_CONV), tr, IRCONV_NUM_INT);
+    else if (tref_istype(tr, IRT_I64))  /* 5.4 int64: like lj_lib_checknum. */
+      tr = emitir(IRTN(IR_CONV), tr, IRCONV_NUM_I64);
     else if (tref_isstr(tr))
       tr = emitir(IRTG(IR_STRTO, IRT_NUM), tr, 0);
     else
@@ -426,6 +428,8 @@ TRef LJ_FASTCALL lj_ir_tonum(jit_State *J, TRef tr)
 TRef LJ_FASTCALL lj_ir_tostr(jit_State *J, TRef tr)
 {
   if (!tref_isstr(tr)) {
+    if (tref_istype(tr, IRT_I64))  /* 5.4 int64: exact decimal. */
+      return lj_ir_call(J, IRCALL_lj_strfmt_i64, tr);
     if (!tref_isnumber(tr))
       lj_trace_err(J, LJ_TRERR_BADTYPE);
     tr = emitir(IRT(IR_TOSTR, IRT_STR), tr,

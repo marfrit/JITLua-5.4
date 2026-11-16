@@ -52,6 +52,9 @@ LJ_FUNC int64_t lj_i64_shl(int64_t a, int64_t n);
 LJ_FUNC int64_t lj_i64_shr(int64_t a, int64_t n);
 LJ_FUNC int64_t lj_i64_mod(int64_t a, int64_t b);
 LJ_FUNC int64_t lj_i64_idiv(int64_t a, int64_t b);
+LJ_FUNC int64_t lj_i64_abs(int64_t a);
+LJ_FUNC int64_t lj_i64_min(int64_t a, int64_t b);
+LJ_FUNC int64_t lj_i64_max(int64_t a, int64_t b);
 /* Exact int64 vs. double compare: -1 less, 0 equal, 1 greater, 2 unordered. */
 LJ_FUNC int32_t lj_i64_cmpnum(int64_t a, double b);
 

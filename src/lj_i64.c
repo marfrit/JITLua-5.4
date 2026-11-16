@@ -275,6 +275,11 @@ void lj_i64_tvstore(lua_State *L, TValue *o, int64_t v)
   }
 }
 
+/* JIT helpers for math.abs/min/max with int64 arguments (abs wraps). */
+int64_t lj_i64_abs(int64_t a) { return a < 0 ? (int64_t)(0u - (uint64_t)a) : a; }
+int64_t lj_i64_min(int64_t a, int64_t b) { return a < b ? a : b; }
+int64_t lj_i64_max(int64_t a, int64_t b) { return a > b ? a : b; }
+
 int64_t lj_i64_shl(int64_t a, int64_t n) { return i64_shift(a, n, 0); }
 int64_t lj_i64_shr(int64_t a, int64_t n) { return i64_shift(a, n, 1); }
 

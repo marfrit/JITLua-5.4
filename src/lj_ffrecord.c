@@ -28,6 +28,7 @@
 #include "lj_dispatch.h"
 #include "lj_vm.h"
 #include "lj_strscan.h"
+#include "lj_i64.h"
 #include "lj_strfmt.h"
 #include "lj_serialize.h"
 
@@ -420,14 +421,31 @@ static void LJ_FASTCALL recff_tonumber(jit_State *J, RecordFFData *rd)
       return;
     }
   }
-  if (tref_isnumber_str(tr)) {
+  if (tref_istype(tr, IRT_I64)) {
+    /* 5.4 int64 argument: tonumber() returns it unchanged. */
+  } else if (tref_isnumber_str(tr)) {
     if (tref_isstr(tr)) {
       TValue tmp;
-      if (!lj_strscan_num(strV(&rd->argv[0]), &tmp)) {
+      /* 5.4: integer syntax gives an integer of any size. A constant string
+      ** folds to that constant; a runtime string with integer syntax has
+      ** no IR (STRTO yields a double), so it stays in the interpreter. */
+      if (!lj_strscan_number64(J->L, strV(&rd->argv[0]), &tmp)) {
 	recff_nyiu(J, rd);  /* Would need an inverted STRTO for this case. */
 	return;
       }
-      tr = emitir(IRTG(IR_STRTO, IRT_NUM), tr, 0);
+      if (tref_isk(tr)) {
+	int64_t v;
+	if (lj_i64_getint(&tmp, &v))
+	  tr = (int64_t)(int32_t)v == v ? lj_ir_kint(J, (int32_t)v) :
+					 lj_ir_kint64(J, (uint64_t)v);
+	else
+	  tr = lj_ir_knum(J, numV(&tmp));
+      } else if (!tvisnum(&tmp)) {
+	recff_nyiu(J, rd);
+	return;
+      } else {
+	tr = emitir(IRTG(IR_STRTO, IRT_NUM), tr, 0);
+      }
     }
 #if LJ_HASFFI
   } else if (tref_iscdata(tr)) {
@@ -478,10 +496,8 @@ static int recff_metacall(jit_State *J, RecordFFData *rd, MMS mm)
 static void LJ_FASTCALL recff_tostring(jit_State *J, RecordFFData *rd)
 {
   TRef tr = J->base[0];
-  if (tvisi64(&rd->argv[0])) {
-    /* ADR-001b step 4: a runtime boxed int64 is NYI in the recorder; the
-    ** interpreter produces the exact decimal. */
-    recff_nyiu(J, rd);
+  if (tref_istype(tr, IRT_I64)) {  /* 5.4 int64: exact decimal. */
+    J->base[0] = lj_ir_call(J, IRCALL_lj_strfmt_i64, tr);
     return;
   }
   if (tref_isstr(tr)) {
@@ -633,7 +649,14 @@ static void LJ_FASTCALL recff_next(jit_State *J, RecordFFData *rd)
 
 static void LJ_FASTCALL recff_math_abs(jit_State *J, RecordFFData *rd)
 {
-  TRef tr = lj_ir_tonum(J, J->base[0]);
+  TRef tr = J->base[0];
+  if (tref_istype(tr, IRT_I64)) {
+    /* 5.4: exact, wraps for mininteger. |v| of a value outside int32 is
+    ** outside int32 too (-2^31 is int32 inline), so the result stays I64. */
+    J->base[0] = lj_ir_call(J, IRCALL_lj_i64_abs, tr);
+    return;
+  }
+  tr = lj_ir_tonum(J, tr);
   J->base[0] = emitir(IRTN(IR_ABS), tr, lj_ir_ksimd(J, LJ_KSIMD_ABS));
   UNUSED(rd);
 }
@@ -717,11 +740,52 @@ static void LJ_FASTCALL recff_math_pow(jit_State *J, RecordFFData *rd)
   UNUSED(rd);
 }
 
+/* 5.4 math.min/max with an int64 argument: only when every argument is an
+** integer (int32 or int64) -- exact 64-bit compare, result narrowed back to
+** int32 under a guard when the runtime result fits (representation rule).
+** Mixed integer/float arguments stay in the interpreter. */
+static int recff_math_minmax_i64(jit_State *J, RecordFFData *rd)
+{
+  uint32_t op = rd->data;
+  int anyi64 = 0;
+  int64_t best;
+  BCReg i;
+  for (i = 0; J->base[i] != 0; i++) {
+    if (tref_istype(J->base[i], IRT_I64)) anyi64 = 1;
+    else if (!tref_isinteger(J->base[i])) return 0;
+  }
+  if (!anyi64) return 0;
+  {
+    TRef tr = J->base[0];
+    IRCallID id = op == IR_MIN ? IRCALL_lj_i64_min : IRCALL_lj_i64_max;
+    if (tref_isinteger(tr))
+      tr = emitir(IRT(IR_CONV, IRT_I64), tr, IRCONV_I64_INT|IRCONV_SEXT);
+    lj_i64_getint(&rd->argv[0], &best);
+    for (i = 1; J->base[i] != 0; i++) {
+      TRef tr2 = J->base[i];
+      int64_t v;
+      if (tref_isinteger(tr2))
+	tr2 = emitir(IRT(IR_CONV, IRT_I64), tr2, IRCONV_I64_INT|IRCONV_SEXT);
+      tr = lj_ir_call(J, id, tr, tr2);
+      lj_i64_getint(&rd->argv[i], &v);
+      best = op == IR_MIN ? (v < best ? v : best) : (v > best ? v : best);
+    }
+    if ((int64_t)(int32_t)best == best)
+      tr = emitir(IRTGI(IR_CONV), tr, IRCONV_INT_I64|IRCONV_CHECK);
+    J->base[0] = tr;
+  }
+  return 1;
+}
+
 static void LJ_FASTCALL recff_math_minmax(jit_State *J, RecordFFData *rd)
 {
-  TRef tr = lj_ir_tonumber(J, J->base[0]);
+  TRef tr;
   uint32_t op = rd->data;
   BCReg i;
+  if (recff_math_minmax_i64(J, rd)) return;
+  for (i = 0; J->base[i] != 0; i++)
+    if (tref_istype(J->base[i], IRT_I64)) { recff_nyiu(J, rd); return; }
+  tr = lj_ir_tonumber(J, J->base[0]);
   for (i = 1; J->base[i] != 0; i++) {
     TRef tr2 = lj_ir_tonumber(J, J->base[i]);
     IRType t = IRT_INT;
@@ -1093,6 +1157,10 @@ static void recff_format(jit_State *J, RecordFFData *rd, TRef hdr, int sbufx)
     case STRFMT_INT:
       id = IRCALL_lj_strfmt_putfnum_int;
     handle_int:
+      if (tref_istype(tra, IRT_I64)) {  /* 5.4 int64: exact. */
+	tr = lj_ir_call(J, IRCALL_lj_strfmt_putfxint, tr, trsf, tra);
+	break;
+      }
       if (!tref_isinteger(tra)) {
 #if LJ_HASFFI
 	if (tref_iscdata(tra)) {
@@ -1129,6 +1197,11 @@ static void recff_format(jit_State *J, RecordFFData *rd, TRef hdr, int sbufx)
       if (LJ_SOFTFP32) lj_needsplit(J);
       break;
     case STRFMT_STR:
+      if (tref_istype(tra, IRT_I64) && sf == STRFMT_STR) {  /* Plain %s. */
+	tr = lj_ir_call(J, IRCALL_lj_strfmt_putfxint, tr,
+			lj_ir_kint(J, (int32_t)STRFMT_D), tra);
+	break;
+      }
       if (!tref_isstr(tra)) {
 	recff_nyiu(J, rd);  /* NYI: __tostring and non-string types for %s. */
 	/* NYI: also buffers. */
@@ -1670,10 +1743,21 @@ void lj_ffrecord_func(jit_State *J)
     ** it as an int32. Leave such calls to the interpreter. */
     BCReg i;
     uint32_t ffid = J->fn->c.ffid;
-    /* Handlers that only copy, compare or type-dispatch their arguments. */
+    /* Handlers that only copy, compare or type-dispatch their arguments, or
+    ** that understand an IRT_I64 argument (step 4: tostring/tonumber,
+    ** string.format, math.abs/min/max, and the FP functions, which take the
+    ** int64 as a double like lj_lib_checknum does). */
     int generic = ffid == FF_type || ffid == FF_select || ffid == FF_assert ||
 		  ffid == FF_pcall || ffid == FF_xpcall || ffid == FF_rawequal ||
-		  ffid == FF_rawget || ffid == FF_rawset;
+		  ffid == FF_rawget || ffid == FF_rawset ||
+		  ffid == FF_tostring || ffid == FF_tonumber ||
+		  ffid == FF_string_format ||
+		  ffid == FF_math_abs || ffid == FF_math_min || ffid == FF_math_max ||
+		  ffid == FF_math_sqrt || ffid == FF_math_log10 || ffid == FF_math_exp ||
+		  ffid == FF_math_sin || ffid == FF_math_cos || ffid == FF_math_tan ||
+		  ffid == FF_math_asin || ffid == FF_math_acos || ffid == FF_math_atan ||
+		  ffid == FF_math_sinh || ffid == FF_math_cosh || ffid == FF_math_tanh ||
+		  ffid == FF_math_log || ffid == FF_math_atan2 || ffid == FF_math_ldexp;
     if (!generic)
       for (i = 0; i < J->maxslot; i++)
 	if (tref_istype(J->base[i], IRT_I64))

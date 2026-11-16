@@ -72,6 +72,27 @@ p("strfuncs", ("hello"):sub(b + 2), ("hello"):sub(-(b + 2), 2), ("hello"):sub(2,
 p("strfuncs-err", try(string.rep, "x", b), try(string.char, b), try(select, b, 1), try(table.insert, {}, b, 1),
   try(string.rep, "x", -(b)))
 
+-- Hot loops for the recorder: tostring/tonumber/format/math with int64 args.
+local ts, tn, mf, sq, fm = 0, 0, 0, 0, 0
+for i = 1, 300 do
+  ts = ts + #tostring(b + i) + #tostring(-(w + i))
+  tn = tn + tonumber("1152921504606846976") + tonumber("1099511627776") + (tonumber(b + i) - b)
+  mf = mf + math.abs(-(b + i)) - b + math.abs(math.mininteger + i) - b
+  sq = sq + math.sqrt(b + i) + math.floor(w + i) - w + math.ceil(b + i) - b
+  fm = fm + #string.format("%s|%d|%5d|%x", b + i, -(w + i), w, b + i)
+end
+p("rec-loops", ts, tn, mf, sq, fm)
+local mm1, mm2, mm3 = 0, 0, 0
+for i = 1, 300 do
+  mm1 = mm1 + math.max(b + i, w, i) - b + math.min(b + i, w, i)
+  mm2 = mm2 + math.min(-(b + i), -w) + b + math.max(w + i, -i) - w
+  mm3 = mm3 + math.max(i, 5) + math.min(w + i, w + 2) - w  -- narrowing back to int32
+end
+p("minmax-rec", mm1, mm2, mm3)
+local cat = 0
+for i = 1, 300 do cat = cat + #(i .. (b + i) .. (w + i) .. 1.5 .. "x") end
+p("concat-rec", cat)
+
 -- Interpreter GC on pure int64 arithmetic: memory must stay bounded.
 collectgarbage(); collectgarbage()
 local x = 0x9e3779b97f4a7c15

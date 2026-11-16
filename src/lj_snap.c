@@ -706,6 +706,12 @@ static void snap_restoreval(jit_State *J, GCtrace *T, ExitState *ex,
   if (irref_isk(ref)) {  /* Restore constant slot. */
     if (ir->o == IR_KPTR) {
       o->u64 = (uint64_t)(uintptr_t)ir_kptr(ir);
+#if LJ_GC64
+    } else if (ir->o == IR_KINT64) {
+      /* A 5.4 integer constant outside int32 (ADR-001b step 3): canonical
+      ** encoding, not the FFI cdata that lj_ir_kvalue would produce. */
+      lj_i64_toTValue(J->L, o, (int64_t)ir_kint64(ir)->u64);
+#endif
     } else {
       lj_assertJ(!(ir->o == IR_KKPTR || ir->o == IR_KNULL),
 		 "restore of const from IR %04d with bad op %d",

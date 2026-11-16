@@ -983,6 +983,30 @@ static void build_subroutines(BuildCtx *ctx)
   |  // 0/1 or TValue * (metamethod) returned in eax (RC).
   |  jmp <3
   |
+  |->vmeta_equal_i64:
+  |  // Lua 5.4 exact equality (ADR-001b). RA, RD = TValue words, RBd = ne,
+  |  // set by BC_ISEQV/BC_ISNEV/BC_ISEQN/BC_ISNEN.
+  |  sub PC, 4
+  |.if X64WIN
+  |  mov CARG3, RD
+  |  mov CARG4d, RBd
+  |  mov L:RB, SAVE_L
+  |  mov L:RB->base, BASE		// Caveat: CARG2 == BASE.
+  |  mov CARG2, RA
+  |  mov CARG1, L:RB			// Caveat: CARG1 == RA.
+  |.else
+  |  mov CARG2, RA
+  |  mov CARG4d, RBd			// Caveat: CARG4 == RA.
+  |  mov L:RB, SAVE_L
+  |  mov L:RB->base, BASE		// Caveat: CARG3 == BASE.
+  |  mov CARG3, RD
+  |  mov CARG1, L:RB
+  |.endif
+  |  mov SAVE_PC, PC
+  |  call extern lj_meta_equal_any	// (lua_State *L, uint64_t a, b, int ne)
+  |  // 0/1 or TValue * (metamethod) returned in eax (RC).
+  |  jmp <3
+  |
   |->vmeta_equal_cd:
   |.if FFI
   |  sub PC, 4
@@ -3046,39 +3070,6 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  mov RB, [BASE+RD*8]
     |  mov ITYPE, [BASE+RA*8]
     |  add PC, 4
-    |  // Exact int64/box numeric equality: compare by value, not by bits.
-    |  mov TMPR, RB
-    |  shr TMPR, 48
-    |  cmp TMPRd, 65529	// 0xfff9: int32, widened inline int, boxed int64
-    |  je >6
-    |  mov TMPR, ITYPE
-    |  shr TMPR, 48
-    |  cmp TMPRd, 65529
-    |  je >6
-    |  jmp >4
-    |6:
-    |  mov TMP1, BASE	// A C call clobbers BASE (CARG2/CARG3).
-    |  lea CARG1, [BASE+RA*8]	// Caveat: CARG1 == RA (WIN).
-    |  lea CARG2, [BASE+RD*8]	// Caveat: CARG2 == BASE (WIN).
-    |  call extern lj_i64_numeq	// (cTValue *a, cTValue *b)
-    |  mov BASE, TMP1	// Restore BASE: every exit path below uses it.
-    |  cmp RCd, -1		// -1: not numeric, use the normal path.
-    |  je >5
-    |  cmp RCd, 1		// 1 = equal, 0 = unequal.
-    if (vk) {
-      |  je >7
-    } else {
-      |  jne >7
-    }
-    |  ins_next
-    |7:
-    |  movzx RDd, PC_RD
-    |  branchPC RD
-    |  ins_next
-    |5:  // Reload what the call clobbered (RB is C callee-save).
-    |  movzx RAd, byte [PC-7]	// A of the compare (PC is past its JMP).
-    |  mov ITYPE, [BASE+RA*8]
-    |4:  // Resume the normal path (pre-call path jumps here directly).
     |  mov RD, RB
     |  mov RA, ITYPE
     |  sar RB, 47
@@ -3086,7 +3077,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |.if DUALNUM
     |  cmp RBd, LJ_TISNUM; jne >7
     |  cmp ITYPEd, LJ_TISNUM; jne >8
-    |  cmp RDd, RAd
+    |  cmp RD, RA		// 5.4: whole words (canonical int32/widened encodings).
     if (vk) {
       |  jne >9
     } else {
@@ -3102,13 +3093,32 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  // RD is a number.
     |  movq xmm1, RD
     |  cmp ITYPEd, LJ_TISNUM; jb >1; jne >5
-    |  // RD is a number, RA is an integer.
+    |  // RD is a number, RA is an integer: a widened 47-bit int (ADR-001b)
+    |  // needs the exact compare in C.
+    |  mov RB, RA
+    |  shr RB, 32
+    |  test RBd, 0x7fff
+    if (vk) {
+      |  mov RBd, 0			// ne = 0
+    } else {
+      |  mov RBd, 1			// ne = 1
+    }
+    |  jnz ->vmeta_equal_i64
     |  cvtsi2sd xmm0, RAd
     |  jmp >2
     |
     |8:  // RD is an integer, RA is not an integer.
     |  ja >5
-    |  // RD is an integer, RA is a number.
+    |  // RD is an integer, RA is a number. Widened RD: exact compare in C.
+    |  mov RB, RD
+    |  shr RB, 32
+    |  test RBd, 0x7fff
+    if (vk) {
+      |  mov RBd, 0			// ne = 0
+    } else {
+      |  mov RBd, 1			// ne = 1
+    }
+    |  jnz ->vmeta_equal_i64
     |  cvtsi2sd xmm1, RDd
     |  jmp >1
     |
@@ -3161,6 +3171,10 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
       |  cmp RBd, LJ_TCDATA; je ->vmeta_equal_cd
       |  cmp ITYPEd, LJ_TCDATA; je ->vmeta_equal_cd
       |.endif
+      |  // Lua 5.4 (ADR-001b): a userdata may be an interned int64 box, which
+      |  // compares by value against any number: exact compare in C.
+      |  cmp RBd, LJ_TUDATA; je >6
+      |  cmp ITYPEd, LJ_TUDATA; je >6
       |  cmp RA, RD
       |  je <1				// Same GCobjs or pvalues?
       |  cmp RBd, ITYPEd
@@ -3182,6 +3196,13 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
 	|  mov RBd, 1			// ne = 1
       }
       |  jmp ->vmeta_equal		// Handle __eq metamethod.
+      |6:  // RA/RD hold both TValue words.
+      if (vk) {
+	|  xor RBd, RBd			// ne = 0
+      } else {
+	|  mov RBd, 1			// ne = 1
+      }
+      |  jmp ->vmeta_equal_i64
     } else {
       |.if FFI
       |3:
@@ -3214,39 +3235,6 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  ins_AD	// RA = src, RD = num const, JMP with RD = target
     |  mov RB, [BASE+RA*8]
     |  add PC, 4
-    |  // Exact int64/box numeric equality: compare by value, not by bits.
-    |  mov TMPR, RB
-    |  shr TMPR, 48
-    |  cmp TMPRd, 65529	// 0xfff9: int32, widened inline int, boxed int64
-    |  je >6
-    |  mov TMPR, [KBASE+RD*8]
-    |  shr TMPR, 48
-    |  cmp TMPRd, 65529
-    |  je >6
-    |  jmp >4
-    |6:
-    |  mov TMP1, BASE	// A C call clobbers BASE (CARG2/CARG3).
-    |  lea CARG1, [BASE+RA*8]	// Caveat: CARG1 == RA (WIN).
-    |  lea CARG2, [KBASE+RD*8]	// RD is still the constant register index.
-    |  call extern lj_i64_numeq	// (cTValue *a, cTValue *b)
-    |  mov BASE, TMP1	// Restore BASE: every exit path below uses it.
-    |  cmp RCd, -1		// -1: not numeric, use the normal path.
-    |  je >5
-    |  cmp RCd, 1		// 1 = equal, 0 = unequal.
-    if (vk) {
-      |  je >7
-    } else {
-      |  jne >7
-    }
-    |  ins_next
-    |7:
-    |  movzx RDd, PC_RD
-    |  branchPC RD
-    |  ins_next
-    |5:  // Reload what the call clobbered (RB is C callee-save).
-    |  movzx RAd, byte [PC-7]	// A of the compare (PC is past its JMP).
-    |  movzx RDd, byte [PC-6]	// Constant register index of the compare.
-    |4:  // Resume the normal path (pre-call path jumps here directly).
     |.if DUALNUM
     |  checkint RB, >7
     |  mov RD, [KBASE+RD*8]
@@ -3262,20 +3250,42 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |9:
     |  ins_next
     |
-    |7:  // RA is not an integer.
-    |  ja >3
-    |  // RA is a number.
+    |7:  // RA is not an int32.
     |  mov RD, [KBASE+RD*8]
-    |  checkint RD, >1
+    |  // Lua 5.4 (ADR-001b): a widened 47-bit int or an int64 box in RA, or a
+    |  // widened constant, needs the exact compare in C (vmeta_equal_i64).
+    |  mov ITYPE, RB
+    |  sar ITYPE, 47
+    |  cmp ITYPEd, LJ_TISNUM; je >5	// Tag TISNUM but not int32: widened.
+    |  cmp ITYPEd, LJ_TUDATA; je >5	// Box (or userdata vs. number).
+    |  ja >3
+    |  // RA is a number (double).
+    |  mov ITYPE, RD
+    |  sar ITYPE, 47
+    |  cmp ITYPEd, LJ_TISNUM; jne >1	// RD is a double.
+    |  mov ITYPE, RD
+    |  shr ITYPE, 32
+    |  test ITYPEd, 0x7fff; jnz >5	// Widened constant.
     |  // RA is a number, RD is an integer.
     |  cvtsi2sd xmm0, RDd
     |  jmp >2
     |
-    |8:  // RA is an integer, RD is a number.
+    |8:  // RA is an integer, RD is not an int32: double or widened constant.
+    |  mov ITYPE, RD
+    |  sar ITYPE, 47
+    |  cmp ITYPEd, LJ_TISNUM; je >5	// Widened constant.
     |  cvtsi2sd xmm0, RBd
     |  movq xmm1, RD
     |  ucomisd xmm0, xmm1
     |  jmp >4
+    |5:  // Exact compare in C: RA = word 1, RD = word 2, RBd = ne.
+    |  mov RA, RB
+    if (vk) {
+      |  xor RBd, RBd			// ne = 0
+    } else {
+      |  mov RBd, 1			// ne = 1
+    }
+    |  jmp ->vmeta_equal_i64
     |1:
     |  movq xmm0, RD
     |.else
@@ -3378,19 +3388,15 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  mov RB, [BASE+RD*8]
     |.if DUALNUM
     |  checkint RB, >5
+    |  // Lua 5.4 (ADR-001b): -0 is the integer 0; -(-2^31) is an int64 result
+    |  // computed by the C helper via vmeta_unm (checkint already sends a
+    |  // widened 47-bit operand to >5, where ja takes it to vmeta_unm).
     |  neg RBd
-    |  jz >3
-    |  jo >4
+    |  jo ->vmeta_unm
     |  setint RB
     |9:
     |  mov [BASE+RA*8], RB
     |  ins_next
-    |3:
-    |  mov64 RB, U64x(80000000,00000000)  // -0.
-    |  jmp <9
-    |4:
-    |  mov64 RB, U64x(41e00000,00000000)  // 2^31.
-    |  jmp <9
     |5:
     |  ja ->vmeta_unm
     |.else

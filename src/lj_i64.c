@@ -97,6 +97,7 @@ static void i64_resize(lua_State *L, MSize size)
   }
   g->i64.tab = newtab;
   g->i64.mask = size-1;
+  g->i64.used = g->i64.num;  /* Rehashing drops the tombstones. */
 }
 
 void LJ_FASTCALL lj_i64_remove(global_State *g, GCudata *ud)
@@ -131,13 +132,24 @@ GCudata *lj_i64_box(lua_State *L, int64_t v)
     GCudata *ud = lj_udata_new(L, sizeof(int64_t), tabref(L->env));
     ud->udtype = UDTYPE_I64BOX;
     *(int64_t *)uddata(ud) = v;
-    /* Insert (rehash if the table is getting full). */
-    if (!g->i64.tab || g->i64.num >= (g->i64.mask+1) * 3 / 4)
-      i64_resize(L, g->i64.tab ? (g->i64.mask+1) * 2 : I64_HSIZE_MIN);
+    /* Insert. The load that matters for the probe chains is live entries
+    ** plus tombstones (a lookup stops only at an empty anchor): rehash when
+    ** that reaches 3/4, growing only if the live entries need it. Counting
+    ** live entries alone let a GC-churned table fill up with tombstones and
+    ** the lookup loop above never found an empty anchor (measured: the JIT's
+    ** -O0 trace tail boxing hung). */
+    if (!g->i64.tab) {
+      i64_resize(L, I64_HSIZE_MIN);
+    } else if (g->i64.used + 1 > (g->i64.mask+1) * 3 / 4) {
+      MSize size = g->i64.mask+1;
+      if (g->i64.num + 1 > size / 2) size *= 2;
+      i64_resize(L, size);
+    }
     {
       MSize mask = g->i64.mask, h = i64_hash(v) & mask;
       while (gcrefu(g->i64.tab[h]) != 0 && gcrefu(g->i64.tab[h]) != I64_TOMB)
 	h = (h + 1) & mask;
+      if (gcrefu(g->i64.tab[h]) == 0) g->i64.used++;  /* Reusing a tombstone keeps the load. */
       setgcref(g->i64.tab[h], obj2gco(ud));
       g->i64.num++;
     }
@@ -152,14 +164,15 @@ void LJ_FASTCALL lj_i64_freetab(global_State *g)
     g->i64.tab = NULL;
     g->i64.mask = 0;
     g->i64.num = 0;
+    g->i64.used = 0;
   }
 }
 
 void lj_i64_push(lua_State *L, int64_t v)
 {
-  ptrdiff_t ofs = L->top - L->base;  /* the box allocation may move the stack */
-  GCudata *ud = lj_i64_box(L, v);
-  setudataV(L, L->base + ofs, ud);
+  /* Canonical encoding: a box never holds an int32-range (or, on GC64, a
+  ** widenable) value. lj_i64_toTValue stores base-relative. */
+  lj_i64_toTValue(L, L->top, v);
   incr_top(L);
 }
 
@@ -232,6 +245,44 @@ static int64_t i64_shift(int64_t a, int64_t n, int right)
     return (int64_t)((cnt == 0) ? u : (u >> cnt));
   else
     return (int64_t)((cnt == 0) ? u : (u << cnt));
+}
+
+/* -- JIT helpers (ADR-001b step 3) ---------------------------------------- */
+
+/* Canonical TValue encoding of an int64, written directly to *o. */
+void lj_i64_tvstore(lua_State *L, TValue *o, int64_t v)
+{
+  if ((int64_t)(int32_t)v == v) {
+    setintV(o, (int32_t)v);
+#if LJ_GC64
+  } else if (i47_fits(v) && (((uint64_t)v >> 32) & 0x7fffu) != 0) {
+    setint47V(o, v);
+#endif
+  } else {
+    setudataV(L, o, lj_i64_box(L, v));
+  }
+}
+
+int64_t lj_i64_shl(int64_t a, int64_t n) { return i64_shift(a, n, 0); }
+int64_t lj_i64_shr(int64_t a, int64_t n) { return i64_shift(a, n, 1); }
+
+/* The recorder guards b != 0 before emitting these calls. */
+int64_t lj_i64_mod(int64_t a, int64_t b)
+{
+  int64_t r;
+  if (b == -1) return 0;  /* Also covers I64_MIN % -1. */
+  r = a % b;
+  if (r != 0 && ((r < 0) != (b < 0))) r += b;
+  return r;
+}
+
+int64_t lj_i64_idiv(int64_t a, int64_t b)
+{
+  int64_t q;
+  if (b == -1) return (int64_t)((uint64_t)0 - (uint64_t)a);  /* Wraps for I64_MIN. */
+  q = a / b;
+  if ((a % b) != 0 && ((a < 0) != (b < 0))) q -= 1;
+  return q;
 }
 
 /* Float semantics for the mixed int/float and float cases of the same ops. */
@@ -318,21 +369,6 @@ int LJ_FASTCALL lj_i64_unop(lua_State *L, TValue *ra, cTValue *rb, I64Op op)
     return 0;  /* bnot of a float: let the caller raise */
   }
   return 0;
-}
-
-/* Exact numeric equality for VM fast paths: -1 = not handled (non-numeric),
-** 0 = unequal, 1 = equal. Boxed/widened integers compare by value, including
-** against floats (long double is exact for int64 on x64/arm64). */
-int LJ_FASTCALL lj_i64_numeq(cTValue *a, cTValue *b)
-{
-  int64_t ia, ib;
-  int ka = lj_i64_getint(a, &ia), kb = lj_i64_getint(b, &ib);
-  if (ka && kb) return ia == ib;
-  if (ka && tvisnum(b))
-    return (long double)ia == (long double)numberVnum(b);
-  if (kb && tvisnum(a))
-    return (long double)numberVnum(a) == (long double)ib;
-  return -1;
 }
 
 int LJ_FASTCALL lj_i64_compare(cTValue *a, cTValue *b, int op, int *res)

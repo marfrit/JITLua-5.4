@@ -877,7 +877,28 @@ LJFOLD(CONV KINT64 IRCONV_INT_I64)
 LJFOLD(CONV KINT64 IRCONV_U32_I64)
 LJFOLDF(kfold_conv_kint64_int_i64)
 {
-  return INTFOLD((int32_t)ir_kint64(fleft)->u64);
+  int64_t k = (int64_t)ir_kint64(fleft)->u64;
+  if (irt_isguard(fins->t) && (int64_t)(int32_t)k != k)
+    return FAILFOLD;  /* Checked narrowing of a wide constant always fails. */
+  return INTFOLD((int32_t)k);
+}
+
+/* Checked narrowing I64 -> INT (ADR-001b step 3): drop the guard when the
+** value is provably int32, e.g. after masking with a non-negative int32 mask.
+*/
+LJFOLD(CONV BAND IRCONV_INT_I64)
+LJFOLDF(simplify_conv_int_i64_band)
+{
+  if (irt_isguard(fins->t) && irref_isk(fleft->op2)) {
+    IRIns *irk = IR(fleft->op2);
+    uint64_t k = irk->o == IR_KINT64 ? ir_kint64(irk)->u64 : (uint64_t)irk->i;
+    if (k <= 0x7fffffffu) {
+      fins->t.irt &= ~IRT_GUARD;
+      fins->op2 &= ~IRCONV_CONVMASK;
+      return RETRYFOLD;
+    }
+  }
+  return NEXTFOLD;
 }
 
 LJFOLD(CONV KNUM IRCONV_INT_NUM)

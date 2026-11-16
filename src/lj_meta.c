@@ -238,7 +238,10 @@ TValue *lj_meta_arith(lua_State *L, TValue *ra, cTValue *rb, cTValue *rc,
   cTValue *b, *c;
   /* Lua 5.4 exact 64-bit semantics (ADR-001b): a boxed integer operand, or an
   ** int32 overflow that landed here, is handled by the C helper. */
-  if (mm < MM__MAX) {
+  if (mm == MM_unm) {  /* Unary minus: wraps, -mininteger == mininteger. */
+    if (lj_i64_unop(L, ra, rb, I64_UNM))
+      return NULL;  /* Handled. */
+  } else if (mm < MM__MAX) {
     I64Op iop = lj_i64_op_from_mm(mm);
     if (iop != I64__MAX &&
 	(tvisi64(rb) || tvisi64(rc) || tvisint(rb) || tvisint(rc) ||
@@ -500,6 +503,22 @@ TValue *lj_meta_equal(lua_State *L, GCobj *o1, GCobj *o2, int ne)
     return top;  /* Trigger metamethod call. */
   }
   return (TValue *)(intptr_t)ne;
+}
+
+/* Exact 5.4 equality for the VM's slow path (ADR-001b): either operand may be
+** a widened 47-bit inline integer or an interned int64 box, which compare by
+** value against any number. Same return convention as lj_meta_equal: 0/1 is
+** the branch decision, a TValue * requests the __eq metamethod call. The raw
+** TValue words are passed so the VM need not re-derive slot pointers. */
+TValue *lj_meta_equal_any(lua_State *L, uint64_t a, uint64_t b, int ne)
+{
+  TValue ta, tb;
+  ta.u64 = a; tb.u64 = b;
+  if (a == b) return (TValue *)(intptr_t)(1 ^ ne);
+  if (itype(&ta) == itype(&tb) && (tvistab(&ta) || tvisudata(&ta)) &&
+      !tvisi64(&ta) && !tvisi64(&tb))
+    return lj_meta_equal(L, gcV(&ta), gcV(&tb), ne);
+  return (TValue *)(intptr_t)(lj_obj_equal(&ta, &tb) ^ ne);
 }
 
 #if LJ_HASFFI

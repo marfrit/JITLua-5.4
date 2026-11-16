@@ -680,7 +680,15 @@ static void asm_conv(ASMState *as, IRIns *ir)
 	emit_dn(as, A64I_SXTW, dest, left);
       }
     } else {
-      if (st64 && !(ir->op2 & IRCONV_NONE)) {
+      if (st64 && irt_isguard(ir->t)) {
+	/* Checked narrowing int64 -> int32 (ADR-001b step 3): the value must
+	** be its own sign extension. Executed: cmp x, w, sxtw; b.ne exit; mov.
+	*/
+	Reg left = ra_hintalloc(as, lref, dest, RSET_GPR);
+	emit_dm(as, A64I_MOVw, dest, left);
+	asm_guardcc(as, CC_NE);
+	emit_nm(as, A64I_CMPx | A64F_EX(A64EX_SXTW), left, left);
+      } else if (st64 && !(ir->op2 & IRCONV_NONE)) {
 	/* This is either a 32 bit reg/reg mov which zeroes the hiword
 	** or a load of the loword from a 64 bit address.
 	*/
@@ -1074,6 +1082,44 @@ static void asm_xstore(ASMState *as, IRIns *ir)
   }
 }
 
+/* Decode a Lua 5.4 integer outside int32 (ADR-001b step 3) from the raw
+** TValue word in tmp into dest (IRT_I64), guarding that the value is one of
+** its two representations and nothing else:
+**   widened inline: itype LJ_TISNUM with payload bits 32..46 nonzero;
+**   interned box:   itype LJ_TUDATA with udtype UDTYPE_I64BOX.
+** Executed order:
+**   asr TMP, tmp, #47 ; cmn TMP, #14 ; b.ne box
+**   tst tmp, #(0x7fff << 32) ; b.eq exit ; sbfx dest, tmp, #0, #47 ; b done
+** box:
+**   cmn TMP, #13 ; b.ne exit ; and dest, tmp, #GCVMASK
+**   ldrb TMP, [dest, #udtype] ; cmp TMP, #UDTYPE_I64BOX ; b.ne exit
+**   ldr dest, [dest, #sizeof(GCudata)]
+** done:
+*/
+static void asm_i64decode(ASMState *as, Reg dest, Reg tmp)
+{
+  MCode *l_done = as->mcp, *l_box;
+  uint32_t k13;
+  emit_lso(as, A64I_LDRx, dest, dest, (int32_t)sizeof(GCudata));
+  asm_guardcc(as, CC_NE);
+  emit_n(as, (A64I_CMPw^A64I_K12) | A64F_U12(UDTYPE_I64BOX), RID_TMP);
+  emit_lso(as, A64I_LDRB, RID_TMP, dest, (int32_t)offsetof(GCudata, udtype));
+  emit_dn(as, A64I_ANDx^emit_isk13(LJ_GCVMASK, 1), dest, tmp);
+  asm_guardcc(as, CC_NE);
+  emit_n(as, (A64I_CMNx^A64I_K12) | A64F_U12(-LJ_TUDATA), RID_TMP);
+  l_box = as->mcp;
+  checkmclim(as);
+  emit_branch(as, A64I_B, l_done);
+  emit_dn(as, A64I_SBFMx | A64F_IMMR(0) | A64F_IMMS(46), dest, tmp);
+  asm_guardcc(as, CC_EQ);
+  k13 = emit_isk13(0x7fff00000000ULL, 1);
+  lj_assertA(k13 != 0, "widened payload mask not encodable");
+  emit_n(as, A64I_TSTx^k13, tmp);
+  emit_cond_branch(as, CC_NE, l_box);
+  emit_n(as, (A64I_CMNx^A64I_K12) | A64F_U12(-LJ_TISNUM), RID_TMP);
+  emit_dn(as, A64I_ASRx | A64F_IMMR(47), RID_TMP, tmp);
+}
+
 static void asm_ahuvload(ASMState *as, IRIns *ir)
 {
   Reg idx, tmp;
@@ -1172,6 +1218,17 @@ static void asm_sload(ASMState *as, IRIns *ir)
 	     "bad parent SLOAD");  /* Handled by asm_head_side(). */
   lj_assertA(irt_isguard(t) || !(ir->op2 & IRSLOAD_TYPECHECK),
 	     "inconsistent SLOAD variant");
+  if ((ir->op2 & IRSLOAD_I64)) {  /* 5.4 int64 slot (ADR-001b step 3). */
+    Reg tmp;
+    lj_assertA(irt_isint64(t) && (ir->op2 & IRSLOAD_TYPECHECK),
+	       "bad I64 SLOAD");
+    dest = ra_used(ir) ? ra_dest(as, ir, allow) : ra_scratch(as, allow);
+    tmp = ra_scratch(as, rset_clear(allow, dest));
+    base = ra_alloc1(as, REF_BASE, rset_clear(allow, tmp));
+    asm_i64decode(as, dest, tmp);
+    emit_lso(as, A64I_LDRx, tmp, base, ofs);
+    return;
+  }
   if ((ir->op2 & IRSLOAD_CONVERT) && irt_isguard(t) && irt_isint(t)) {
     dest = ra_scratch(as, RSET_FPR);
     asm_tointg(as, ir, dest);

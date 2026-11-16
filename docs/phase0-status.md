@@ -637,3 +637,25 @@ values are skipped instead of erroring at declaration.
 Next: isolate (1) with a minimal cpcall+upvalue C test (probably L->top/frame
 placement inside the UCLO handler), then choose between cpcall and a VM-side
 metamethod continuation; keep the parser/proto map and both VM hooks.
+## Session 26 (branch step3-i64, merged as merge-step3) — STEP 3 LANDED: int64 in the JIT
+
+Design and measurements: docs/adr-001b-boxed-i64.md, "Step 3 implementation".
+Summary: a 5.4 integer outside int32 is a raw IRT_I64 register value in a
+trace; an IRT_INT ref is always an int32 inline TValue; results that fit int32
+are narrowed under a guard where they are produced, so a slot's IR type follows
+the interpreter's representation and never changes inside a trace. SLOAD gets
+an IRSLOAD_I64 mode whose single guard accepts widened inline and boxed
+values. Trace tails store int64 slots through lj_i64_tvstore (C) and drop them
+from the final snapshot. Loop PHIs int<->int64 are fixed like int<->num.
+Not recorded yet (NYI aborts): int64 table values/keys, int64 upvalues, fast
+functions with int64 arguments, int64 vs float compares, //.
+
+Interpreter bugs the new tests/d54/i64_02_jit.lua exposed and fixed: parser
+negated boxed literals in place (corrupting the intern table), lexer boxed hex
+literals that wrap into int32, BC_UNM on both VMs (floats for -0 and -(-2^31),
+low-word negate of widened), BC_ISEQV/ISEQN on both VMs (low-word or raw-word
+compare for widened/boxed values), mixed int64/float arithmetic read the low
+word of a widened operand.
+
+Rule for the future: a box never holds an int32-range value (canonical
+encoding); every producer must go through lj_i64_toTValue/lj_i64_tvstore.

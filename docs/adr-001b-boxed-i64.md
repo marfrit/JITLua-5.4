@@ -392,3 +392,106 @@ Time-boxed attempt (commit `b99fe41d`, reverted to keep the step-2 gates):
      exists).
 5. Gates for the resumed step: b1 <= 1.5x stock FFI; b3 back to ~46 ms with the
    JIT and -joff checksums both 1196193376; full suites green on arm64 and x64.
+
+## Step 3 implementation (2026-11-16, branch `step3-i64`)
+
+Shipped on arm64 and x64. The IR_BOX allocation model of the time-box is not
+used; a 5.4 integer travels through a trace as a raw `IRT_I64` register value.
+
+### Representation rule (the design decision)
+
+In a trace an `IRT_INT` ref always stands for an int32 inline TValue, and an
+`IRT_I64` ref for a 5.4 integer that does not fit int32 (widened 47-bit inline
+or interned box). A result that fits int32 is narrowed back to `IRT_INT` under
+a guard right where it is produced (`CONV INT<-I64 CHECK`, new in both
+backends: `cmp x, w, sxtw` / `movsxd + cmp`). So a slot's IR type follows the
+interpreter's representation, a type never changes inside a trace, and an exit
+can re-encode a value from its IR type alone (`lj_i64_toTValue`, kept from the
+time-box). This mirrors the stock recorder's int-vs-num decision by the actual
+result: `lj_opt_narrow_arith` emits `ADDOV/SUBOV/MULOV` when the exact int32
+result fits and the 64-bit operation on sign-extended operands when it does
+not. For the rule to hold the *interpreter* must keep boxes canonical: a box
+never holds an int32-range value. Three places violated that and were fixed
+(the parser negated boxed literals in place -- through the FFI cdata fold --
+corrupting the intern table; the lexer boxed hex literals that wrap into int32;
+`lj_i64_push` boxed unconditionally).
+
+### Pieces
+
+- **Slots.** `SLOAD` with the new `IRSLOAD_I64` mode accepts both
+  representations with one guard (`itype == TISNUM && payload bits 32..46 != 0`,
+  or `itype == TUDATA && udtype == UDTYPE_I64BOX`) and decodes to a 64-bit
+  register (`asm_i64decode`, arm64 and x64). A slot whose value alternates
+  between the two forms therefore does not flap between traces. x64 must not
+  fuse such an SLOAD as a memory operand (`asm_fuseload`): the raw word is not
+  the value.
+- **Constants.** `BC_KI64`, widened and boxed constants become `KINT64`;
+  `snap_restoreval` encodes a `KINT64` slot canonically instead of the cdata
+  `lj_ir_kvalue` would make.
+- **Operations.** `+ - *` wrap on `IRT_I64` (existing FFI backend code);
+  `& | ~ ~x`; shifts are always 64-bit (5.4: `1 << 40 == 2^40`, counts >= 64
+  give 0, negative counts reverse) -- constant counts become native shifts,
+  variable counts call `lj_i64_shl/shr`; `%` calls `lj_i64_mod` under a
+  divisor != 0 guard; unary minus wraps (`-mininteger == mininteger`,
+  `-(-2^31) == 2^31`, `-0 == 0`); `/`, `^` and any float operand convert to
+  float. Ordered compares and equality use 64-bit IR compares; int64 against
+  float is left to the interpreter (exact compare).
+- **Loops.** `lj_opt_loop`: an int32 entry type with an int64 back edge gets
+  the checked narrowing on the back edge, an int64 entry with an int32 back
+  edge gets a sign extension -- the same shape as the int/num fix. The side
+  trace from the narrowing guard records the loop with the wide type and, when
+  it reaches its own start, forms its own loop (`rec_loop_jit`), so a loop
+  whose accumulator crosses 2^31 ends up fully compiled with int64.
+- **Trace tails.** Machine code cannot produce the canonical TValue of an int64
+  (int32 / widened / box, the latter allocates). `lj_record_stop` therefore
+  stores int64 slots through `lj_i64_tvstore` (a CALLS with `BASE + 8*slot`)
+  before any non-loop link or return and drops them from the final snapshot.
+  Looping traces keep them in registers.
+- **Not recorded (NYI aborts, interpreter stays exact):** int64 table values
+  and keys, int64 upvalues, fast functions with int64 arguments, int64 vs float
+  compares, `//`, string coercion to int64. Each needs the unified load guard
+  (`asm_ahuvload`) or the store helper with a GC barrier; none is on the
+  benchmark paths.
+
+### Interpreter fixes found by the new test (tests/d54/i64_02_jit.lua)
+
+- BC_UNM on both VMs returned floats for `-0` and `-(-2^31)` and negated the
+  low word of a widened operand; `lj_meta_arith` did not route `MM_unm` to the
+  int64 helper.
+- BC_ISEQV/ISEQN compared low words (x64: `2^40+5 == 5` was true) or raw
+  words with a tag test (arm64: `(1<<40) == 1099511627776` was false). Whole
+  words are compared on the int path (canonical encodings), and every case with
+  a widened value or a userdata goes to `lj_meta_equal_any` (new VM label
+  `vmeta_equal_i64` on both backends).
+- `lj_i64_arith`'s mixed int64/float path read the low word of a widened
+  operand (`(1<<40) + 0.5` gave `0.5`).
+
+### Gates (commit deadff71, 2026-11-16)
+
+`tests/ci-box.sh` on both boxes: modes A+B 55 PASS / 0 FAIL / 16 XFAIL / 1
+XPASS (meta_02_compare_len, now removed from known-bad: exact int/float
+equality), mode B at opt 0-3 144 PASS, mode R 36 PASS, C API 34 + i64 14/14,
+fuzz 160/160. Pre-existing and unchanged: `-jv`/`-jdump` of a script with
+boxed literals segfaults in jit.util (also at the base commit 1e883ab8).
+
+Benchmark gate `tests/bench/run.sh`, median of 3, same box, same moment:
+
+| bench (arm64, escher) | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
+|---|---|---|---|---|
+| B1 FNV-1a-64, 10 MiB | **16.4 ms** (1.08x FFI) | 6870.6 ms | 15.2 ms | 292.1 ms |
+| B2 1e6 64-bit values | 2279.7 ms, 522 MB | 2264.2 ms | 698.7 ms | 565.3 ms |
+| B2b 1e6 ~2^41 values | 270.0 ms, 79 MB | 285.2 ms | 147.6 ms (float) | 162.9 ms |
+| B3 int32 control (fnv / table) | **20.9 / 209.3 ms** | 4323.7 / 684.9 ms | 37.9 / 200.8 ms | 308.9 / 253.5 ms |
+
+| bench (x64, pve2 NUC) | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
+|---|---|---|---|---|
+| B1 | **30.2 ms** (1.03x FFI) | 21468 ms | 29.2 ms | 1332 ms |
+| B2 | 7327.7 ms | 7600.5 ms | 2596.0 ms | 2159.7 ms |
+| B2b | 1135.4 ms | 1134.2 ms | 613.0 ms | 730.0 ms |
+| B3 | **47.6 / 945.3 ms** | 10722 / 1838.7 ms | 96.9 / 860.6 ms | 1296.7 / 989.3 ms |
+
+Checksums: B1 343592796160 and B3 1196193376 on both arches, JIT == -joff ==
+PUC. Against the step-3 gates: B1 within 1.5x of the FFI yardstick on both
+arches; B3 faster than stock; B2/B2b unchanged (their loops store int64 values
+into tables, which is still a NYI abort -- the next step: `ALOAD/HLOAD` with
+the unified int64 guard and a `lj_i64_tvstore` + TBAR store path).

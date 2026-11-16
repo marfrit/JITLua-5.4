@@ -658,6 +658,7 @@ typedef struct global_State {
     GCRef *tab;		/* Open-addressing anchors (NULL = empty, 1 = tombstone). */
     MSize mask;		/* Hash mask (size - 1). */
     MSize num;		/* Number of live boxes in the table. */
+    MSize used;		/* Live boxes plus tombstones (probe-chain load). */
   } i64;			/* appended: assembler offsets are recomputed at build */
   volatile int32_t vmstate;  /* VM state or current JIT code trace number. */
   GCRef mainthref;	/* Link to main thread. */

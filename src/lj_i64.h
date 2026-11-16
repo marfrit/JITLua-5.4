@@ -29,6 +29,19 @@ LJ_FUNC void LJ_FASTCALL lj_i64_freetab(global_State *g);
 ** inline, otherwise an interned box). Also used by the JIT snapshot restore. */
 LJ_FUNC void LJ_FASTCALL lj_i64_toTValue(lua_State *L, TValue *o, int64_t v);
 
+/* JIT helpers (ADR-001b step 3). The trace keeps 5.4 integers outside the
+** int32 range as raw IRT_I64 values; these encode or compute for it.
+** lj_i64_tvstore writes the canonical TValue encoding directly to *o (the
+** destination must not move: a stack slot addressed via BASE, or a table
+** slot). The shift/mod/idiv helpers implement the exact 5.4 rules for
+** operands the backends cannot express inline (variable counts, floor
+** division). Divisors are guarded non-zero by the recorder. */
+LJ_FUNC void lj_i64_tvstore(lua_State *L, TValue *o, int64_t v);
+LJ_FUNC int64_t lj_i64_shl(int64_t a, int64_t n);
+LJ_FUNC int64_t lj_i64_shr(int64_t a, int64_t n);
+LJ_FUNC int64_t lj_i64_mod(int64_t a, int64_t b);
+LJ_FUNC int64_t lj_i64_idiv(int64_t a, int64_t b);
+
 /* Push a boxed integer onto the stack. */
 LJ_FUNC void lj_i64_push(lua_State *L, int64_t v);
 
@@ -38,9 +51,6 @@ LJ_FUNC int LJ_FASTCALL lj_i64_isnum(cTValue *o);
 /* Extract the integer value of an int32 integer or a boxed integer.
 ** Returns 0 if the object is neither. */
 LJ_FUNC int LJ_FASTCALL lj_i64_getint(cTValue *o, int64_t *p);
-
-/* Exact numeric equality for VM equality fast paths (-1: not handled). */
-LJ_FUNC int LJ_FASTCALL lj_i64_numeq(cTValue *a, cTValue *b);
 
 /* 5.4 arithmetic for operands where an int32/int64 integer is involved.
 ** Returns 1 if the result was stored in *ra, 0 if the caller must use the

@@ -28,6 +28,7 @@
 #include "lj_i64.h"
 #include "lj_vm.h"
 #include "lj_vmevent.h"
+#include "lj_i64.h"
 
 /* -- Parser structures and definitions ----------------------------------- */
 
@@ -1124,7 +1125,10 @@ static void bcemit_unop(FuncState *fs, BCOp op, ExpDesc *e)
     lj_assertFS(op == BC_UNM || op == BC_LEN || op == BC_BNOT, "bad unop %d", op);
     if (!expr_hasjump(e)) {
       if (op == BC_UNM) {  /* Constant-fold negations. */
-	if (tvisi64(&e->u.nval)) {  /* Boxed 5.4 integer: exact negation. */
+	if (e->k == VKCDATA && tvisi64(&e->u.nval)) {
+	  /* Boxed int64 literal (ADR-001b): boxes are interned and immutable,
+	  ** so never negate in place. Wraps; the result takes the canonical
+	  ** form (int32 constant when it fits, otherwise another box). */
 	  int64_t v = (int64_t)((uint64_t)0 - (uint64_t)i64V(&e->u.nval));
 	  if ((int64_t)(int32_t)v == v) {
 	    setintV(&e->u.nval, (int32_t)v);
@@ -1133,7 +1137,7 @@ static void bcemit_unop(FuncState *fs, BCOp op, ExpDesc *e)
 	    setudataV(fs->L, &e->u.nval, lj_i64_box(fs->L, v));
 	  }
 	  return;
-	}
+	} else
 #if LJ_HASFFI
 	if (e->k == VKCDATA) {  /* Fold in-place since cdata is not interned. */
 	  GCcdata *cd = cdataV(&e->u.nval);
@@ -1149,10 +1153,12 @@ static void bcemit_unop(FuncState *fs, BCOp op, ExpDesc *e)
 	  TValue *o = expr_numtv(e);
 	  if (tvisint(o)) {
 	    int32_t k = intV(o), negk = (int32_t)(~(uint32_t)k+1u);
-	    if (k == negk)
-	      setnumV(o, -(lua_Number)k);
-	    else
+	    if (k == negk) {  /* 5.4: -(-2^31) is the integer 2^31. */
+	      setudataV(fs->L, o, lj_i64_box(fs->L, (int64_t)2147483648LL));
+	      e->k = VKCDATA;
+	    } else {
 	      setintV(o, negk);
+	    }
 	    return;
 	  } else {
 	    o->u64 ^= U64x(80000000,00000000);

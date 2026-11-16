@@ -514,6 +514,10 @@ static TRef conv_str_tonum(jit_State *J, TRef tr, TValue *o)
     /* Would need an inverted STRTO for this rare and useless case. */
     if (!lj_strscan_num(strV(o), o))  /* Convert in-place. Value used below. */
       lj_trace_err(J, LJ_TRERR_BADTYPE);  /* Punt if non-numeric. */
+    /* STRTO yields a number ref; a 5.4 string that denotes a 64-bit integer
+    ** would need an int64 result (ADR-001b step 3): not in a trace. */
+    if (tvisi47w(o) || tvisi64(o))
+      lj_trace_err(J, LJ_TRERR_BADTYPE);
   }
   return tr;
 }
@@ -525,12 +529,23 @@ TRef lj_opt_narrow_arith(jit_State *J, TRef rb, TRef rc,
   rb = conv_str_tonum(J, rb, vb);
   rc = conv_str_tonum(J, rc, vc);
   /* Must not narrow MUL in non-DUALNUM variant, because it loses -0. */
-  /* Lua 5.4: integer +/-/* overflow is not undefined; it widens to 64-bit
-  ** (wrap) in the interpreter. Always emit the guarded form, so an overflow
-  ** exits to the interpreter instead of silently wrapping at 32 bits. */
+  /* Lua 5.4 (ADR-001b step 3): int32 +, -, * either stay int32 or widen to
+  ** an exact 64-bit result in the interpreter. Decide by the actual result,
+  ** the way the stock recorder decides int vs. num: a result that fits int32
+  ** records the guarded ADDOV/SUBOV/MULOV form (an overflow exits and the
+  ** side trace specialises on the wide result); a result outside int32
+  ** records the 64-bit operation on sign-extended operands and carries the
+  ** value as IRT_I64 (see lj_record.c for the type/representation rule). */
   if (op >= IR_ADD && op <= IR_MUL &&
-      tref_isinteger(rb) && tref_isinteger(rc))
-    return emitir(IRTGI((int)op - (int)IR_ADD + (int)IR_ADDOV), rb, rc);
+      tref_isinteger(rb) && tref_isinteger(rc)) {
+    int64_t a = (int64_t)numberVint(vb), b = (int64_t)numberVint(vc), r;
+    r = op == IR_ADD ? a + b : op == IR_SUB ? a - b : a * b;
+    if ((int64_t)(int32_t)r == r)
+      return emitir(IRTGI((int)op - (int)IR_ADD + (int)IR_ADDOV), rb, rc);
+    rb = emitir(IRT(IR_CONV, IRT_I64), rb, IRCONV_I64_INT|IRCONV_SEXT);
+    rc = emitir(IRT(IR_CONV, IRT_I64), rc, IRCONV_I64_INT|IRCONV_SEXT);
+    return emitir(IRT(op, IRT_I64), rb, rc);
+  }
   if (!tref_isnum(rb)) rb = emitir(IRTN(IR_CONV), rb, IRCONV_NUM_INT);
   if (!tref_isnum(rc)) rc = emitir(IRTN(IR_CONV), rc, IRCONV_NUM_INT);
   return emitir(IRTN(op), rb, rc);
@@ -542,12 +557,14 @@ TRef lj_opt_narrow_unm(jit_State *J, TRef rc, TValue *vc)
   rc = conv_str_tonum(J, rc, vc);
   if (tref_isinteger(rc)) {
     uint32_t k = (uint32_t)numberVint(vc);
-    if (k != 0 && k != 0x80000000u) {
+    /* Lua 5.4: -0 is the integer 0 and -(-2^31) is the integer 2^31. */
+    if (k == 0x80000000u) {  /* Result is 2^31: a 64-bit value. */
+      rc = emitir(IRT(IR_CONV, IRT_I64), rc, IRCONV_I64_INT|IRCONV_SEXT);
+      return emitir(IRT(IR_NEG, IRT_I64), rc, rc);
+    } else {
       TRef zero = lj_ir_kint(J, 0);
-      emitir(IRTGI(IR_NE), rc, zero);
       return emitir(IRTGI(IR_SUBOV), zero, rc);
     }
-    rc = emitir(IRTN(IR_CONV), rc, IRCONV_NUM_INT);
   }
   return emitir(IRTN(IR_NEG), rc, lj_ir_ksimd(J, LJ_KSIMD_NEG));
 }

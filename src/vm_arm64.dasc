@@ -320,35 +320,6 @@
 |  b fptarget			// otherwise a double
 |9:
 |.endmacro
-|.macro eqbox  // exact int64/box numeric equality in the ISEQ* fast paths
-|  lsr TMP0, CARG1, #48
-|   movz TMP1, #0xfff9
-|  cmp TMP0, TMP1
-|   lsr TMP2, CARG3, #48
-|  beq >8
-|  cmp TMP2, TMP1
-|  bne >9
-|8:
-|  add CARG1, BASE, RA, lsl #3
-|   mov CARG2, RC
-|  bl extern lj_i64_numeq
-|  cmn CRET1w, #1			// -1 (32-bit C int): not numeric, normal path
-|  beq >9
-|  cmp CRET1w, #1			// 1 = equal, 0 = unequal
-||if (vk) {
-|  csel PC, RB, PC, eq
-||} else {
-|  csel PC, RB, PC, ne
-||}
-|  ins_next
-|9:
-|  // A C call clobbers CARG1/CARG3/RB: reload for the normal path.
-|  ldrh RBw, [PC, #(OFS_RD-4)]
-|   add RB, PC, RB, lsl #2
-|    sub RB, RB, #0x20000
-|  ldr CARG1, [BASE, RA, lsl #3]
-|  ldr CARG3, [RC]
-|.endmacro
 |.macro checknum, reg, target
 |  cmp TISNUMhi, reg, lsr #32
 |  bls target
@@ -894,6 +865,18 @@ static void build_subroutines(BuildCtx *ctx)
   |   mov CARG1, L
   |  str PC, SAVE_PC
   |  bl extern lj_meta_equal  // (lua_State *L, GCobj *o1, *o2, int ne)
+  |  // Returns 0/1 or TValue * (metamethod).
+  |  b <3
+  |
+  |->vmeta_equal_i64:
+  |  // Lua 5.4 exact equality (ADR-001b). CARG1, CARG3 = TValue words,
+  |  // CARG4 = ne, set by BC_ISEQV/BC_ISNEV/BC_ISEQN/BC_ISNEN.
+  |  mov CARG2, CARG1
+  |  sub PC, PC, #4
+  |   str BASE, L->base
+  |   mov CARG1, L
+  |  str PC, SAVE_PC
+  |  bl extern lj_meta_equal_any  // (lua_State *L, uint64_t a, b, int ne)
   |  // Returns 0/1 or TValue * (metamethod).
   |  b <3
   |
@@ -2528,7 +2511,6 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |    add PC, PC, #4
     |    add RB, PC, RB, lsl #2
     |    sub RB, RB, #0x20000
-    |  eqbox
     |  asr ITYPE, CARG3, #47
     |  cmn ITYPE, #-LJ_TISNUM
     if (vk) {
@@ -2555,6 +2537,12 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  ins_next
     |
     |2:  // Check if the tags are the same and it's a table or userdata.
+    |  // Lua 5.4 (ADR-001b): a userdata may be an interned int64 box, which
+    |  // compares by value against any number: exact compare in C.
+    |  cmn ITYPE, #-LJ_TUDATA
+    |  beq >8
+    |  cmn TMP0, #-LJ_TUDATA
+    |  beq >8
     |  cmp ITYPE, TMP0
     |  ccmn ITYPE, #-LJ_TISTABUD, #2, eq
     if (vk) {
@@ -2578,6 +2566,14 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
       |  tbnz TMP1w, #MM_eq, ->BC_ISEQV_Z	// 'no __eq' flag set: done.
     }
     |  b ->vmeta_equal
+    |
+    |8:  // CARG1/CARG3 hold both TValue words.
+    if (vk) {
+      |  mov CARG4, #0			// ne = 0
+    } else {
+      |  mov CARG4, #1			// ne = 1
+    }
+    |  b ->vmeta_equal_i64
     break;
 
   case BC_ISEQS: case BC_ISNES:
@@ -2618,7 +2614,6 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |    add PC, PC, #4
     |    add RB, PC, RB, lsl #2
     |    sub RB, RB, #0x20000
-    |  eqbox
     if (vk) {
       |->BC_ISEQN_Z:
     } else {
@@ -2638,7 +2633,15 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |3:
     |  ins_next
     |
-    |4:  // RA not int.
+    |4:  // RA not int32.
+    |  // Lua 5.4 (ADR-001b): a widened 47-bit int or an int64 box in RA, or a
+    |  // widened constant, needs the exact compare in C (vmeta_equal_i64).
+    |  asr ITYPE, CARG1, #47
+    |  cmn ITYPE, #-LJ_TISNUM
+    |  beq >8				// Tag TISNUM but not int32: widened.
+    |  cmn ITYPE, #-LJ_TUDATA
+    |  beq >8				// Box (or userdata vs. number).
+    |  cmp TISNUMhi, CARG1, lsr #32	// Restore flags: lo = not a number.
     |.if FFI
     |  blo >7
     |.else
@@ -2647,7 +2650,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |    ldr FARG1, [BASE, RA, lsl #3]
     |    ldr FARG2, [RC]
     |   cmp TISNUMhi, CARG3, lsr #32
-    |   bne >5
+    |   bne >9
     |  // RA number, RC int.
     |  scvtf FARG2, CARG3w
     |5:
@@ -2655,11 +2658,28 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  fcmp FARG1, FARG2
     |  b <1
     |
-    |6:  // RA int, RC number
+    |9:  // RA number, RC not int32: double or widened constant.
+    |  asr ITYPE, CARG3, #47
+    |  cmn ITYPE, #-LJ_TISNUM
+    |  beq >8				// Widened constant.
+    |  b <5
+    |
+    |6:  // RA int, RC not int32: double or widened constant.
+    |  asr ITYPE, CARG3, #47
+    |  cmn ITYPE, #-LJ_TISNUM
+    |  beq >8				// Widened constant.
     |  ldr FARG2, [RC]
     |  scvtf FARG1, CARG1w
     |  fcmp FARG1, FARG2
     |  b <1
+    |
+    |8:  // CARG1/CARG3 hold both TValue words.
+    if (vk) {
+      |  mov CARG4, #0			// ne = 0
+    } else {
+      |  mov CARG4, #1			// ne = 1
+    }
+    |  b ->vmeta_equal_i64
     |
     |.if FFI
     |7:
@@ -2763,12 +2783,13 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  bhi ->vmeta_unm
     |  eor TMP0, TMP0, #U64x(80000000,00000000)
     |  bne >5
+    |  // Lua 5.4 (ADR-001b): -0 is the integer 0; a widened 47-bit operand and
+    |  // -(-2^31) (an int64 result) go to the C helper via vmeta_unm.
+    |  tst TMP0, #U64x(00007fff,00000000)
+    |  bne ->vmeta_unm
     |  negs TMP0w, TMP0w
-    |   movz CARG3, #0x41e0, lsl #48	// 2^31.
-    |   add_TISNUM TMP0, TMP0
-    |  csel TMP0, TMP0, CARG3, vc
-    |   movz CARG3, #0x8000, lsl #48	// -0.
-    |  csel TMP0, TMP0, CARG3, ne
+    |  bvs ->vmeta_unm
+    |  add_TISNUM TMP0, TMP0
     |5:
     |  str TMP0, [BASE, RA, lsl #3]
     |  ins_next

@@ -1447,6 +1447,8 @@ static void asm_call(ASMState *as, IRIns *ir)
 {
   IRRef args[CCI_NARGS_MAX];
   const CCallInfo *ci = &lj_ir_callinfo[ir->op2];
+  if (ir->op2 == IRCALL_lj_i64_tvstore)
+    as->gcsteps++;  /* May allocate an interned int64 box. */
   asm_collectargs(as, ir, ci, args);
   asm_setupresult(as, ir, ci);
   asm_gencall(as, ci, args);

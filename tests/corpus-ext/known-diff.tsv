@@ -5,3 +5,12 @@ serpent	gcs	IMPL-DEFINED: pairs() order of hash keys and string.dump bytes diffe
 dkjson	joff	IMPL-DEFINED: key order of encoded sparse/mixed tables follows pairs() order
 dkjson	jon	IMPL-DEFINED: key order of encoded sparse/mixed tables follows pairs() order
 dkjson	gcs	IMPL-DEFINED: key order of encoded sparse/mixed tables follows pairs() order
+lua-cjson	joff	IMPL-DEFINED: pairs() order of hash keys in decoded/encoded objects
+lua-cjson	jon	IMPL-DEFINED: pairs() order of hash keys in decoded/encoded objects
+lua-cjson	gcs	IMPL-DEFINED: pairs() order of hash keys in decoded/encoded objects
+luafilesystem	joff	LIB FINDING (lib_io): lfs reads FILE* handles as luaL_Stream {FILE *f; lua_CFunction closef}; ours are {FILE *fp; uint32_t type}, so lfs.setmode/lock see closef == 0 = "closed file" (nondeterministic padding: an arm may pass)
+luafilesystem	jon	LIB FINDING (lib_io): luaL_Stream layout, see joff
+luafilesystem	gcs	LIB FINDING (lib_io): luaL_Stream layout, see joff
+penlight	joff	VM FINDING (env-uv, queued): Penlight compat.getfenv/setfenv look for an "_ENV" upvalue (debug.getupvalue); the GGET model has none, test-class/test-class2 fail with rawset(nil)
+penlight	jon	VM FINDING (env-uv, queued): _ENV upvalue, see joff
+penlight	gcs	VM FINDING (env-uv, queued): _ENV upvalue, see joff

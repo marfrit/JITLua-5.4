@@ -785,8 +785,12 @@ LUA_API void lua_pushnil(lua_State *L)
 LUA_API void lua_pushnumber(lua_State *L, lua_Number n)
 {
   setnumV(L->top, n);
-  if (LJ_UNLIKELY(tvisnan(L->top)))
-    setnanV(L->top);  /* Canonicalize injected NaNs. */
+  if (LJ_UNLIKELY(tvisnan(L->top))) {
+    /* Canonicalize injected NaNs, keeping the sign: 5.4 prints "nan" and
+    ** "-nan" apart (lua-cjson decodes "NaN" to a positive NaN). A positive
+    ** quiet NaN never aliases a tagged value. */
+    if (L->top->u64 >> 63) setnanV(L->top); else L->top->u64 = U64x(7ff80000,00000000);
+  }
   incr_top(L);
 }
 

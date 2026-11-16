@@ -396,16 +396,9 @@ static int load_aux(lua_State *L, int status, int envarg)
       GCtab *t = tabV(L->base+envarg-1);
       setgcref(fn->c.env, obj2gco(t));
       lj_gc_objbarrier(L, fn, t);
-      {  /* Lua 5.4: expose the chunk environment as _ENV inside the chunk.
-	** LuaJIT resolves globals through the function env, so the alias is
-	** materialised in the table (only when absent). */
-	GCstr *envname = lj_str_newlit(L, "_ENV");
-	cTValue *old = lj_tab_getstr(t, envname);
-	if (!old || tvisnil(old)) {
-	  settabV(L, lj_tab_setstr(L, t, envname), t);
-	  lj_gc_objbarrier(L, t, t);
-	}
-      }
+      /* 5.4: _ENV reads/writes inside the chunk are the GGET/GSET special
+      ** case on the interned key (VM and recorder); the table itself must
+      ** not carry an "_ENV" entry (PUC: _G._ENV == nil, pairs(_G) has none). */
     }
     return 1;
   } else {
@@ -807,7 +800,7 @@ LUALIB_API int luaopen_base(lua_State *L)
   ** yield the env and writes retarget it (function scope, see docs). */
   { GCstr *envstr = lj_str_newlit(L, "_ENV");
     setgcref(G(L)->gcroot[GCROOT_ENVSTR], obj2gco(envstr));
-    settabV(L, lj_tab_setstr(L, env, envstr), env);
+    /* No _G._ENV entry: PUC's _ENV is an upvalue, not a global. */
   }
   lua_pushliteral(L, LUA_VERSION);  /* top-3. */
   newproxy_weaktable(L);  /* top-2. */

@@ -836,6 +836,57 @@ fuzz 160/160. Bench unchanged against part 2: arm64 B1 16.5, B2 1520.6, B2b
 130.7, B3 23.7 / 212.9 ms; x64 B1 30.2, B2 3124.3, B2b 662.3, B3 47.6 /
 955.6 ms; checksums equal.
 
+## Session 27e — lexer escape-error token text (side buffer)
+
+x/u escape parse errors now include the consumed escape source in the "near"
+token (PUC lexerror cases); the text is collected in a side buffer and appended
+to ls->sb only on the error path, so valid literals stay intact. literals.lua
+advances from line32 to its lexerror block (line83, second case still differs);
+known-bad.
+
+## Session 27f — generic/decimal lexer escape tokens
+
+Generic invalid escapes (`\g`, `\.`) now reject like PUC and carry the escape
+source in the error token; EOF cases no longer append the EOF byte (matches
+`lexerror([["abc\x]], [[\x]])` etc.). corpus literals.lua advances to line100
+(decimal escape overflow `\999"` needs the trailing source char in the token;
+the lexer's sb only holds bytes up to the failure - a look-ahead scan is needed).
+
+## Session 27g — decimal overflow + \u overflow lexer tokens
+
+Decimal overflow (\999, \300, \256) error tokens now include the source up to
+the string terminator; \u error tokens include the consumed digits/characters
+and too-large is checked before the shift (uint32 wrap used to hide
+\u{100000000}). All the literals.lua lexerror cases through the UTF-8 block now
+find their "near ..." text; corpus literals.lua advances further.
+
+## Session 27h — fork dump version 0x84
+
+BCDump format changed (KGC_I64BOX inserted before KGC_STR, KTAB_I64 added, 5.4
+bytecode), so BCDUMP_VERSION is now 0x84 (>= 0x80, the private fork range).
+The reader stays strict: any other version/flags produce the normal "cannot
+load malformed bytecode / bad precompiled chunk" error (no crash). Stock LuaJIT
+2.1 dumps are rejected instead of misparsed, and stock 2.1 rejects ours.
+tests/d54/dump_03_version.lua checks round-trip, a hand-crafted version-2 header
+rejection and the >=0x80 version byte; A/B are known-bad (PUC dump format
+differs), mode R runs it.
+
+## Session 27i — LUA_PATH_5_4 / LUA_CPATH_5_4 / LUA_INIT_5_4 precedence (PUC 5.4)
+
+luaconf.h defines the versioned env names; package setpath prefers
+LUA_PATH_5_4/LUA_CPATH_5_4 over LUA_PATH/LUA_CPATH (PUC lloadlib order), and
+luajit.c initialises from LUA_INIT_5_4 before LUA_INIT. Path defaults themselves
+were already PUC-identical (session 27b). Gate pending in the next context.
+
+## Session 28 — identifiers are strict Lua 5.4 (deliberate divergence)
+
+Markus decision (2026-11-16): identifiers are ASCII letters/digits/underscore
+only; bytes 128-255 are rejected. Stock LuaJIT's lexer accepts them
+(lj_char_bits marks 128-255 as IDENT); this fork deliberately follows PUC 5.4
+(no compatibility switch). Implemented with lex_isident5 in lj_lex.c; new
+tests/d54/lex_02_identifiers.lua asserts the same normalized syntax error as
+PUC for UTF-8/byte>=128 identifiers and that ASCII names still load.
+
 ## Session 30 (branch i64-ffuncs) — standard library with int64, GC drive, GC stress harness
 
 Interpreter: lj_lib_checknum/checknumber/checkint take boxed/widened

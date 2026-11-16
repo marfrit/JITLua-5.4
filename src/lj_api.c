@@ -1007,8 +1007,41 @@ LJ_FUNC void lj_api_warn_emit(lua_State *L, const char *msg, int tocont)
   }
 }
 
+/* PUC 5.4 lua_setwarnf: the C warning hook is independent of the Lua `warn`
+** function. Stored in the registry as a small userdata {fn, ud}; NULL resets
+** to the default emitter state machine. */
+typedef struct lua_WarnCtx { lua_WarnFunction f; void *ud; } lua_WarnCtx;
+
+LUA_API void lua_setwarnf(lua_State *L, lua_WarnFunction f, void *ud)
+{
+  if (f == NULL) {
+    lua_pushliteral(L, "_LJ_WARN_HOOK");
+    lua_pushnil(L);
+    lua_rawset(L, LUA_REGISTRYINDEX);
+  } else {
+    lua_WarnCtx *c = (lua_WarnCtx *)lua_newuserdata(L, sizeof(lua_WarnCtx));
+    c->f = f;
+    c->ud = ud;
+    lua_pushliteral(L, "_LJ_WARN_HOOK");
+    lua_insert(L, -2);
+    lua_rawset(L, LUA_REGISTRYINDEX);
+  }
+}
+
 LUA_API void lua_warning(lua_State *L, const char *msg, int tocont)
 {
+  int top = lua_gettop(L);
+  lua_pushliteral(L, "_LJ_WARN_HOOK");
+  lua_rawget(L, LUA_REGISTRYINDEX);
+  if (lua_isuserdata(L, -1)) {
+    lua_WarnCtx *c = (lua_WarnCtx *)lua_touserdata(L, -1);
+    if (c && c->f) {
+      lua_settop(L, top);
+      c->f(c->ud, msg ? msg : "", tocont);
+      return;
+    }
+  }
+  lua_settop(L, top);
   lj_api_warn_emit(L, msg, tocont);
 }
 

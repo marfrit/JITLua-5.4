@@ -294,6 +294,29 @@ static void test_warning(void)
   lua_close(L);
 }
 
+static void warn_hook(void *ud, const char *msg, int tocont)
+{
+  int *n = (int *)ud;
+  n[0]++;
+  n[1] = tocont;
+  n[2] = msg[0];
+}
+
+static void test_warnf(void)
+{
+  lua_State *L = newL();
+  int state[3] = {0, -1, 0};
+  lua_setwarnf(L, warn_hook, state);
+  lua_warning(L, "hook", 0);
+  ok(state[0] == 1 && state[1] == 0 && state[2] == 'h',
+     "lua_setwarnf hook receives (msg, tocont)");
+  lua_warning(L, "@off", 0);  /* a custom hook sees control messages too */
+  ok(state[0] == 2 && state[2] == '@', "custom hook sees control messages");
+  lua_setwarnf(L, NULL, NULL);
+  ok(warn_state(L) == 0, "lua_setwarnf(NULL) restores the default emitter");
+  lua_close(L);
+}
+
 static void test_resume54(void)
 {
   lua_State *L = newL();
@@ -368,7 +391,7 @@ int main(void)
 {
   test_absindex(); test_getseti(); test_len(); test_compare();
   test_stringtonumber(); test_getsubtable(); test_isinteger(); test_rotate();
-  test_newuserdatauv(); test_iuservalue(); test_warning(); test_resume54(); test_lauxlib54();
+  test_newuserdatauv(); test_iuservalue(); test_warning(); test_warnf(); test_resume54(); test_lauxlib54();
   printf("== capi: %d checks, %d failures ==\n", checks, failures);
   return failures ? 1 : 0;
 }

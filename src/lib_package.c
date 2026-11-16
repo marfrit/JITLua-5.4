@@ -589,7 +589,16 @@ static void setpath(lua_State *L, const char *fieldname, const char *envname,
   const char *path = NULL;
   UNUSED(envname);
 #else
-  const char *path = getenv(envname);
+  const char *path;
+  if (!strcmp(envname, LUA_PATH)) {
+    path = getenv(LUA_PATH_5_4);
+    if (path == NULL) path = getenv(LUA_PATH);
+  } else if (!strcmp(envname, LUA_CPATH)) {
+    path = getenv(LUA_CPATH_5_4);
+    if (path == NULL) path = getenv(LUA_CPATH);
+  } else {
+    path = getenv(envname);
+  }
 #endif
   if (path == NULL || noenv) {
     lua_pushstring(L, def);

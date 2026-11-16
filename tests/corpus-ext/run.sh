@@ -75,12 +75,7 @@ build_cmod() {
   for arm in puc ours; do
     if [ $arm = puc ]; then inc=$PUCINC; else inc=$ROOT/src; fi
     [ -f "$inc/lua.h" ] || { say "  $name: no headers at $inc"; return 1; }
-    shim=""
-    if [ $arm = ours ]; then  # see shim-ours.h: header gaps, reported, not hidden
-      shim="-include $ROOT/tests/corpus-ext/shim-ours.h"
-      say "  $name: built against our headers with shim-ours.h (C API gaps, see the header)"
-    fi
-    if ( cd "$dir" && $CC -O2 -shared -fPIC $cflags $shim -I"$inc" -o "$MOD/$arm/$so.so" "$@" ) > "$OUT/$name.build.$arm.txt" 2>&1; then
+    if ( cd "$dir" && $CC -O2 -shared -fPIC $cflags -I"$inc" -o "$MOD/$arm/$so.so" "$@" ) > "$OUT/$name.build.$arm.txt" 2>&1; then
       :
     else
       say "  $name: build against $arm headers FAILED"

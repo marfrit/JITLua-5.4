@@ -805,3 +805,12 @@ no luajit-2.1 default (they were unavailable anyway; MISSION extension note).
 now allows exactly one optional `;` and then requires parse_isend (end/else/
 elseif/until/eof); the corpus errors.lua line58 case works. This is the Lua 5.4
 grammar rule that PUC enforces via luaY_checknext/luaK_return.
+
+## Session 27d — lexer escape-error token text: attempt reverted
+
+PUC's lexerror corpus cases need the consumed escape text in the "near '...'"
+token (e.g. \x5"). The lexer builds the *parsed string* in ls->sb, so appending
+the escape bytes corrupts valid literals (literals.lua line32 broke). A correct
+fix must collect the source chars in a side buffer and append only on the error
+path (x: '\\','x',up to two digits + offending char; u: '\\','u','{',digits +
+offending char). Reverted to keep the tree green; literals.lua stays known-bad.

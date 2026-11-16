@@ -3107,7 +3107,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |4:
     |  add PC, 4
     |  cmp RA, RD
-    |  jmp_comp jge, jl, jg, jle, >9
+    |  jmp_comp jge, jl, jg, jle, <9
     |  jmp <6
     |.else
     |  cmp ITYPEd, LJ_TISNUM; jae ->vmeta_comp

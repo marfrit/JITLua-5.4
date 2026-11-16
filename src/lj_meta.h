@@ -40,7 +40,7 @@ LJ_FUNCA void lj_meta_call(lua_State *L, TValue *func, TValue *top);
 LJ_FUNCA void LJ_FASTCALL lj_meta_for(lua_State *L, TValue *o);
 /* 5.4 to-be-closed variables. */
 LJ_FUNCA void LJ_FASTCALL lj_meta_tbcmark(lua_State *L, TValue *o);
-LJ_FUNCA TValue *lj_meta_tbcclose(lua_State *L, TValue *level);
+LJ_FUNCA TValue *lj_meta_tbcclose(lua_State *L, TValue *level, MSize multres);
 LJ_FUNC int lj_meta_tbccloseall(lua_State *L, TValue *level, TValue *err);
 LJ_FUNC void lj_meta_tbcfree(global_State *g, lua_State *L);
 

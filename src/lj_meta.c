@@ -727,22 +727,32 @@ void LJ_FASTCALL lj_meta_tbcmark(lua_State *L, TValue *o)
 /* BC_UCLO: set up the next __close(value, nil) call for a pending slot at or
 ** above level, or return NULL when none is left. The VM makes the call with
 ** the lj_cont_nop continuation returning to the UCLO itself. */
-TValue *lj_meta_tbcclose(lua_State *L, TValue *level)
+TValue *lj_meta_tbcclose(lua_State *L, TValue *level, MSize multres)
 {
+  ptrdiff_t lofs = savestack(L, level);
   while (L->tbcn > 0) {
     int32_t *list = mref(L->tbclist, int32_t);
     TValue *o = restorestack(L, list[L->tbcn-1]);
     cTValue *mo;
     TValue *top;
-    if (o < level) return NULL;
+    if (o < restorestack(L, lofs)) return NULL;
     L->tbcn--;
     mo = lj_meta_lookup(L, o, MM_close);
     if (tvisnil(mo))
       lj_err_msgv(L, LJ_ERR_TBCCALL, lj_typename(mo));
     /* Like mmcall(), with one extra slot below the continuation where the
     ** VM parks MULTRES across the call (return f() in a <close> scope is
-    ** CALLM + UCLO + RETM). Layout: [mres][cont][PC][mo][frame][o][nil]. */
-    top = curr_topL(L);
+    ** CALLM + UCLO + RETM). The open results of that CALLM may extend past
+    ** the frame size: place the call frame above them. */
+    top = curr_topL(L) + (multres >> 3);
+    if (top + 8 > tvref(L->maxstack)) {  /* Grow; the VM reloads BASE. */
+      ptrdiff_t tofs = savestack(L, L->top);
+      L->top = top;  /* lj_state_growstack sizes relative to top. */
+      lj_state_growstack(L, 8 + LUA_MINSTACK);
+      L->top = restorestack(L, tofs);
+      o = restorestack(L, list[L->tbcn]);
+      top = curr_topL(L) + (multres >> 3);
+    }
     setintV(top, 0);
     setcont(top+1, lj_cont_tbc);
     setnilV(top+2);

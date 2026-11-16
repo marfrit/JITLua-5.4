@@ -3296,7 +3296,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |   str PC, SAVE_PC
     |  mov CARG1, L
     |  add CARG2, BASE, RA, lsl #3
-    |  bl extern lj_meta_tbcclose	// (lua_State *L, TValue *level)
+    |  ldr CARG3w, SAVE_MULTRES
+    |  bl extern lj_meta_tbcclose	// (lua_State *L, TValue *level, MSize multres)
     |  ldr BASE, L->base
     |  cbz CRET1, >2
     |  ldr TMP0w, SAVE_MULTRES

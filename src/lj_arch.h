@@ -584,6 +584,15 @@
 #else
 #define LJ_DUALNUM		0
 #endif
+/* LuaJIT-5.4: the 5.4 number model needs the dual-number VM everywhere. The
+** Makefile forces LUAJIT_NUMMODE=2 for x64/x86, but `make XCFLAGS=...` on the
+** command line replaces that line (GNU make: command-line variables override
+** Makefile assignments) and silently produced single-number builds whose
+** parser boxed every integer literal and corrupted the heap. Extra flags go
+** in CFLAGS (`make CFLAGS=-DLUA_USE_ASSERT`), which the Makefile appends. */
+#if !LJ_DUALNUM
+#error "LuaJIT-5.4 requires dual-number mode: build with LUAJIT_NUMMODE=2 (do not override XCFLAGS; use CFLAGS for extra defines)"
+#endif
 
 #if LJ_TARGET_IOS || LJ_TARGET_CONSOLE
 /* Runtime code generation is restricted on iOS. Complain to Apple, not me. */

@@ -1231,3 +1231,18 @@ Once seen, not reproduced in 10 further runs: test-utils.lua:40
 of ours in one full corpus run; the probe shows identical popen/os.execute
 status reporting; kept in mind if it shows up in the soak.
 
+Resolved (session 38): the "x64 assert build segfaults at start-up on
+main" known issue was a build-recipe artifact, not a VM bug. `make
+XCFLAGS=-DLUA_USE_ASSERT` replaces the Makefile's `XCFLAGS+=
+-DLUAJIT_NUMMODE=2` (GNU make command-line variables override assignments),
+so x64 built in single-number mode: the lexer scanned integer literals
+with STRSCAN_OPT_TONUM, lex_number then boxed every integer literal, the
+parser registered the box as a GC constant while fs_fixup_k saw a numeric
+key and wrote it as a number constant past the prototype (ASan:
+heap-buffer-overflow in fs_fixup_k, 16 bytes past a 149-byte proto for
+`print(1)`), which lj_alloc's slack usually hid. arm64 is dual-number by
+architecture and never saw it. lj_arch.h now refuses non-dual builds with
+an #error; extra defines go in CFLAGS (`make CFLAGS="-DLUA_USE_ASSERT
+-DLUA_USE_APICHECK"`), which the Makefile appends. The arm64 assert-build
+runs in sessions 35-38 were valid (dual by default).
+

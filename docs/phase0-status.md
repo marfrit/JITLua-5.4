@@ -1132,3 +1132,34 @@ assertion. First suspects: an assert-only code path in the x64 VM/C glue
 (LJ_GC64 + LUAJIT_NUMMODE=2) or a struct whose size changes with
 LUA_USE_ASSERT between buildvm and the C side.
 
+
+## Session 36 — corpus 5.4: pack/io/int64 keys, loader and interpreter surface
+
+Pushed 08325f52..96227610 (rebased on 40f616db). Both boxes: d54 A+B 101 PASS
+/ 5 XFAIL, opt 212, R 53, GC-stress 59+1X, capi 84, i64 14, fuzz 160, corpus-ext
+9 SAME / 0 unexpected.
+
+Fixed: string.pack/unpack/packsize (already present, corrected for int64 and
+PUC checks); hex integer literals wrap modulo 2^64 with any digit count;
+lua_geti/lua_seti exact boxed int64 keys and the C API box branches in
+lua_tointeger/lua_tonumber; table.unpack/move int64 indices, table.insert/sort
+through luaL_len; io.close/file-method split, io.lines EOF close + the 5.4
+4-value to-be-closed shape + MAXARGLINE 250, io read 'n' exact int64; dofile as
+a Lua wrapper (yields); loadfile BOM/shebang including line numbers; luajit -l
+PUC global names ('=' and '-suffix'); print line flush; coroutine.yield wording
+without location; traceback metamethod names and C-frame "in ?" (Fable's
+pushfuncname rewrite, kept our __ strip); LJ_MAX_UPVAL 255; duplicate labels
+are rejected function-wide like PUC (corpus goto.lua passes); non-ASCII lexer
+tokens print '<\239>'.
+
+Cleared known-bad: tpack, big, utf8, bitwise, constructs, goto, d54 env_01,
+dump_str_01, attrib_01. Remaining corpus rows: db/files (debug 5.4, Fable
+lib_debug), math (string arithmetic coercion in the VM), pm/literals (long
+string interning / %p identity), main (corpus lacks libs fixtures; progname
+and argv), sort (IMPL-DEFINED counters/timings), PERF rows. Remaining d54 rows:
+dump_02_border, tbl_03_border_divergence, dump_03_version (fork), err_02_tailname,
+gc_01_tbc_gc.
+
+process: the mandated agent reviewer blocked lua_seti's missing boxed-key pop
+and io double-close before the push; both fixed. Both delegated coder branches
+(utf8, goto) contained no usable code and were discarded.

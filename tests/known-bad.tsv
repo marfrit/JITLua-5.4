@@ -7,12 +7,12 @@ tests/corpus/puc54/literals.lua	A	IMPL-DEFINED: long strings are interned in the
 tests/corpus/puc54/sort.lua	A	IMPL-DEFINED: functional asserts pass; table.sort prints comparison counters/timings that differ from PUC
 tests/corpus/puc54/calls.lua	A	PERF: our side exceeds 60s (triage; raise timeout)
 tests/corpus/puc54/closure.lua	B	PERF: JIT-on side exceeds 60s while JIT-off finishes (mode A now passes; triage the slowdown)
-tests/corpus/puc54/db.lua	A	P5: debug library 5.4 (info fields, hooks)
-tests/corpus/puc54/files.lua	A	P5: io library 5.4 exactness
+tests/corpus/puc54/db.lua	A	P5: debug.getinfo(2) fields (func/nups) and getlocal naming after dbg-hooks; Fable lib_debug area
+tests/corpus/puc54/files.lua	A	P5: debug.getlocal of the generic-for state (file 4th value) at files.lua:443; Fable lib_debug area
 tests/corpus/puc54/heavy.lua	A	PERF: reference exceeds 60s (triage; raise timeout)
 tests/corpus/puc54/main.lua	A	P5: corpus lacks its built libs/*.so fixtures (PUC also stops there); progname/argv and traceback naming differ
-tests/corpus/puc54/math.lua	A	P1: int64 numeric model + math library 5.4
-tests/corpus/puc54/pm.lua	A	P5: pattern semantics now match PUC except one %p identity assert (gsub returns interned strings; needs lj_str.c)
+tests/corpus/puc54/math.lua	A	P1: 5.4 string->number coercion in arithmetic ("2"+3e0) at math.lua:75; VM arithmetic
+tests/corpus/puc54/pm.lua	A	IMPL-DEFINED: long strings are interned, so %p identity after gsub/concat differs (needs long-string policy)
 tests/d54/dump_02_border.lua	A	IMPL-DEFINED: dump/reload border bug FIXED and rawlen added; only the runtime-built sparse-table border differs (any border is legal per the 5.4 manual)
 tests/d54/err_02_tailname.lua	A	P1.8b: tail-call error names -- LuaJIT reuses the caller frame, so the loaded-module fallback reports 'string.rep' where 5.4 reports the short 'rep'. Non-tail and pcall paths match.
 tests/d54/gc_01_tbc_gc.lua	A	P1/P4: <close>/__close, generational GC options

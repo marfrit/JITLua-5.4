@@ -93,7 +93,9 @@ int32_t LJ_FASTCALL lj_vm_modi(int32_t a, int32_t b)
   /* This must be checked before using this function. */
   lj_assertX(b != 0, "modulo with zero divisor");
   /* Lua 5.4: integer modulo is a floor modulo -- the result takes the sign of
-  ** the divisor (C's % takes the sign of the dividend). */
+  ** the divisor (C's % takes the sign of the dividend). INT_MIN % -1 is 0
+  ** (C's % traps on x86 for it: SIGFPE in traces). */
+  if (b == -1) return 0;
   r = a % b;
   if (r != 0 && ((r < 0) != (b < 0)))
     r += b;

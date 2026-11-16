@@ -1401,3 +1401,16 @@ C-stack-overflow handling, >600s; VM owner), closure (JIT-on slowdown), db
 (istailcall without a hook), main (missing libs fixtures + interactive prompt
 environment), heavy (PUC reference timeout); d54 only the documented border/
 fork/tailname/table-__gc rows.
+
+## Session 44 — C API 5.4 getter/raw signatures and tests
+
+lua_gettable/getfield/rawget/rawgeti/geti return lua_type like PUC 5.4 (void in
+LuaJIT 2.1); lua_rawgeti/rawseti take lua_Integer and handle exact int64 keys
+(rawseti roots a boxed key during the allocating raw set); lua_rawgetp and
+lua_rawsetp are added. tests/capi covers luaL_checkversion,
+lua_pushglobaltable, lua_rawlen (string and table without __len),
+LUA_INTEGER_FMT, maxinteger rawgeti/rawseti, and lightuserdata rawgetp/setp:
+108 checks, 0 failures. corpus-ext C modules (lfs, lpeg, cjson) still build
+against our headers and pass on x64 (3 SAME arms for lfs/lpeg; cjson known
+pair-order diffs). Both boxes ci-box green (109/0/5, opt228, R57, GC59+1X,
+capi 108, i64 14, fuzz 160/0).

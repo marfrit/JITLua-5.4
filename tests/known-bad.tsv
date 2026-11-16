@@ -14,7 +14,7 @@ tests/corpus/puc54/heavy.lua	A	PERF: reference exceeds 60s (triage; raise timeou
 tests/corpus/puc54/literals.lua	A	P1: 5.4 scanner (int/float literals, hex floats)
 tests/corpus/puc54/main.lua	A	P5: standalone interpreter semantics (progname, arg)
 tests/corpus/puc54/math.lua	A	P1: int64 numeric model + math library 5.4
-tests/corpus/puc54/pm.lua	A	P5: pattern matching 5.4 exactness
+tests/corpus/puc54/pm.lua	A	P5: pattern semantics now match PUC except one %p identity assert (gsub returns interned strings; needs lj_str.c)
 tests/corpus/puc54/sort.lua	A	P5: table.sort 5.4 + string.pack
 tests/corpus/puc54/tpack.lua	A	P5: string.pack/unpack absent
 tests/corpus/puc54/utf8.lua	A	P1: utf8 lib + \u{} + NUL-in-pattern done; last assert needs int64 bitwise ((1<<31)-1)

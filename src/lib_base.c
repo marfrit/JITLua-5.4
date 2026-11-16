@@ -623,28 +623,34 @@ LJLIB_CF(coroutine_close)
   else if (co->base > tvref(co->stack)+1+LJ_FR2) s = "normal";
   else if (co->top == co->base) s = "dead";
   else s = "suspended";
-  if (strcmp(s, "suspended") == 0) {
-    /* 5.4: close a suspended coroutine. Without to-be-closed variables the
-    ** close is just a reset of the coroutine's stack. */
+  if (strcmp(s, "suspended") == 0 || (strcmp(s, "dead") == 0 && co->status != LUA_OK)) {
+    /* 5.4: close a suspended coroutine, or one that died with an error (its
+    ** frames are still on its stack): run the pending __close handlers with
+    ** nil or the error object, then reset the coroutine. An error inside a
+    ** __close replaces the error object (false, err). */
+    TValue err;
+    int st;
+    if (co->status != LUA_OK && co->status != LUA_YIELD && co->top > co->base)
+      copyTV(L, &err, co->top-1);
+    else
+      setnilV(&err);
+    co->status = LUA_OK;
+    st = lj_meta_tbccloseall(co, tvref(co->stack), &err);
     lj_func_closeuv(co, tvref(co->stack));
     co->status = LUA_OK;
     co->base = co->top = tvref(co->stack) + 1 + LJ_FR2;
     co->cframe = NULL;
+    if (st != LUA_OK || !tvisnil(&err)) {
+      setboolV(L->top++, 0);
+      copyTV(L, L->top++, &err);
+      return 2;
+    }
     setboolV(L->top++, 1);
     return 1;
   }
-  if (strcmp(s, "dead") == 0) {
-    if (co->status == LUA_OK) {  /* Finished without error. */
-      setboolV(L->top++, 1);
-    } else {  /* Died with an error: return false plus the error object. */
-      setboolV(L->top++, 0);
-      if (co->top > co->base) {
-	copyTV(L, L->top++, co->top-1);
-      } else {
-	setnilV(L->top++);
-      }
-    }
-    return (co->status == LUA_OK) ? 1 : 2;
+  if (strcmp(s, "dead") == 0) {  /* Finished without error. */
+    setboolV(L->top++, 1);
+    return 1;
   }
   lj_err_callermsg(L, s[0] == 'r' ? "cannot close a running coroutine" :
 		       "cannot close a normal coroutine");

@@ -162,6 +162,7 @@ typedef struct FuncState {
   uint8_t numparams;		/* Number of parameters. */
   uint8_t framesize;		/* Fixed frame size. */
   uint8_t nuv;			/* Number of upvalues */
+  uint8_t ntbc;			/* Active to-be-closed variables (5.4). */
   VarIndex varmap[LJ_MAX_LOCVAR];  /* Map from register to variable idx. */
   VarIndex uvmap[LJ_MAX_UPVAL];	/* Map from upvalue to variable idx. */
   VarIndex uvtmp[LJ_MAX_UPVAL];	/* Temporary upvalue map. */
@@ -1400,7 +1401,7 @@ static void var_assign(LexState *ls, ExpDesc *e)
 {
   if (e->k == VLOCAL || e->k == VUPVAL) {
     VarInfo *v = &ls->vstack[e->u.s.aux];
-    if ((v->info & VSTACK_CONST))
+    if ((v->info & (VSTACK_CONST|VSTACK_CLOSE)))  /* <close> is const too. */
       lj_lex_error(ls, 0, LJ_ERR_XCONSTA, strdata(strref(v->name)));
   }
 }
@@ -1555,7 +1556,10 @@ static void fscope_end(FuncState *fs)
 {
   FuncScope *bl = fs->bl;
   LexState *ls = fs->ls;
+  BCReg i;
   fs->bl = bl->prev;
+  for (i = bl->nactvar; i < fs->nactvar; i++)  /* Leaving <close> variables. */
+    if ((var_get(ls, fs, i).info & VSTACK_CLOSE)) fs->ntbc--;
   var_remove(ls, bl->nactvar);
   fs->freereg = fs->nactvar;
   lj_assertFS(bl->nactvar == fs->nactvar, "bad regalloc");
@@ -1915,6 +1919,7 @@ static void fs_init(LexState *ls, FuncState *fs)
   fs->nkn = 0;
   fs->nactvar = 0;
   fs->nuv = 0;
+  fs->ntbc = 0;
   fs->bl = NULL;
   fs->flags = 0;
   fs->framesize = 1;  /* Minimum frame size. */
@@ -2758,9 +2763,7 @@ static int parse_attrib(LexState *ls)
   if (!strcmp(strdata(name), "const")) {
     attr = VSTACK_CONST;
   } else if (!strcmp(strdata(name), "close")) {
-    /* P1.5: needs VM support for scope-exit/error/coroutine close. */
-    lj_lex_error(ls, 0, LJ_ERR_XCLOSE);
-    attr = 0;
+    attr = VSTACK_CLOSE;
   } else {
     lj_lex_error(ls, 0, LJ_ERR_XATTR, strdata(name));
     attr = 0;
@@ -2816,6 +2819,18 @@ static void parse_local(LexState *ls, int vinfo)
     }
     assign_adjust(ls, nvars, nexps, &e);
     var_add(ls, nvars);
+    {  /* 5.4 <close>: register the slot at runtime (BC_TBC) and make every
+       ** exit of the scope (block end, break/goto, return) emit a UCLO. */
+      BCReg i, ntbc = 0;
+      for (i = fs->nactvar - nvars; i < fs->nactvar; i++) {
+	if ((var_get(ls, fs, i).info & VSTACK_CLOSE)) {
+	  if (ntbc++) lj_lex_error(ls, 0, LJ_ERR_XTBCMULTI);
+	  bcemit_AD(fs, BC_TBC, i, 0);
+	  fs->bl->flags |= FSCOPE_UPVAL;
+	  fs->ntbc++;
+	}
+      }
+    }
   }
 }
 
@@ -2874,6 +2889,8 @@ static void parse_return(LexState *ls, int eflags)
     if (nret == 1) {  /* Return one result. */
       /* Check for tail call. */
       if (e.k == VCALL) {
+	/* 5.4: no tail call in the scope of a to-be-closed variable. */
+	if (fs->ntbc) goto notailcall;
 #ifdef LUAJIT_DISABLE_TAILCALL
 	goto notailcall;
 #else
@@ -2898,8 +2915,8 @@ static void parse_return(LexState *ls, int eflags)
       }
     }
   }
-  if (fs->flags & PROTO_CHILD)
-    bcemit_AJ(fs, BC_UCLO, 0, 0);  /* May need to close upvalues first. */
+  if ((fs->flags & PROTO_CHILD) || fs->ntbc)
+    bcemit_AJ(fs, BC_UCLO, 0, 0);  /* May need to close upvalues/<close> first. */
   bcemit_INS(fs, ins);
 }
 

@@ -8,6 +8,7 @@
 
 #include "lj_obj.h"
 #include "lj_err.h"
+#include "lj_meta.h"
 #include "lj_debug.h"
 #include "lj_str.h"
 #include "lj_tab.h"
@@ -99,6 +100,11 @@ LJ_DATADEF const char *lj_err_allmsg =
 LJ_NOINLINE static void unwindstack(lua_State *L, TValue *top)
 {
   lj_func_closeuv(L, top);
+  /* Pending to-be-closed slots above the new top are gone (lj_err_run has
+  ** already run the __close handlers of a caught error). */
+  while (L->tbcn > 0 &&
+	 restorestack(L, mref(L->tbclist, int32_t)[L->tbcn-1]) >= top)
+    L->tbcn--;
   if (top < L->top-1) {
     copyTV(L, top, L->top-1);
     L->top = top+1;
@@ -885,6 +891,51 @@ static ptrdiff_t finderrfunc(lua_State *L)
 }
 
 /* Runtime error. */
+/* 5.4 to-be-closed variables: the base of the frames an error unwinds, i.e.
+** the first slot above the pcall()/lua_pcall frame that catches it, or NULL
+** when the error leaves the thread (a dying coroutine keeps its pending
+** variables for coroutine.close; the main thread panics). Mirrors the frame
+** walk of err_unwind() without side effects. */
+static TValue *tbc_catch_level(lua_State *L)
+{
+  TValue *frame = L->base-1;
+  void *cf = L->cframe;
+  while (cf) {
+    int32_t nres = cframe_nres(cframe_raw(cf));
+    if (nres < 0) {  /* C frame without Lua frame? */
+      TValue *top = restorestack(L, -nres);
+      if (frame < top) return top;
+    }
+    if (frame <= tvref(L->stack)+LJ_FR2)
+      break;
+    switch (frame_typep(frame)) {
+    case FRAME_LUA: case FRAME_LUAP:
+      frame = frame_prevl(frame);
+      break;
+    case FRAME_C:
+      cf = cframe_prev(cf);
+      frame = frame_prevd(frame);
+      break;
+    case FRAME_CP:
+      if (cframe_canyield(cf)) return NULL;  /* Coroutine dies: keep them. */
+      return frame + 1;
+    case FRAME_CONT:
+      if (frame_iscont_fficb(frame)) {
+	cf = cframe_prev(cf);
+	frame = frame_prevd(frame);
+	break;
+      }
+      /* fallthrough */
+    case FRAME_VARG:
+      frame = frame_prevd(frame);
+      break;
+    case FRAME_PCALL: case FRAME_PCALLH:
+      return frame + 1;
+    }
+  }
+  return NULL;
+}
+
 LJ_NOINLINE void LJ_FASTCALL lj_err_run(lua_State *L)
 {
   ptrdiff_t ef = (LJ_HASJIT && tvref(G(L)->jit_base)) ? 0 : finderrfunc(L);
@@ -904,6 +955,13 @@ LJ_NOINLINE void LJ_FASTCALL lj_err_run(lua_State *L)
     if (LJ_FR2) setnilV(top++);
     L->top = top+1;
     lj_vm_call(L, top, 1+1);  /* Stack: |errfunc|msg| -> |msg| */
+  }
+  if (L->tbcn > 0) {  /* 5.4: close the to-be-closed variables being unwound. */
+    TValue *level = tbc_catch_level(L);
+    if (level) {
+      lj_state_checkstack(L, LUA_MINSTACK * 2);
+      lj_meta_tbccloseall(L, level, L->top-1);
+    }
   }
   lj_err_throw(L, LUA_ERRRUN);
 }

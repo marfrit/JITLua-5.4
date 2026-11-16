@@ -23,6 +23,7 @@
 #include "lj_strfmt.h"
 #include "lj_lib.h"
 #include "lj_debug.h"
+#include "lj_state.h"
 #include "lj_i64.h"
 #if LJ_HASFFI
 #include "lj_ctype.h"
@@ -675,3 +676,110 @@ void LJ_FASTCALL lj_meta_for(lua_State *L, TValue *o)
   }
 }
 
+
+/* -- Lua 5.4 to-be-closed variables ------------------------------------- */
+
+/* The pending slots of a thread are kept as stack offsets (innermost last).
+** BC_TBC registers a slot at its declaration, BC_UCLO closes the registered
+** slots at or above its level in reverse order (one __close call per UCLO
+** execution: the VM re-executes the UCLO after each call), coroutine.close
+** and the error path close the rest from C. */
+
+static void tbc_push(lua_State *L, TValue *o)
+{
+  int32_t *list = mref(L->tbclist, int32_t);
+  if (LJ_UNLIKELY(L->tbcn >= L->tbcsize)) {
+    MSize nsz = L->tbcsize ? L->tbcsize * 2 : 8;
+    list = (int32_t *)lj_mem_realloc(L, list, L->tbcsize * sizeof(int32_t),
+				     nsz * sizeof(int32_t));
+    setmref(L->tbclist, list);
+    L->tbcsize = nsz;
+  }
+  list[L->tbcn++] = (int32_t)savestack(L, o);
+}
+
+void lj_meta_tbcfree(global_State *g, lua_State *L)
+{
+  if (L->tbcsize) {
+    lj_mem_free(g, mref(L->tbclist, void), L->tbcsize * sizeof(int32_t));
+    setmref(L->tbclist, NULL);
+    L->tbcn = L->tbcsize = 0;
+  }
+}
+
+/* BC_TBC: a to-be-closed variable got its value. nil and false are ignored;
+** anything else needs a __close metamethod. */
+void LJ_FASTCALL lj_meta_tbcmark(lua_State *L, TValue *o)
+{
+  if (tvisnil(o) || tvisfalse(o)) return;
+  if (tvisnil(lj_meta_lookup(L, o, MM_close))) {
+    const BCIns *pc = cframe_pc(cframe_raw(L->cframe));
+    const char *name = NULL;
+    if (curr_funcisL(L))
+      lj_debug_slotname(curr_proto(L), pc, (BCReg)(o - L->base), &name);
+    lj_err_callerv(L, LJ_ERR_TBCVAL, name ? name : "?");
+  }
+  tbc_push(L, o);
+}
+
+/* BC_UCLO: set up the next __close(value, nil) call for a pending slot at or
+** above level, or return NULL when none is left. The VM makes the call with
+** the lj_cont_nop continuation returning to the UCLO itself. */
+TValue *lj_meta_tbcclose(lua_State *L, TValue *level)
+{
+  while (L->tbcn > 0) {
+    int32_t *list = mref(L->tbclist, int32_t);
+    TValue *o = restorestack(L, list[L->tbcn-1]);
+    cTValue *mo;
+    if (o < level) return NULL;
+    L->tbcn--;
+    mo = lj_meta_lookup(L, o, MM_close);
+    {
+      TValue nilv;
+      setnilV(&nilv);
+      return mmcall(L, lj_cont_nop, mo, o, &nilv);  /* nil mo: "attempt to call" */
+    }
+  }
+  return NULL;
+}
+
+/* Close all pending slots at or above level from C, each in a protected
+** call: __close(value, err). An error inside a __close replaces err (5.4).
+** Returns 0 when every call succeeded, otherwise the error status; err then
+** holds the new error object. */
+int lj_meta_tbccloseall(lua_State *L, TValue *level, TValue *err)
+{
+  /* level and err may point into the Lua stack, which the calls below can
+  ** reallocate: keep them as offsets. */
+  ptrdiff_t lofs = savestack(L, level);
+  int errinstack = (err >= tvref(L->stack) && err < tvref(L->maxstack));
+  ptrdiff_t eofs = errinstack ? savestack(L, err) : 0;
+  int status = LUA_OK;
+  while (L->tbcn > 0) {
+    int32_t *list = mref(L->tbclist, int32_t);
+    TValue *o = restorestack(L, list[L->tbcn-1]);
+    cTValue *mo;
+    TValue *top;
+    int st;
+    if (o < restorestack(L, lofs)) break;
+    L->tbcn--;
+    lj_state_checkstack(L, LUA_MINSTACK);
+    o = restorestack(L, list[L->tbcn]);  /* Re-derive after a possible realloc. */
+    if (errinstack) err = restorestack(L, eofs);
+    mo = lj_meta_lookup(L, o, MM_close);
+    top = L->top;
+    copyTV(L, top, mo);
+    if (LJ_FR2) setnilV(top+1);
+    copyTV(L, top+1+LJ_FR2, o);
+    copyTV(L, top+2+LJ_FR2, err);
+    L->top = top+3+LJ_FR2;
+    st = lj_vm_pcall(L, top+1+LJ_FR2, 0+1, 0);  /* No results, no errfunc. */
+    if (st != LUA_OK) {  /* The error of a __close replaces the error. */
+      if (errinstack) err = restorestack(L, eofs);
+      copyTV(L, err, L->top-1);
+      L->top--;
+      status = st;
+    }
+  }
+  return status;
+}

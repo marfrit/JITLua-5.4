@@ -216,6 +216,7 @@ static void close_state(lua_State *L)
 {
   global_State *g = G(L);
   lj_func_closeuv(L, tvref(L->stack));
+  lj_meta_tbcfree(g, L);
   lj_gc_freeall(g);
   lj_assertG(gcref(g->gc.root) == obj2gco(L),
 	     "main thread is not first GC object");
@@ -280,6 +281,8 @@ LUA_API lua_State *lua_newstate(lua_Alloc allocf, void *allocd)
   L->gct = ~LJ_TTHREAD;
   L->marked = LJ_GC_WHITE0 | LJ_GC_FIXED | LJ_GC_SFIXED;  /* Prevent free. */
   L->dummy_ffid = FF_C;
+  setmref(L->tbclist, NULL);
+  L->tbcn = L->tbcsize = 0;
   setmref(L->glref, g);
   g->gc.currentwhite = LJ_GC_WHITE0 | LJ_GC_FIXED;
   g->strempty.marked = LJ_GC_WHITE0;
@@ -372,6 +375,8 @@ lua_State *lj_state_new(lua_State *L)
   L1->cframe = NULL;
   /* NOBARRIER: The lua_State is new (marked white). */
   setgcrefnull(L1->openupval);
+  setmref(L1->tbclist, NULL);
+  L1->tbcn = L1->tbcsize = 0;
   setmrefr(L1->glref, L->glref);
   setgcrefr(L1->env, L->env);
   stack_init(L1, L);  /* init stack */
@@ -393,6 +398,7 @@ void LJ_FASTCALL lj_state_free(global_State *g, lua_State *L)
     lj_trace_abort(g);  /* For aa_uref soundness. */
     lj_assertG(gcref(L->openupval) == NULL, "stale open upvalues");
   }
+  lj_meta_tbcfree(g, L);
   lj_mem_freevec(g, tvref(L->stack), L->stacksize, TValue);
   lj_mem_freet(g, L);
 }

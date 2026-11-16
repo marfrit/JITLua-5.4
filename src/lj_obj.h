@@ -572,7 +572,9 @@ enum {
   /* The following must be in ORDER ARITH. */ \
   _(add) _(sub) _(mul) _(div) _(mod) _(pow) _(unm) _(idiv) \
   /* The following are used in the standard libraries. */ \
-  _(metatable) _(tostring) MMDEF_FFI(_) MMDEF_PAIRS(_)
+  _(metatable) _(tostring) MMDEF_FFI(_) MMDEF_PAIRS(_) \
+  /* 5.4 to-be-closed variables (appended: arith ids stay). */ \
+  _(close)
 
 typedef enum {
 #define MMENUM(name)	MM_##name,
@@ -721,6 +723,11 @@ struct lua_State {
   GCRef env;		/* Thread environment (table of globals). */
   void *cframe;		/* End of C stack frame chain. */
   MSize stacksize;	/* True stack size (incl. LJ_STACK_EXTRA). */
+  /* 5.4 to-be-closed variables: stack offsets (savestack) of the pending
+  ** slots, innermost last. Offsets survive stack reallocation. */
+  MRef tbclist;		/* int32_t[] of stack offsets. */
+  MSize tbcn;		/* Number of pending to-be-closed slots. */
+  MSize tbcsize;	/* Allocated size of tbclist. */
 };
 
 #define G(L)			(mref(L->glref, global_State))

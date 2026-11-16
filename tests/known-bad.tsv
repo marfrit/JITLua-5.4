@@ -31,4 +31,3 @@ tests/d54/lex_01_literals.lua	A	P1: 5.4 literal classification (int vs float, ov
 tests/d54/math_os_01.lua	A	P1/P5: math.type/tointeger/ult done; remaining: math.maxinteger/mininteger (int64 core), math.random(1,2^62)
 tests/d54/math_02_random.lua	A	P5.5 done: xoshiro256** sequence matches PUC for every seeded call; only math.random(0) still returns a float -- needs a 64-bit integer in the value model (ADR-001)
 tests/d54/tbl_03_border_divergence.lua	A	IMPL-DEFINED: runtime-built sparse tables may report any legal border (5.4 manual 3.4.7); LuaJIT's array-growth policy differs from PUC's alimit hint
-tests/d54/close_01_semantics.lua	A,B	P1: <close> parked (VM __close call context corrupts closure upvalues; see docs/phase0-status.md)

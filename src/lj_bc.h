@@ -137,6 +137,7 @@
   _(USETN,	uv,	___,	num,	___) \
   _(USETP,	uv,	___,	pri,	___) \
   _(UCLO,	rbase,	___,	jump,	___) \
+  _(TBC,	rbase,	___,	___,	___) \
   _(FNEW,	dst,	___,	func,	gc) \
   \
   /* Table ops. */ \

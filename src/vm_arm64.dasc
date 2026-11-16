@@ -3276,9 +3276,24 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
 
   case BC_UCLO:
     |  // RA = level, RC = target
+    |  ldr TMP1w, L->tbcn
+    |   str BASE, L->base
+    |  cbz TMP1w, >2
+    |  // 5.4 to-be-closed variables at or above the level: the helper sets up
+    |  // one __close(value, nil) call (NULL when none is left). The call runs
+    |  // with the nop continuation returning to this UCLO, which then handles
+    |  // the next one. RA/RC are callee-saved.
+    |   str PC, SAVE_PC
+    |  mov CARG1, L
+    |  add CARG2, BASE, RA, lsl #3
+    |  bl extern lj_meta_tbcclose	// (lua_State *L, TValue *level)
+    |  ldr BASE, L->base
+    |  cbz CRET1, >2
+    |  sub PC, PC, #4			// Re-execute this UCLO after the call.
+    |  b ->vmeta_binop
+    |2:
     |  ldr CARG3, L->openupval
     |   add RC, PC, RC, lsl #2
-    |    str BASE, L->base
     |   sub PC, RC, #0x20000
     |  cbz CARG3, >1
     |  mov CARG1, L
@@ -3286,6 +3301,16 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  bl extern lj_func_closeuv	// (lua_State *L, TValue *level)
     |  ldr BASE, L->base
     |1:
+    |  ins_next
+    break;
+  case BC_TBC:
+    |  // RA = slot of the to-be-closed variable (5.4)
+    |   str BASE, L->base
+    |  mov CARG1, L
+    |   str PC, SAVE_PC
+    |  add CARG2, BASE, RA, lsl #3
+    |  bl extern lj_meta_tbcmark	// (lua_State *L, TValue *o)
+    |  ldr BASE, L->base
     |  ins_next
     break;
 

@@ -211,7 +211,7 @@ static int io_file_readnum(lua_State *L, FILE *fp)
   }
   ungetc(rn.c, fp);  /* unread look-ahead char */
   rn.buf[rn.n] = '\0';
-  if (lj_strscan_number(lj_str_new(L, rn.buf, (size_t)rn.n), &o)) {
+  if (lj_strscan_number64(L, lj_str_new(L, rn.buf, (size_t)rn.n), &o)) {
     copyTV(L, L->top++, &o);
     return 1;
   }
@@ -332,8 +332,8 @@ static int io_file_iter(lua_State *L)
   GCfunc *fn = curr_func(L);
   IOFileUD *iof = uddata(udataV(&fn->c.upvalue[0]));
   int n = fn->c.nupvalues - 1;
-  if (iof->fp == NULL)
-    lj_err_caller(L, LJ_ERR_IOCLFL);
+  if (iof->fp == NULL)  /* 5.4 io.lines helper wording */
+    luaL_error(L, "file is already closed");
   L->top = L->base;
   if (n) {  /* Copy upvalues with options to stack. */
     lj_state_checkstack(L, (MSize)n);
@@ -341,7 +341,11 @@ static int io_file_iter(lua_State *L)
     L->top += n;
   }
   n = io_file_read(L, iof, 0);
-  if (n < 1) return 0;
+  if (n < 1) {  /* EOF: 5.4 closes an io.lines file, so a later call errors. */
+    if (iof->type & IOFILE_FLAG_CLOSE)
+      io_file_close(L, iof);
+    return 0;
+  }
   if (!tvisnil(L->top-n))  /* read at least one value? */
     return n;
   if (n > 1)  /* error result: nil, message, errno */
@@ -354,8 +358,8 @@ static int io_file_iter(lua_State *L)
 static int io_file_lines(lua_State *L)
 {
   int n = (int)(L->top - L->base);
-  if (n > LJ_MAX_UPVAL)
-    lj_err_caller(L, LJ_ERR_UNPACK);
+  /* PUC 5.4 MAXARGLINE = 250; the iterator closure has n formats + 1 file. */
+  luaL_argcheck(L, n-1 <= 250, 252, "too many arguments");  /* n includes the file */
   lua_pushcclosure(L, io_file_iter, n);
   return 1;
 }
@@ -366,14 +370,9 @@ static int io_file_lines(lua_State *L)
 
 LJLIB_CF(io_method_close)
 {
-  IOFileUD *iof;
-  if (L->base < L->top) {
-    iof = io_tofile(L);
-  } else {
-    iof = IOSTDF_IOF(L, GCROOT_IO_OUTPUT);
-    if (iof->fp == NULL)
-      lj_err_caller(L, LJ_ERR_IOCLFL);
-  }
+  /* A file method: self is argument #1; a dot call without it is PUC's
+  ** "FILE* expected, got no value" (only io.close() may omit the file). */
+  IOFileUD *iof = io_tofile(L);
   return io_file_close(L, iof);
 }
 
@@ -543,7 +542,15 @@ LJLIB_CF(io_tmpfile)
 
 LJLIB_CF(io_close)
 {
-  return lj_cf_io_method_close(L);
+  IOFileUD *iof;
+  if (L->base < L->top) {
+    iof = io_tofile(L);
+  } else {
+    iof = IOSTDF_IOF(L, GCROOT_IO_OUTPUT);
+    if (iof->fp == NULL)
+      lj_err_caller(L, LJ_ERR_IOCLFL);
+  }
+  return io_file_close(L, iof);
 }
 
 LJLIB_CF(io_read)

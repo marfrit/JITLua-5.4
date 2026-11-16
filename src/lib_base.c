@@ -583,6 +583,7 @@ LJLIB_CF(print)
     fwrite(str, 1, size, stdout);
   }
   putchar('\n');
+  fflush(stdout);  /* PUC 5.4 lua_writeline flushes each line */
   return 0;
 }
 
@@ -708,7 +709,8 @@ LJLIB_CF(coroutine_create)
 
 LJLIB_ASM(coroutine_yield)
 {
-  lj_err_caller(L, LJ_ERR_CYIELD);
+  /* 5.4 raises this without a source location (PUC lua_yieldk wording). */
+  lj_err_msg(L, LJ_ERR_CYIELD);
   return FFH_UNREACHABLE;
 }
 
@@ -813,6 +815,23 @@ LUALIB_API int luaopen_base(lua_State *L)
   newproxy_weaktable(L);  /* top-2. */
   LJ_LIB_REG(L, "_G", base);
   LJ_LIB_REG(L, LUA_COLIBNAME, coroutine);
+  /* 5.4 dofile may yield: the C call boundary of the stock implementation
+  ** forbids it, so install a Lua wrapper that calls the loaded chunk from
+  ** Lua (loadfile/error semantics are unchanged for normal use). */
+  {
+    static const char dofilesrc[] =
+      "local loadfile = loadfile\n"
+      "return function(name)\n"
+      "  local f, e = loadfile(name)\n"
+      "  if not f then error(e, 0) end\n"
+      "  return f()\n"
+      "end\n";
+    GCstr *key = lj_str_newlit(L, "dofile");
+    luaL_loadstring(L, dofilesrc);
+    lua_call(L, 0, 1);
+    setfuncV(L, lj_tab_setstr(L, env, key), funcV(L->top-1));
+    L->top--;
+  }
   /* 5.4 warnings: the auxlib default is OFF (luaL_newstate); only set the
   ** registry state if it was not configured yet. The standalone interpreter
   ** leaves this off, like PUC without -W. */

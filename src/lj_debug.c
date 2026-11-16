@@ -789,8 +789,13 @@ LUALIB_API void luaL_traceback (lua_State *L, lua_State *L1, const char *msg,
       const char *gname = lj_err_funcname_loaded(L, fn, namebuf, sizeof(namebuf));
       if (gname)
 	lua_pushfstring(L, " in function " LUA_QS, gname);
-      else if (*ar.namewhat)
-	lua_pushfstring(L, " in %s " LUA_QS, ar.namewhat, ar.name);
+      else if (*ar.namewhat) {
+	const char *nm = ar.name;
+	/* 5.4 tracebacks name the event without the '__' prefix. */
+	if (*ar.namewhat == 'm' && ar.namewhat[1] == 'e' &&
+	    nm[0] == '_' && nm[1] == '_') nm += 2;
+	lua_pushfstring(L, " in %s " LUA_QS, ar.namewhat, nm);
+      }
       else if (*ar.what == 'm')
 	lua_pushliteral(L, " in main chunk");
       else if (*ar.what != 'C')

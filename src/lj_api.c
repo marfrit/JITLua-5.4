@@ -421,7 +421,7 @@ static void api_pushkey(lua_State *L, lua_Integer n)
   incr_top(L);
 }
 
-LUA_API void lua_geti(lua_State *L, int idx, lua_Integer n)
+LUA_API int lua_geti(lua_State *L, int idx, lua_Integer n)
 {
   cTValue *v, *t = index2adr_check(L, idx);
   TValue key;
@@ -446,7 +446,7 @@ LUA_API void lua_geti(lua_State *L, int idx, lua_Integer n)
     }
     copyTV(L, L->top, v);
     incr_top(L);
-    return;
+    return lua_type(L, -1);
   }
   /* Boxed int64 key: exactly 5.4. Root it on the stack while tget may run a
   ** metamethod. */
@@ -455,6 +455,7 @@ LUA_API void lua_geti(lua_State *L, int idx, lua_Integer n)
   api_pushkey(L, n);
   lua_gettable(L, -2);  /* pops the key, pushes the value */
   lua_remove(L, -2);  /* drop the table copy, keep the result */
+  return lua_type(L, -1);
 }
 
 LUA_API void lua_seti(lua_State *L, int idx, lua_Integer n)
@@ -1144,7 +1145,7 @@ LUA_API int lua_setcstacklimit(lua_State *L, unsigned int limit)
 
 /* -- Object getters ------------------------------------------------------ */
 
-LUA_API void lua_gettable(lua_State *L, int idx)
+LUA_API int lua_gettable(lua_State *L, int idx)
 {
   cTValue *t = index2adr_check(L, idx);
   cTValue *v = lj_meta_tget(L, t, L->top-1);
@@ -1155,9 +1156,10 @@ LUA_API void lua_gettable(lua_State *L, int idx)
     v = L->top+1+LJ_FR2;
   }
   copyTV(L, L->top-1, v);
+  return lua_type(L, -1);
 }
 
-LUA_API void lua_getfield(lua_State *L, int idx, const char *k)
+LUA_API int lua_getfield(lua_State *L, int idx, const char *k)
 {
   cTValue *v, *t = index2adr_check(L, idx);
   TValue key;
@@ -1171,26 +1173,38 @@ LUA_API void lua_getfield(lua_State *L, int idx, const char *k)
   }
   copyTV(L, L->top, v);
   incr_top(L);
+  return lua_type(L, -1);
 }
 
-LUA_API void lua_rawget(lua_State *L, int idx)
+LUA_API int lua_rawget(lua_State *L, int idx)
 {
   cTValue *t = index2adr(L, idx);
   lj_checkapi(tvistab(t), "stack slot %d is not a table", idx);
   copyTV(L, L->top-1, lj_tab_get(L, tabV(t), L->top-1));
 }
 
-LUA_API void lua_rawgeti(lua_State *L, int idx, int n)
+LUA_API int lua_rawgeti(lua_State *L, int idx, lua_Integer n)
 {
   cTValue *v, *t = index2adr(L, idx);
+  TValue key;
   lj_checkapi(tvistab(t), "stack slot %d is not a table", idx);
-  v = lj_tab_getint(tabV(t), n);
-  if (v) {
-    copyTV(L, L->top, v);
-  } else {
-    setnilV(L->top);
-  }
+  lj_i64_toTValue(L, &key, (int64_t)n);  /* exact int64 key; no alloc below */
+  v = lj_tab_get(L, tabV(t), &key);
+  copyTV(L, L->top, v);
   incr_top(L);
+  return lua_type(L, -1);
+}
+
+LUA_API int lua_rawgetp(lua_State *L, int idx, const void *p)
+{
+  cTValue *v, *t = index2adr(L, idx);
+  TValue key;
+  lj_checkapi(tvistab(t), "stack slot %d is not a table", idx);
+  setrawlightudV(&key, (void *)p);
+  v = lj_tab_get(L, tabV(t), &key);
+  copyTV(L, L->top, v);
+  incr_top(L);
+  return lua_type(L, -1);
 }
 
 LUA_API int lua_getmetatable(lua_State *L, int idx)
@@ -1397,16 +1411,39 @@ LUA_API void lua_rawset(lua_State *L, int idx)
   L->top = key;
 }
 
-LUA_API void lua_rawseti(lua_State *L, int idx, int n)
+LUA_API void lua_rawseti(lua_State *L, int idx, lua_Integer n)
 {
   GCtab *t = tabV(index2adr(L, idx));
-  TValue *dst, *src;
+  TValue key;
+  TValue *dst;
   lj_checkapi_slot(1);
-  dst = lj_tab_setint(L, t, n);
-  src = L->top-1;
-  copyTV(L, dst, src);
+  if ((int64_t)n == (int64_t)(int32_t)n) {
+    setintV(&key, (int32_t)n);
+    dst = lj_tab_set(L, t, &key);
+    copyTV(L, dst, L->top-1);
+    lj_gc_barriert(L, t, dst);
+    L->top--;
+  } else {
+    /* Exact boxed key, rooted on the stack during the (allocating) set. */
+    api_pushkey(L, n);
+    dst = lj_tab_set(L, t, L->top-1);
+    copyTV(L, dst, L->top-2);
+    lj_gc_barriert(L, t, dst);
+    L->top -= 2;
+  }
+}
+
+LUA_API void lua_rawsetp(lua_State *L, int idx, const void *p)
+{
+  GCtab *t = tabV(index2adr(L, idx));
+  TValue key;
+  TValue *dst;
+  lj_checkapi_slot(1);
+  setrawlightudV(&key, (void *)p);
+  dst = lj_tab_set(L, t, &key);
+  copyTV(L, dst, L->top-1);
   lj_gc_barriert(L, t, dst);
-  L->top = src;
+  L->top--;
 }
 
 LUA_API int lua_setmetatable(lua_State *L, int idx)

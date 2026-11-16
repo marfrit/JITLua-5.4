@@ -90,6 +90,43 @@ static void test_stream_abi(void)
   lua_close(L);
 }
 
+static void test_api54_surface(void)
+{
+  lua_State *L = newL();
+  char buf[64];
+  luaL_checkversion(L);
+  ok(1, "luaL_checkversion accepts this build");
+  lua_pushglobaltable(L);
+  ok(lua_istable(L, -1) && lua_getglobal(L, "print") == LUA_TFUNCTION,
+     "lua_pushglobaltable is the global table");
+  lua_pop(L, 1);
+  lua_pushliteral(L, "abc");
+  ok(lua_rawlen(L, -1) == 3, "lua_rawlen string");
+  lua_pop(L, 1);
+  luaL_dostring(L, "rt = {1,2,3}; setmetatable(rt, {__len = function() return 99 end})");
+  lua_getglobal(L, "rt");
+  ok(lua_rawlen(L, -1) == 3, "lua_rawlen table ignores __len");
+  lua_pop(L, 1);
+  /* rawgeti/rawseti with an int64 key outside int32; rawgetp/rawsetp. */
+  lua_newtable(L);
+  {
+    lua_Integer big = (lua_Integer)0x7fffffffffffffffLL;
+    int anchor;
+    lua_pushinteger(L, 7); lua_rawseti(L, -2, big);
+    ok(lua_rawgeti(L, -1, big) == LUA_TNUMBER &&
+       lua_tointeger(L, -1) == 7, "rawgeti/rawseti maxinteger key");
+    lua_pop(L, 1);
+    lua_pushinteger(L, 9); lua_rawsetp(L, -2, &anchor);
+    ok(lua_rawgetp(L, -1, &anchor) == LUA_TNUMBER &&
+       lua_tointeger(L, -1) == 9, "rawgetp/rawsetp lightuserdata key");
+    lua_pop(L, 1);
+  }
+  lua_pop(L, 1);
+  snprintf(buf, sizeof(buf), LUA_INTEGER_FMT, (LUAI_UACINT)(lua_Integer)-42);
+  ok(strcmp(buf, "-42") == 0, "LUA_INTEGER_FMT formats lua_Integer");
+  lua_close(L);
+}
+
 static void test_len(void)
 {
   lua_State *L = newL();
@@ -461,7 +498,7 @@ static void test_rotate(void)
 
 int main(void)
 {
-  test_absindex(); test_getseti(); test_stream_abi(); test_len(); test_compare();
+  test_absindex(); test_getseti(); test_stream_abi(); test_api54_surface(); test_len(); test_compare();
   test_stringtonumber(); test_getsubtable(); test_isinteger(); test_rotate();
   test_newuserdatauv(); test_iuservalue(); test_warning(); test_warnf(); test_resume54(); test_lauxlib54();
   printf("== capi: %d checks, %d failures ==\n", checks, failures);

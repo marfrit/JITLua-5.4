@@ -195,11 +195,12 @@ LUA_API int   (lua_pushthread) (lua_State *L);
 /*
 ** get functions (Lua -> stack)
 */
-LUA_API void  (lua_gettable) (lua_State *L, int idx);
-LUA_API void  (lua_getfield) (lua_State *L, int idx, const char *k);
-LUA_API void  (lua_rawget) (lua_State *L, int idx);
-LUA_API void  (lua_rawgeti) (lua_State *L, int idx, int n);
-LUA_API void  (lua_geti) (lua_State *L, int idx, lua_Integer n);
+LUA_API int   (lua_gettable) (lua_State *L, int idx);
+LUA_API int   (lua_getfield) (lua_State *L, int idx, const char *k);
+LUA_API int   (lua_rawget) (lua_State *L, int idx);
+LUA_API int   (lua_rawgetp) (lua_State *L, int idx, const void *p);
+LUA_API int   (lua_rawgeti) (lua_State *L, int idx, lua_Integer n);
+LUA_API int   (lua_geti) (lua_State *L, int idx, lua_Integer n);
 LUA_API void  (lua_createtable) (lua_State *L, int narr, int nrec);
 LUA_API void *(lua_newuserdata) (lua_State *L, size_t sz);
 LUA_API int   (lua_getmetatable) (lua_State *L, int objindex);
@@ -212,7 +213,8 @@ LUA_API void  (lua_getfenv) (lua_State *L, int idx);
 LUA_API void  (lua_settable) (lua_State *L, int idx);
 LUA_API void  (lua_setfield) (lua_State *L, int idx, const char *k);
 LUA_API void  (lua_rawset) (lua_State *L, int idx);
-LUA_API void  (lua_rawseti) (lua_State *L, int idx, int n);
+LUA_API void  (lua_rawsetp) (lua_State *L, int idx, const void *p);
+LUA_API void  (lua_rawseti) (lua_State *L, int idx, lua_Integer n);
 LUA_API void  (lua_seti) (lua_State *L, int idx, lua_Integer n);
 LUA_API int   (lua_setmetatable) (lua_State *L, int objindex);
 LUA_API int   (lua_setfenv) (lua_State *L, int idx);

@@ -568,3 +568,93 @@ PUC on both; B2 went from 3.2x/2.8x FFI to 1.9x/1.3x FFI (arm64/x64) and from
 522 MB to 79 MB -- the remaining gap is the sort with a Lua comparator (boxed
 compares through a call frame) plus one intern lookup per store; a widened
 value stores without any allocation now.
+
+## Step 3, part 3 (2026-11-16, branch `i64-keys`): int64 table keys
+
+Before: a widened key was turned into a float key, a boxed key hashed by its
+box pointer, so `t[2^60]` and `t[1<<60]` were two keys, `next()` returned
+floats for sparse integer keys (`t[100000]` came back as `100000.0`, a
+divergence inherited from stock DUALNUM LuaJIT, which keeps integral hash
+keys as floats), and the recorder aborted on int64 keys.
+
+Design: **an integral key lives in the hash part in its canonical integer
+encoding** (int32 inline, widened 47-bit inline, interned box) and never as
+a float. Consequences and pieces:
+
+- `lj_tab.c`: `hashi64()` hashes the int64 value for all three encodings;
+  lookups compare by value (`tab_findi64`: node keys are decoded, so no box
+  needs to exist for a lookup and a float key with an integral value finds
+  the integer node). `lj_tab_get/set/keyindex/getinth/setinth/countint`
+  follow; a new key keeps the caller's encoding (the parser keys its
+  constant table `fs->kt` by the boxed literal object and `fs_fixup_k` must
+  get that object back as a GC constant). `lj_tab_seti64(L, t, v)` is the
+  store entry by value (also the JIT's NEWREF for an IRT_I64 key).
+  `lj_meta_tset` no longer floats integer keys before `lj_tab_newkey`.
+- `next()` takes a float key as a float only, like PUC's `findindex()`:
+  `next(t, 2^40)` is an "invalid key to 'next'" although `t[2^40]` is
+  `t[1<<40]`; `lj_obj_equal()` would have equated them (int/float numeric
+  equality), so the traversal compares float keys by raw bits.
+- Bytecode dump: `BCDUMP_KTAB_I64` for widened/boxed keys and values in
+  template tables (`bcwrite_ktabk` wrote the low word of a widened value).
+- GC: a boxed integer is a value. Weak tables mark boxed keys and values
+  whatever their mode and `gc_mayclear()` never drops them. `lj_i64_box()`
+  resurrects a dead box found during the sweep (`flipwhite`, like
+  `lj_str_new`): a box that is only referenced from the intern hash between
+  the atomic phase and its sweep used to be handed out and then freed.
+- JIT recorder (`rec_idx_key`): keys are normalised under guards the same
+  way -- a float with an int32 value becomes `CONV INT NUM CHECK`, a larger
+  integral float `CONV I64 NUM` plus an equality guard on the way back, a
+  non-integral float is guarded `FLOOR(key) != key`, and an IRT_I64 key is
+  guarded outside the int32 range (the canonical-encoding rule, which a key
+  computed by a 64-bit op cannot promise by its type). Integer keys stay
+  IRT_INT/IRT_I64 for HREF/HREFK/NEWREF (no more `CONV NUM INT` for hash
+  keys); a constant int64 key becomes the widened word (KINT64) or the
+  interned box (KGC udata, kept alive by the trace). The normalised key is
+  `RecordIndex.nkey`; metamethods still receive the original key (PUC
+  passes `2^40` as a float to `__index`).
+- Backends: `asm_href` hashes int32/int64 keys by value (`hashi64`) and
+  compares int32 keys and widened constants as raw TValue words; a
+  non-constant int64 key decodes each node key in the chain (int32 inline,
+  widened payload, or `UDTYPE_I64BOX` payload) and compares the value.
+  `asm_hrefk` compares the widened word or the box pointer. `ir_khash`
+  hashes integer constants and boxes by value. NEWREF with an IRT_I64 key
+  calls `lj_tab_seti64`. `rawget`/`rawset` accept int64 arguments.
+- Alias analysis (`aa_ahref`) is unchanged: INT, I64 and NUM keys are
+  different types and, under the guards above, cannot name the same node.
+
+Test: `tests/d54/i64_04_keys.lua` (all encodings as keys, float-key
+normalisation, next/pairs, template tables in mode R, metamethod keys,
+sparse int32/negative keys, constant and variable int64 keys in hot loops,
+keys crossing encodings, weak tables, 20000 boxed keys under GC pressure).
+`-jv`: 40 traces compiled; the aborts are stock ones (mixed sparse/dense
+table in the weak-table loop, fast functions with int64 arguments).
+
+### Gates (commit 87dfc75e, 2026-11-16)
+
+`tests/ci-box.sh` on both boxes, identical: modes A+B 81 PASS / 0 FAIL / 13
+XFAIL / 0 XPASS, mode B at opt 0-3 184 PASS / 0 FAIL / 4 XFAIL (math_os_01 B),
+mode R 47 PASS, C API 34 + i64 14/14, fuzz 160/160. The new test runs in
+all four modes (the template table with int64 keys covers dump/reload).
+
+Benchmark gate `tests/bench/run.sh`, median of 3 (the x64 box was shared
+during the FFI and PUC arms of this run; the JIT arm is unchanged against
+part 2):
+
+| bench (arm64, escher) | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
+|---|---|---|---|---|
+| B1 FNV-1a-64, 10 MiB | **16.5 ms** (1.09x FFI) | 12036.3 ms | 15.2 ms | 289.0 ms |
+| B2 1e6 64-bit values | **1520.6 ms, 79 MB** | 2667.7 ms, 522 MB | 622.8 ms, 31.6 MB | 547.6 ms, 16.4 MB |
+| B2b 1e6 ~2^41 values | **130.7 ms, 8.2 MB** | 383.9 ms, 79 MB | 125.7 ms (float) | 176.0 ms |
+| B3 int32 control (fnv / table) | **23.7 / 212.9 ms** | 4315.9 / 672.7 ms | 37.9 / 200.2 ms | 309.1 / 255.3 ms |
+
+| bench (x64, pve2 NUC) | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
+|---|---|---|---|---|
+| B1 | **30.2 ms** | 21419.0 ms | 36.5 ms | 3152.1 ms |
+| B2 | **3124.3 ms, 79 MB** | 7597.5 ms, 522 MB | 5402.4 ms, 31.6 MB | 3172.1 ms, 16.4 MB |
+| B2b | **662.3 ms, 8.2 MB** | 1253.8 ms, 79 MB | 1253.2 ms (float) | 728.0 ms |
+| B3 | **47.6 / 955.6 ms** | 15895.6 / 1886.5 ms | 99.1 / 872.8 ms | 1323.5 / 1001.0 ms |
+
+Checksums on both arches, JIT == -joff == PUC: B1 343592796160, B2
+4047905256, B2b 299440, B3 1196193376. No regression against part 2 (arm64
+B1 16.5 / B2 1520.6 / B2b 130.7 / B3 23.7 ms; x64 B1 30.2 / B2 3124.3 / B2b
+662.3 / B3 47.6 ms).

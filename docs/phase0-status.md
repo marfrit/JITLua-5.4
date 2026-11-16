@@ -764,3 +764,24 @@ Bench (JIT arm, median of 3): arm64 B1 14.9 ms (FFI 15.2), B2 1358.6 ms /
 139.7, PUC 176.8), B3 22.2 / 226.4 ms; x64 B1 30.4 (FFI 29.2), B2 3405.9 (was
 7327.7; FFI 2589.7, PUC 2151.5), B2b 675.4 (was 1135.4; FFI 612.6, PUC
 729.7), B3 47.7 / 967.3 ms. Checksums equal (B2 4047905256 now stable).
+
+## Session 29 (branch i64-keys) — int64 table keys
+
+Integral keys live in the hash part as canonical integers (int32 inline,
+widened, box), never as floats: t[2^60] is t[1<<60], next() returns
+integers (also for sparse int32 keys, a stock-DUALNUM divergence), float
+keys with integral values normalise on get/set but not in next() (PUC
+findindex). Hash by value for all encodings (hashi64), lookups decode node
+keys, so no box needs to exist for a lookup. JIT: rec_idx_key normalises
+under guards and keeps IRT_INT/IRT_I64 keys; asm_href/asm_hrefk on both
+arches hash and compare integer keys by value, int64 keys decode the chain;
+NEWREF int64 -> lj_tab_seti64. Also: template tables dump int64 keys/values
+(BCDUMP_KTAB_I64), weak tables keep boxed integers, lj_i64_box resurrects
+a dead box found during the sweep, lj_meta_tset stops floating keys, the
+parser constant table keeps its boxed-literal keys. Details and bench
+tables: docs/adr-001b-boxed-i64.md "Step 3, part 3".
+Gates at 87dfc75e, both arches identical: A+B 81 PASS / 0 FAIL / 13 XFAIL /
+0 XPASS, opt 0-3 184 PASS (+4 XFAIL math_os_01 B), R 47, C API + i64 14/14,
+fuzz 160/160. Bench unchanged against part 2: arm64 B1 16.5, B2 1520.6, B2b
+130.7, B3 23.7 / 212.9 ms; x64 B1 30.2, B2 3124.3, B2b 662.3, B3 47.6 /
+955.6 ms; checksums equal.

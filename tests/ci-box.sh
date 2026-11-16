@@ -57,7 +57,7 @@ say "real-program corpus (tests/corpus-ext: PUC vs -joff / -jon / -jon+GC-stress
 sh tests/corpus-ext/run.sh | grep -v "^      " | tail -24
 
 say "C API"
-tests/capi/run.sh | tail -3
+tests/capi/run.sh | grep -E '^== (capi|i64):'
 
 say "fuzz: mode B, 40 programs x opt levels 0-3, GC pressure"
 python3 tests/fuzz/fuzz.py --seed 1 --count 40 --mode B --opt-levels 0,1,2,3 --gc | tail -6

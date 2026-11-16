@@ -870,3 +870,10 @@ load malformed bytecode / bad precompiled chunk" error (no crash). Stock LuaJIT
 tests/d54/dump_03_version.lua checks round-trip, a hand-crafted version-2 header
 rejection and the >=0x80 version byte; A/B are known-bad (PUC dump format
 differs), mode R runs it.
+
+## Session 27i — LUA_PATH_5_4 / LUA_CPATH_5_4 / LUA_INIT_5_4 precedence (PUC 5.4)
+
+luaconf.h defines the versioned env names; package setpath prefers
+LUA_PATH_5_4/LUA_CPATH_5_4 over LUA_PATH/LUA_CPATH (PUC lloadlib order), and
+luajit.c initialises from LUA_INIT_5_4 before LUA_INIT. Path defaults themselves
+were already PUC-identical (session 27b). Gate pending in the next context.

@@ -507,7 +507,8 @@ static int handle_luainit(lua_State *L)
 #if LJ_TARGET_CONSOLE
   const char *init = NULL;
 #else
-  const char *init = getenv(LUA_INIT);
+  const char *init = getenv(LUA_INIT_5_4);
+  if (init == NULL) init = getenv(LUA_INIT);
 #endif
   if (init == NULL)
     return LUA_OK;

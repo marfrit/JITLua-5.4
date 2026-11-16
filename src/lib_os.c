@@ -212,13 +212,16 @@ static void os_checkdatefmt(lua_State *L, const char *s)
 
 LJLIB_CF(os_date)
 {
-  const char *s = luaL_optstring(L, 1, "%c");
+  size_t slen;
+  const char *s = luaL_optlstring(L, 1, "%c", &slen);
+  const char *se;
   time_t t = lua_isnoneornil(L, 2) ? time(NULL) :
 	     lj_num2int_type(luaL_checknumber(L, 2), time_t);
   struct tm *stm;
 #if LJ_TARGET_POSIX
   struct tm rtm;
 #endif
+  se = s + slen;
   if (*s == '!') {  /* UTC? */
     s++;  /* Skip '!' */
 #if LJ_TARGET_POSIX
@@ -235,7 +238,7 @@ LJLIB_CF(os_date)
   }
   if (stm == NULL)  /* invalid date? */
     return luaL_error(L, "date result cannot be represented in this installation");
-  if (strcmp(s, "*t") == 0) {
+  if (se - s == 2 && s[0] == '*' && s[1] == 't') {
     lua_createtable(L, 0, 9);  /* 9 = number of fields */
     setfield(L, "sec", stm->tm_sec);
     setfield(L, "min", stm->tm_min);
@@ -246,26 +249,48 @@ LJLIB_CF(os_date)
     setfield(L, "wday", stm->tm_wday+1);
     setfield(L, "yday", stm->tm_yday+1);
     setboolfield(L, "isdst", stm->tm_isdst);
-  } else if (*s) {
-    SBuf *sb = &G(L)->tmpbuf;
-    MSize sz = 0, retry = 4;
-    const char *q;
-    os_checkdatefmt(L, s);
-    for (q = s; *q; q++)
-      sz += (*q == '%') ? 30 : 1;  /* Overflow doesn't matter. */
-    setsbufL(sb, L);
-    while (retry--) {  /* Limit growth for invalid format or empty result. */
-      char *buf = lj_buf_need(sb, sz);
-      size_t len = strftime(buf, sbufsz(sb), s, stm);
-      if (len) {
-	setstrV(L, L->top++, lj_str_new(L, buf, len));
-	lj_gc_check(L);
-	break;
-      }
-      sz += (sz|1);
-    }
   } else {
-    setstrV(L, L->top++, &G(L)->strempty);
+    /* PUC 5.4 formats piece by piece: literal bytes (including NULs) are
+    ** copied, only conversion specifiers go through strftime. A single
+    ** strftime on the whole format truncates at a NUL. */
+    luaL_Buffer b;
+    luaL_buffinit(L, &b);
+    while (s < se) {
+      if (*s != '%') {
+	luaL_addchar(&b, *s++);
+      } else {
+	char cc[4], tmp[256];
+	char spec[4];
+	size_t reslen;
+	const char *p = s + 1;
+	cc[0] = '%';
+	spec[0] = '%';
+	if (p >= se) {
+	  spec[1] = '\0';
+	  lj_err_argv(L, 1, LJ_ERR_OSDATEFMT, spec);
+	}
+	if (strchr(LJ_STRFTIMEOPT1, *p)) {
+	  cc[1] = *p; cc[2] = '\0';
+	  s = p + 1;
+	} else if ((*p == 'E' || *p == 'O') && p+1 < se) {
+	  char two[3];
+	  two[0] = p[0]; two[1] = p[1]; two[2] = '\0';
+	  if (!strstr(LJ_STRFTIMEOPT2, two)) {
+	    spec[1] = p[0]; spec[2] = p[1]; spec[3] = '\0';
+	    lj_err_argv(L, 1, LJ_ERR_OSDATEFMT, spec);
+	  }
+	  cc[1] = p[0]; cc[2] = p[1]; cc[3] = '\0';
+	  s = p + 2;
+	} else {
+	  spec[1] = *p; spec[2] = '\0';
+	  lj_err_argv(L, 1, LJ_ERR_OSDATEFMT, spec);
+	}
+	reslen = strftime(tmp, sizeof(tmp), cc, stm);
+	luaL_addlstring(&b, tmp, reslen);
+      }
+    }
+    luaL_pushresult(&b);
+    lj_gc_check(L);
   }
   return 1;
 }

@@ -3519,9 +3519,13 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  cmp STR:RC, CARG3			// implicit 5.4 _ENV?
     |  bne >1
     if (op == BC_GGET) {
+      |  cbz TAB:CARG2, >3		// no env (load with env=nil): _ENV is nil
       |  movn TMP0, #~LJ_TTAB
       |   add TMP0, TAB:CARG2, TMP0, lsl #47	// tagged env table
       |  str TMP0, [BASE, RA, lsl #3]
+      |  ins_next
+      |3:
+      |  setnilV RA
       |  ins_next
     } else {
       |  str BASE, L->base

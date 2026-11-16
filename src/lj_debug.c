@@ -214,8 +214,33 @@ static TValue *debug_localname(lua_State *L, const lua_Debug *ar,
     return NULL;
   }
   if (pc != NO_BCPOS &&
-      (*name = debug_varname(funcproto(fn), pc, slot1-1)) != NULL)
-    ;
+      (*name = debug_varname(funcproto(fn), pc, slot1-1)) != NULL) {
+    if (strcmp(*name, "(for state)") == 0) {
+      /* PUC names every hidden generic-for local "(for state)" and stores
+      ** them in the order gen, state, control, toclose. LuaJIT stores
+      ** toclose first because ITERC needs func/state/control right below the
+      ** loop variables; present PUC's order and names in the debug view. */
+      GCproto *pt = funcproto(fn);
+      BCReg start = slot1, k;
+      for (k = 0; k < slot1; k++) {
+	const char *n = debug_varname(pt, pc, slot1-k-2);
+	if (n == NULL || strcmp(n, "(for state)") != 0) break;
+	start--;
+      }
+      {
+	BCReg len = 0, i;
+	for (i = 0; i < 8; i++) {
+	  const char *n = debug_varname(pt, pc, start+i-1);
+	  if (n == NULL || strcmp(n, "(for state)") != 0) break;
+	  len = i+1;
+	}
+	if (len == 4) {  /* generic for: reorder to close-last */
+	  BCReg idx = slot1 - start;
+	  slot1 = start + ((idx + 1) & 3);
+	}
+      }
+    }
+  }
   else if (slot1 > 0 && frame + slot1+LJ_FR2 < nextframe)
     *name = isluafunc(fn) ? "(temporary)" : "(C temporary)";  /* 5.4 names. */
   return frame+slot1;

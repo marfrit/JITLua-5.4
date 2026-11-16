@@ -657,7 +657,10 @@ LUA_API lua_Integer lua_tointeger(lua_State *L, int idx)
       return tvisi47w(&tmp) ? (lua_Integer)intV47(&tmp) : intV(&tmp);
     n = numV(&tmp);
   }
-  return lj_num2int_type(n, lua_Integer);
+  {
+    int64_t i64;
+    return lj_i64_numtoint(n, &i64) ? (lua_Integer)i64 : 0;
+  }
 }
 
 LUA_API lua_Integer lua_tointegerx(lua_State *L, int idx, int *ok)
@@ -693,12 +696,15 @@ LUA_API lua_Integer lua_tointegerx(lua_State *L, int idx, int *ok)
     }
     n = numV(&tmp);
   }
-  if (!(n >= -9223372036854775808.0 && n < 9223372036854775808.0)) {
-    if (ok) *ok = 0;  /* out of integer range: conversion fails (5.4) */
-    return 0;
+  {
+    int64_t i64;
+    if (!lj_i64_numtoint(n, &i64)) {  /* non-integral/NaN/inf/out of range */
+      if (ok) *ok = 0;
+      return 0;
+    }
+    if (ok) *ok = 1;
+    return (lua_Integer)i64;
   }
-  if (ok) *ok = 1;
-  return lj_num2int_type(n, lua_Integer);
 }
 
 LUALIB_API lua_Integer luaL_checkinteger(lua_State *L, int idx)

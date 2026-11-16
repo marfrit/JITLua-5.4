@@ -523,7 +523,17 @@ LJLIB_CF(io_popen)
   const char *fname = strdata(lj_lib_checkstr(L, 1));
   GCstr *s = lj_lib_optstr(L, 2);
   const char *mode = s ? strdata(s) : "r";
-  IOFileUD *iof = io_file_new(L);
+  IOFileUD *iof;
+#if LJ_TARGET_WINDOWS && !LJ_TARGET_XBOXONE && !LJ_TARGET_UWP
+  luaL_argcheck(L, (mode[0] == 'r' || mode[0] == 'w') &&
+		(mode[1] == '\0' ||
+		 ((mode[1] == 'b' || mode[1] == 't') && mode[2] == '\0')),
+		2, "invalid mode");
+#else
+  luaL_argcheck(L, (mode[0] == 'r' || mode[0] == 'w') && mode[1] == '\0',
+		2, "invalid mode");
+#endif
+  iof = io_file_new(L);
   iof->type = IOFILE_TYPE_PIPE;
   iof->closef = NULL;
 #if LJ_TARGET_POSIX

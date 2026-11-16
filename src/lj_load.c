@@ -43,7 +43,8 @@ static TValue *cpparser(lua_State *L, lua_CFunction dummy, void *ud)
       if (c == (LJ_FR2 ? 'W' : 'X')) ls->fr2 = !LJ_FR2;
     }
     if (xmode) {
-      setstrV(L, L->top++, lj_err_str(L, LJ_ERR_XMODE));
+      /* 5.4 names the actual chunk kind and the requested mode. */
+      setstrV(L, L->top++, lj_err_str(L, bc ? LJ_ERR_XMODEB : LJ_ERR_XMODET));
       lj_err_throw(L, LUA_ERRSYNTAX);
     }
   }
@@ -133,8 +134,14 @@ LUALIB_API int luaL_loadfilex(lua_State *L, const char *filename,
       do { c = fgetc(ctx.fp); } while (c != EOF && c != '\n');
       if (c == '\n') c = fgetc(ctx.fp);
       if (c != EOF) {
-	ctx.pre[ctx.prelen++] = '\n';
-	ctx.pre[ctx.prelen++] = (char)c;
+	if (c == BCDUMP_HEAD1) {
+	  /* Binary chunk after the comment line: no synthetic newline, the
+	  ** reader must see the ESC signature first (PUC reopens in binary). */
+	  ctx.pre[ctx.prelen++] = (char)c;
+	} else {
+	  ctx.pre[ctx.prelen++] = '\n';
+	  ctx.pre[ctx.prelen++] = (char)c;
+	}
       }
     } else if (c != EOF) {
       ctx.pre[ctx.prelen++] = (char)c;

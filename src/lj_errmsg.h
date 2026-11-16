@@ -118,6 +118,8 @@ ERRDEF(JITOPT,	"unknown or malformed optimization flag " LUA_QS)
 
 /* Lexer/parser errors. */
 ERRDEF(XMODE,	"attempt to load chunk with wrong mode")
+ERRDEF(XMODET,	"attempt to load a text chunk (mode is 'b')")
+ERRDEF(XMODEB,	"attempt to load a binary chunk (mode is 't')")
 ERRDEF(XNEAR,	"%s near " LUA_QS)
 ERRDEF(XLINES,	"chunk has too many lines")
 ERRDEF(XLEVELS,	"chunk has too many syntax levels")

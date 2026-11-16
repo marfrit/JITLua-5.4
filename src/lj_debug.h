@@ -57,13 +57,13 @@ LJ_FUNC void lj_debug_dumpstack(lua_State *L, SBuf *sb, const char *fmt,
 
 /* Fixed internal variable names. */
 #define VARNAMEDEF(_) \
-  _(FOR_IDX, "(for index)") \
-  _(FOR_STOP, "(for limit)") \
-  _(FOR_STEP, "(for step)") \
-  _(FOR_GEN, "(for generator)") \
+  _(FOR_IDX, "(for state)") \
+  _(FOR_STOP, "(for state)") \
+  _(FOR_STEP, "(for state)") \
+  _(FOR_GEN, "(for state)") \
   _(FOR_STATE, "(for state)") \
-  _(FOR_CTL, "(for control)") \
-  _(FOR_CLOSE, "(for close)")
+  _(FOR_CTL, "(for state)") \
+  _(FOR_CLOSE, "(for state)")
 
 enum {
   VARNAME_END,

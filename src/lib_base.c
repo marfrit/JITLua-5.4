@@ -420,11 +420,17 @@ static int load_aux(lua_State *L, int status, int envarg)
     ** Set environment table for top-level function.
     ** Don't do this for non-native bytecode, which returns a prototype.
     */
-    if (tvistab(L->base+envarg-1) && tvisfunc(L->top-1)) {
+    if (envarg > 0 && tvisfunc(L->top-1)) {
       GCfunc *fn = funcV(L->top-1);
-      GCtab *t = tabV(L->base+envarg-1);
-      setgcref(fn->c.env, obj2gco(t));
-      lj_gc_objbarrier(L, fn, t);
+      cTValue *ev = L->base+envarg-1;
+      if (tvistab(ev)) {
+	GCtab *t = tabV(ev);
+	setgcref(fn->c.env, obj2gco(t));
+	lj_gc_objbarrier(L, fn, t);
+      } else if (tvisnil(ev)) {
+	/* PUC 5.4 loadfile(file,'t',nil): _ENV is nil inside the chunk. */
+	setgcrefnull(fn->c.env);
+      }
       /* 5.4: _ENV reads/writes inside the chunk are the GGET/GSET special
       ** case on the interned key (VM and recorder); the table itself must
       ** not carry an "_ENV" entry (PUC: _G._ENV == nil, pairs(_G) has none). */
@@ -440,11 +446,12 @@ LJLIB_CF(loadfile)
 {
   GCstr *fname = lj_lib_optstr(L, 1);
   GCstr *mode = lj_lib_optstr(L, 2);
+  int envidx = (L->base+2 < L->top) ? 3 : 0;  /* explicit env arg? */
   int status;
   lua_settop(L, 3);  /* Ensure env arg exists. */
   status = luaL_loadfilex(L, fname ? strdata(fname) : NULL,
 			  mode ? strdata(mode) : NULL);
-  return load_aux(L, status, 3);
+  return load_aux(L, status, envidx);
 }
 
 static const char *reader_func(lua_State *L, void *ud, size_t *size)
@@ -485,16 +492,19 @@ LJLIB_CF(load)
       s = strdata(str);
       len = str->len;
     }
+    int envidx = (L->base+3 < L->top) ? 4 : 0;  /* explicit env arg? */
     lua_settop(L, 4);  /* Ensure env arg exists. */
     status = luaL_loadbufferx(L, s, len, name ? strdata(name) : s,
 			      mode ? strdata(mode) : NULL);
+    return load_aux(L, status, envidx);
   } else {
     lj_lib_checkfunc(L, 1);
+    int envidx = (L->base+3 < L->top) ? 4 : 0;  /* explicit env arg? */
     lua_settop(L, 5);  /* Reserve a slot for the string from the reader. */
     status = lua_loadx(L, reader_func, NULL, name ? strdata(name) : "=(load)",
 		       mode ? strdata(mode) : NULL);
+    return load_aux(L, status, envidx);
   }
-  return load_aux(L, status, 4);
 }
 
 LJLIB_CF(loadstring)

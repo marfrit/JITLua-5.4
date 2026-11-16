@@ -829,6 +829,9 @@ static void asm_href(ASMState *as, IRIns *ir, IROp merge)
     } else if (irt_isnum(kt)) {
       kk = (int64_t)ir_knum(irkey)->u64;
       /* Assumes -0.0 is already canonicalized to +0.0. */
+    } else if (irt_isinteger(kt) || irt_isint64(kt)) {
+      /* 5.4 integer constant (ADR-001b): int32 inline or widened word. */
+      kk = (int64_t)ir_ki64word(irkey);
     } else {
       lj_assertA(irt_ispri(kt) && !irt_isnil(kt), "bad HREF key type");
       kk = ~((int64_t)~irt_toitype(kt) << 47);
@@ -836,6 +839,10 @@ static void asm_href(ASMState *as, IRIns *ir, IROp merge)
     k = emit_isk12(kk);
     tkey = k ? 0 : ra_allock(as, kk, allow);
   } else {
+    if (irt_isint64(kt)) {  /* The value register is live inside the loop. */
+      key = ra_alloc1(as, refkey, allow);
+      rset_clear(allow, key);
+    }
     tkey = ra_scratch(as, allow);
   }
 
@@ -852,18 +859,58 @@ static void asm_href(ASMState *as, IRIns *ir, IROp merge)
 
   /* Follow hash chain until the end. */
   l_loop = --as->mcp;
-  if (destused)
+  if (!isk && irt_isint64(kt)) {
+    /* Non-constant 5.4 int64 key: decode each node key (int32 inline,
+    ** widened, or interned box) and compare the value. Mirrors
+    ** tab_findi64() in lj_tab.c. tkey is the second scratch register. */
+    MCode *l_d, *l_b, *l_c, *l_next;
     emit_lso(as, A64I_LDRx, dest, dest, offsetof(Node, next));
+    l_next = as->mcp;
+    if (merge == IR_EQ)
+      asm_guardcc(as, CC_EQ);
+    else
+      emit_cond_branch(as, CC_EQ, l_end);
+    l_d = as->mcp;
+    /* B: not an int tag -- an interned box? */
+    emit_nm(as, A64I_CMPx, tmp, key);
+    emit_lso(as, A64I_LDRx, tmp, tmp, (int32_t)sizeof(GCudata));
+    emit_cond_branch(as, CC_NE, l_next);
+    emit_n(as, (A64I_CMPw^A64I_K12) | A64F_U12(UDTYPE_I64BOX), tkey);
+    emit_lso(as, A64I_LDRB, tkey, tmp, (int32_t)offsetof(GCudata, udtype));
+    emit_dn(as, A64I_ANDx^emit_isk13(LJ_GCVMASK, 1), tmp, tmp);
+    emit_cond_branch(as, CC_NE, l_next);
+    emit_n(as, (A64I_CMNx^A64I_K12) | A64F_U12(-LJ_TUDATA), tkey);
+    l_b = as->mcp;
+    checkmclim(as);
+    /* C: int32 inline -- sign-extend the low word. */
+    emit_branch(as, A64I_B, l_d);
+    emit_nm(as, A64I_CMPx, tmp, key);
+    emit_dn(as, A64I_SXTW, tmp, tmp);
+    l_c = as->mcp;
+    /* Widened: sign-extend the 47-bit payload. */
+    emit_branch(as, A64I_B, l_d);
+    emit_nm(as, A64I_CMPx, tmp, key);
+    emit_dn(as, A64I_SBFMx | A64F_IMMR(0) | A64F_IMMS(46), tmp, tmp);
+    emit_cond_branch(as, CC_EQ, l_c);
+    emit_n(as, A64I_TSTx^emit_isk13(0x7fff00000000ULL, 1), tmp);
+    emit_cond_branch(as, CC_NE, l_b);
+    emit_n(as, (A64I_CMNx^A64I_K12) | A64F_U12(-LJ_TISNUM), tkey);
+    emit_dn(as, A64I_ASRx | A64F_IMMR(47), tkey, tmp);
+    emit_lso(as, A64I_LDRx, tmp, dest, offsetof(Node, key));
+  } else {
+    if (destused)
+      emit_lso(as, A64I_LDRx, dest, dest, offsetof(Node, next));
 
-  /* Type and value comparison. */
-  if (merge == IR_EQ)
-    asm_guardcc(as, CC_EQ);
-  else
-    emit_cond_branch(as, CC_EQ, l_end);
-  emit_nm(as, A64I_CMPx^k, tmp, tkey);
-  if (!destused)
-    emit_lso(as, A64I_LDRx, dest, dest, offsetof(Node, next));
-  emit_lso(as, A64I_LDRx, tmp, dest, offsetof(Node, key));
+    /* Type and value comparison. */
+    if (merge == IR_EQ)
+      asm_guardcc(as, CC_EQ);
+    else
+      emit_cond_branch(as, CC_EQ, l_end);
+    emit_nm(as, A64I_CMPx^k, tmp, tkey);
+    if (!destused)
+      emit_lso(as, A64I_LDRx, dest, dest, offsetof(Node, next));
+    emit_lso(as, A64I_LDRx, tmp, dest, offsetof(Node, key));
+  }
   *l_loop = A64I_X | A64I_CBNZ | A64F_S19(as->mcp - l_loop) | dest;
 
   /* Construct tkey as canonicalized or tagged key. */
@@ -872,6 +919,14 @@ static void asm_href(ASMState *as, IRIns *ir, IROp merge)
       key = ra_alloc1(as, refkey, RSET_FPR);
       emit_dnm(as, A64I_CSELx | A64F_CC(CC_EQ), tkey, RID_ZERO, tkey);
       /* A64I_FMOV_R_D from key to tkey done below. */
+    } else if (irt_isinteger(kt)) {
+      /* 5.4 int32 key: the tagged inline word (compared raw). */
+      key = ra_alloc1(as, refkey, allow);
+      type = ra_allock(as, (int64_t)((uint64_t)LJ_TISNUM << 47),
+		       rset_clear(allow, key));
+      emit_dnm(as, A64I_ADDx | A64F_EX(A64EX_UXTW), tkey, type, key);
+    } else if (irt_isint64(kt)) {
+      /* Value register allocated above; the loop decodes node keys. */
     } else {
       lj_assertA(irt_isaddr(kt), "bad HREF key type");
       key = ra_alloc1(as, refkey, allow);
@@ -910,6 +965,14 @@ static void asm_href(ASMState *as, IRIns *ir, IROp merge)
 	emit_dn(as, A64I_LSRx | A64F_IMMR(32)|A64F_IMMS(32), dest, tkey);
 	emit_nm(as, A64I_FCMPZd, (key & 31), 0);
 	emit_dn(as, A64I_FMOV_R_D, tkey, (key & 31));
+      } else if (irt_isinteger(kt)) {
+	/* hashi64() of the sign-extended int32: lo = key, hi = key >> 31. */
+	emit_dnm(as, A64I_EORw, tmp, key, dest);
+	emit_dn(as, A64I_ASRw | A64F_IMMR(31), dest, key);
+      } else if (irt_isint64(kt)) {
+	/* hashi64() of the int64 value: lo = low word, hi = high word. */
+	emit_dnm(as, A64I_EORw, tmp, key, dest);
+	emit_dn(as, A64I_LSRx | A64F_IMMR(32), dest, key);
       } else {
 	emit_dnm(as, A64I_EORw, tmp, key, dest);
 	emit_dnm(as, A64I_EORx | A64F_SH(A64SH_LSR, 32), dest, type, key);
@@ -943,6 +1006,8 @@ static void asm_hrefk(ASMState *as, IRIns *ir)
     k = ~((int64_t)~irt_toitype(irkey->t) << 47);
   } else if (irt_isnum(irkey->t)) {
     k = ir_knum(irkey)->u64;
+  } else if (irt_isinteger(irkey->t) || irt_isint64(irkey->t)) {
+    k = ir_ki64word(irkey);  /* 5.4 integer constant (ADR-001b). */
   } else {
     k = ((uint64_t)irt_toitype(irkey->t) << 47) | (uint64_t)ir_kgc(irkey);
   }

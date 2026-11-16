@@ -58,7 +58,7 @@ enum {
 /* Type codes for the keys/values of a constant table. */
 enum {
   BCDUMP_KTAB_NIL, BCDUMP_KTAB_FALSE, BCDUMP_KTAB_TRUE,
-  BCDUMP_KTAB_INT, BCDUMP_KTAB_NUM, BCDUMP_KTAB_STR
+  BCDUMP_KTAB_INT, BCDUMP_KTAB_NUM, BCDUMP_KTAB_I64, BCDUMP_KTAB_STR
 };
 
 /* -- Bytecode reader/writer ---------------------------------------------- */

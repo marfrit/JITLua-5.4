@@ -13,15 +13,63 @@
 #include "lj_gc.h"
 #include "lj_err.h"
 #include "lj_tab.h"
+#include "lj_i64.h"
 
 /* -- Object hashing ------------------------------------------------------ */
+
+/* 5.4 integer keys (ADR-001b): an integral key lives in the hash part in its
+** canonical integer encoding (int32 inline, widened 47-bit inline, interned
+** box), never as a float, so t[2^40] and t[1<<40] are one key and next()
+** hands back an integer. All three forms hash the int64 value the same way;
+** the JIT computes the same hash from a register (asm_href). */
+#define hashi64(t, v) \
+  hashlohi((t), (uint32_t)(uint64_t)(v), (uint32_t)((uint64_t)(v) >> 32))
+
+/* Value of an integer key in any of its encodings. */
+static LJ_AINLINE int tab_keyi64(cTValue *o, int64_t *v)
+{
+  if (tvisint(o)) {
+    *v = tvisi47w(o) ? intV47(o) : (int64_t)intV(o);
+    return 1;
+  } else if (tvisi64(o)) {
+    *v = i64V(o);
+    return 1;
+  }
+  return 0;
+}
+
+/* Exact int64 value of an integral float (5.4 key normalisation). */
+static LJ_AINLINE int tab_num2i64(lua_Number n, int64_t *v)
+{
+  if (n >= -9223372036854775808.0 && n < 9223372036854775808.0) {
+    int64_t i = (int64_t)n;
+    if ((lua_Number)i == n) { *v = i; return 1; }
+  }
+  return 0;
+}
+
+/* Hash lookup of an int64 key by value: node keys in any integer encoding
+** (int32 inline, widened, box) compare by their value, so no box needs to
+** exist or be found for a lookup. Mirrors the JIT's asm_href int64 loop. */
+static Node *tab_findi64(GCtab *t, int64_t v)
+{
+  Node *n = hashi64(t, v);
+  do {
+    int64_t kv;
+    if (tab_keyi64(&n->key, &kv) && kv == v)
+      return n;
+  } while ((n = nextnode(n)));
+  return NULL;
+}
 
 /* Hash an arbitrary key and return its anchor position in the hash table. */
 static Node *hashkey(const GCtab *t, cTValue *key)
 {
-  lj_assertX(!tvisint(key), "attempt to hash integer");
+  int64_t v;
   if (tvisstr(key))
     return hashstr(t, strV(key));
+  else if (tab_keyi64(key, &v))
+    return hashi64(t, v);
   else if (tvisnum(key))
     return hashnum(t, key);
   else if (tvisbool(key))
@@ -293,8 +341,13 @@ void lj_tab_resize(lua_State *L, GCtab *t, uint32_t asize, uint32_t hbits)
 
 static uint32_t countint(cTValue *key, uint32_t *bins)
 {
-  lj_assertX(!tvisint(key), "bad integer key");
-  if (tvisnum(key)) {
+  if (tvisint(key)) {
+    int32_t k = intV(key);
+    if (!tvisi47w(key) && (uint32_t)k < LJ_MAX_ASIZE) {
+      bins[(k > 2 ? lj_fls((uint32_t)(k-1)) : 0)]++;
+      return 1;
+    }
+  } else if (tvisnum(key)) {
     int64_t i64;
     int32_t k;
     if (lj_num2int_cond(numV(key), i64, k, (uint32_t)i64 < LJ_MAX_ASIZE)) {
@@ -379,13 +432,35 @@ cTValue * LJ_FASTCALL lj_tab_getinth(GCtab *t, int32_t key)
 {
   TValue k;
   Node *n;
-  k.n = (lua_Number)key;
-  n = hashnum(t, &k);
+  setintV(&k, key);
+  n = hashi64(t, (int64_t)key);
   do {
-    if (tvisnum(&n->key) && n->key.n == k.n)
+    if (n->key.u64 == k.u64)
       return &n->val;
   } while ((n = nextnode(n)));
   return NULL;
+}
+
+/* Generic lookup of a non-nil, non-integer key by raw TValue equality. */
+static LJ_AINLINE cTValue *tab_getgen(GCtab *t, cTValue *key)
+{
+  Node *n = hashkey(t, key);
+  do {
+    if (lj_obj_equal(&n->key, key))
+      return &n->val;
+  } while ((n = nextnode(n)));
+  return NULL;
+}
+
+/* Lookup by int64 value: array part for int32 keys, else by value hash. */
+static cTValue *tab_geti64(GCtab *t, int64_t v)
+{
+  if ((int64_t)(int32_t)v == v) {
+    return lj_tab_getint(t, (int32_t)v);
+  } else {
+    Node *n = tab_findi64(t, v);
+    return n ? &n->val : NULL;
+  }
 }
 
 cTValue *lj_tab_getstr(GCtab *t, const GCstr *key)
@@ -400,44 +475,24 @@ cTValue *lj_tab_getstr(GCtab *t, const GCstr *key)
 
 cTValue *lj_tab_get(lua_State *L, GCtab *t, cTValue *key)
 {
-  TValue tmp;  /* must outlive the branch: key may point here until hashing */
+  cTValue *tv;
+  int64_t v;
   if (tvisstr(key)) {
-    cTValue *tv = lj_tab_getstr(t, strV(key));
-    if (tv)
-      return tv;
-  } else if (tvisint(key)) {
-    if (!tvisi47w(key)) {
-      cTValue *tv = lj_tab_getint(t, intV(key));
-      if (tv)
-	return tv;
-    } else {
-      /* ADR-001b step 6: a widened 47-bit integer key is exactly representable
-      ** as a float, and 5.4 makes integral float keys and integer keys the
-      ** same key -- so normalise it and use the numeric path. */
-      setnumV(&tmp, (lua_Number)intV47(key));
-      key = &tmp;
-      goto genlookup;
-    }
+    tv = lj_tab_getstr(t, strV(key));
+  } else if (tab_keyi64(key, &v)) {
+    tv = tab_geti64(t, v);
   } else if (tvisnum(key)) {
-    int64_t i64;
-    int32_t k;
-    if (lj_num2int_check(numV(key), i64, k)) {
-      cTValue *tv = lj_tab_getint(t, k);
-      if (tv)
-	return tv;
-    } else {
-      goto genlookup;  /* Else use the generic lookup. */
-    }
+    /* 5.4: an integral float is the integer key; others hash as floats. */
+    if (tab_num2i64(numV(key), &v))
+      tv = tab_geti64(t, v);
+    else
+      tv = tab_getgen(t, key);
   } else if (!tvisnil(key)) {
-    Node *n;
-  genlookup:
-    n = hashkey(t, key);
-    do {
-      if (lj_obj_equal(&n->key, key))
-	return &n->val;
-    } while ((n = nextnode(n)));
+    tv = tab_getgen(t, key);
+  } else {
+    tv = NULL;
   }
-  return niltv(L);
+  return tv ? tv : niltv(L);
 }
 
 /* -- Table setters ------------------------------------------------------- */
@@ -522,12 +577,28 @@ TValue *lj_tab_setinth(lua_State *L, GCtab *t, int32_t key)
 {
   TValue k;
   Node *n;
-  k.n = (lua_Number)key;
-  n = hashnum(t, &k);
+  setintV(&k, key);
+  n = hashi64(t, (int64_t)key);
   do {
-    if (tvisnum(&n->key) && n->key.n == k.n)
+    if (n->key.u64 == k.u64)
       return &n->val;
   } while ((n = nextnode(n)));
+  return lj_tab_newkey(L, t, &k);
+}
+
+/* Store slot for an int64 key: array part or existing node by value, else a
+** new node with the canonical encoding (which may intern a box). Also the
+** JIT's NEWREF for an IRT_I64 key. */
+TValue *lj_tab_seti64(lua_State *L, GCtab *t, int64_t v)
+{
+  TValue k;
+  Node *n;
+  if ((int64_t)(int32_t)v == v)
+    return lj_tab_setint(L, t, (int32_t)v);
+  n = tab_findi64(t, v);
+  if (n)
+    return &n->val;
+  lj_i64_tvstore(L, &k, v);
   return lj_tab_newkey(L, t, &k);
 }
 
@@ -546,23 +617,25 @@ TValue *lj_tab_setstr(lua_State *L, GCtab *t, const GCstr *key)
 TValue *lj_tab_set(lua_State *L, GCtab *t, cTValue *key)
 {
   Node *n;
-  TValue tmp;  /* must outlive the branch: key may point here until hashing */
+  int64_t v;
   t->nomm = 0;  /* Invalidate negative metamethod cache. */
   if (tvisstr(key)) {
     return lj_tab_setstr(L, t, strV(key));
-  } else if (tvisint(key)) {
-    if (!tvisi47w(key))
-      return lj_tab_setint(L, t, intV(key));
-    /* widen as an exact float key, as in lj_tab_get() */
-    setnumV(&tmp, (lua_Number)intV47(key));
-    key = &tmp;
+  } else if (tab_keyi64(key, &v)) {
+    /* An integer key in any encoding is found by value; a new key keeps the
+    ** caller's encoding (the parser keys its constant table by the boxed
+    ** literal object, which must come back out as that GC constant). */
+    if ((int64_t)(int32_t)v == v)
+      return lj_tab_setint(L, t, (int32_t)v);
+    n = tab_findi64(t, v);
+    if (n)
+      return &n->val;
+    return lj_tab_newkey(L, t, key);
   } else if (tvisnum(key)) {
-    int64_t i64;
-    int32_t k;
-    if (lj_num2int_check(numV(key), i64, k))
-      return lj_tab_setint(L, t, k);
     if (tvisnan(key))
       lj_err_msg(L, LJ_ERR_NANIDX);
+    if (tab_num2i64(numV(key), &v))  /* 5.4: integral float = integer key. */
+      return lj_tab_seti64(L, t, v);
     /* Else use the generic lookup. */
   } else if (tvisnil(key)) {
     lj_err_msg(L, LJ_ERR_NILIDX);
@@ -587,23 +660,27 @@ TValue *lj_tab_set(lua_State *L, GCtab *t, cTValue *key)
 /* Get the successor traversal index of a key. */
 uint32_t LJ_FASTCALL lj_tab_keyindex(GCtab *t, cTValue *key)
 {
-  TValue tmp;
-  if (tvisint(key)) {
-    int32_t k = intV(key);
-    if (!tvisi47w(key) && (uint32_t)k < t->asize)
-      return (uint32_t)k + 1;
-    setnumV(&tmp, (lua_Number)(tvisi47w(key) ? intV47(key) : (int64_t)k));
-    key = &tmp;
-  } else if (tvisnum(key)) {
-    int64_t i64;
-    int32_t k;
-    if (lj_num2int_cond(numV(key), i64, k, (uint32_t)i64 < t->asize))
-      return (uint32_t)k + 1;
+  int64_t v;
+  /* Integer keys in any encoding are found by value. A float key is looked
+  ** up as a float only, like PUC's findindex(): next(t, 2^40) is an
+  ** "invalid key to 'next'" even though t[2^40] is t[1<<40]. */
+  if (tab_keyi64(key, &v)) {
+    Node *n;
+    if ((int64_t)(int32_t)v == v && (uint32_t)(int32_t)v < t->asize)
+      return (uint32_t)(int32_t)v + 1;
+    n = tab_findi64(t, v);
+    if (n)
+      return t->asize + (uint32_t)((n+1) - noderef(t->node));
+    return ~0u;  /* Invalid key to next. */
   }
   if (!tvisnil(key)) {
     Node *n = hashkey(t, key);
+    int isnum = tvisnum(key);
     do {
-      if (lj_obj_equal(&n->key, key))
+      /* A float key only matches a float node (raw bits): lj_obj_equal()
+      ** would equate 100000.0 with the integer key 100000, PUC does not. */
+      if (isnum ? (tvisnum(&n->key) && n->key.u64 == key->u64) :
+		  lj_obj_equal(&n->key, key))
 	return t->asize + (uint32_t)((n+1) - noderef(t->node));
     } while ((n = nextnode(n)));
     if (key->u32.hi == LJ_KEYINDEX)  /* Despecialized ITERN while running. */

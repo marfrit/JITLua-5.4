@@ -19,6 +19,17 @@ typedef enum I64Op {
 ** return the same pointer, so pointer equality == value equality. */
 LJ_FUNC GCudata *lj_i64_box(lua_State *L, int64_t v);
 
+/* Look up the box of a value without creating one (NULL if not interned).
+** A boxed value that is a table key is always interned and alive, so a miss
+** here means "no table holds that key". */
+LJ_FUNC GCudata *lj_i64_find(global_State *g, int64_t v);
+
+/* True if v takes the widened 47-bit inline form (canonical encoding: int32
+** range -> int32 inline; widened only while payload bits 32..46 are nonzero,
+** so [2^31, 2^32) stays boxed; everything else -> box). */
+#define lj_i64_iswidened(v) \
+  (LJ_GC64 && i47_fits((v)) && (((uint64_t)(v) >> 32) & 0x7fffu) != 0)
+
 /* Remove a box from the intern hash (called by the GC sweep before freeing). */
 LJ_FUNC void LJ_FASTCALL lj_i64_remove(global_State *g, GCudata *ud);
 

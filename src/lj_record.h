@@ -20,6 +20,7 @@ typedef struct RecordIndex {
   cTValue *oldv;	/* Runtime value of previously stored value. */
   TRef tab;		/* Table (or indexed object) reference. */
   TRef key;		/* Key reference. */
+  TRef nkey;		/* Key as looked up in the hash part (5.4 integer canonicalisation). */
   TRef val;		/* Value reference for a store or 0 for a load. */
   TRef mt;		/* Metatable reference. */
   TRef mobj;		/* Metamethod object reference. */

@@ -200,12 +200,20 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
       }
     }
   }
-  if (weak == LJ_GC_WEAK)  /* Nothing to mark if both keys/values are weak. */
-    return 1;
-  if (!(weak & LJ_GC_WEAKVAL)) {  /* Mark array part. */
+  /* ADR-001b: a boxed 5.4 integer is a value, not an object a weak table
+  ** may drop -- it is always marked, whichever part is weak. */
+  if (weak == LJ_GC_WEAK) {  /* Only boxed integers to mark if both are weak. */
+    MSize i, asize = t->asize;
+    for (i = 0; i < asize; i++)
+      if (tvisi64(arrayslot(t, i))) gc_marktv(g, arrayslot(t, i));
+  } else if (!(weak & LJ_GC_WEAKVAL)) {  /* Mark array part. */
     MSize i, asize = t->asize;
     for (i = 0; i < asize; i++)
       gc_marktv(g, arrayslot(t, i));
+  } else {
+    MSize i, asize = t->asize;
+    for (i = 0; i < asize; i++)
+      if (tvisi64(arrayslot(t, i))) gc_marktv(g, arrayslot(t, i));
   }
   if (t->hmask > 0) {  /* Mark hash part. */
     Node *node = noderef(t->node);
@@ -214,8 +222,8 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
       Node *n = &node[i];
       if (!tvisnil(&n->val)) {  /* Mark non-empty slot. */
 	lj_assertG(!tvisnil(&n->key), "mark of nil key in non-empty slot");
-	if (!(weak & LJ_GC_WEAKKEY)) gc_marktv(g, &n->key);
-	if (!(weak & LJ_GC_WEAKVAL)) gc_marktv(g, &n->val);
+	if (!(weak & LJ_GC_WEAKKEY) || tvisi64(&n->key)) gc_marktv(g, &n->key);
+	if (!(weak & LJ_GC_WEAKVAL) || tvisi64(&n->val)) gc_marktv(g, &n->val);
       }
     }
   }
@@ -466,6 +474,8 @@ static int gc_mayclear(cTValue *o, int val)
       gc_mark_str(strV(o));  /* And need to be marked. */
       return 0;
     }
+    if (tvisi64(o))
+      return 0;  /* A boxed 5.4 integer is a value (and was marked). */
     if (iswhite(gcV(o)))
       return 1;  /* Object is about to be collected. */
     if (tvisudata(o) && val && isfinalized(udataV(o)))

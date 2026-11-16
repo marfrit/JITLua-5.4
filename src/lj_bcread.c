@@ -192,6 +192,10 @@ static void bcread_ktabk(LexState *ls, TValue *o, GCtab *t)
   } else if (tp == BCDUMP_KTAB_NUM) {
     o->u32.lo = bcread_uleb128(ls);
     o->u32.hi = bcread_uleb128(ls);
+  } else if (tp == BCDUMP_KTAB_I64) {  /* 5.4 integer outside int32. */
+    uint32_t lo = bcread_uleb128(ls);
+    uint32_t hi = bcread_uleb128(ls);
+    lj_i64_tvstore(ls->L, o, (int64_t)(((uint64_t)hi << 32) | lo));
   } else if (t && tp == BCDUMP_KTAB_NIL) { /* Restore nil value marker. */
     settabV(ls->L, o, t);
   } else {

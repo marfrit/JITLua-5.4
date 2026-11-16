@@ -1672,7 +1672,8 @@ void lj_ffrecord_func(jit_State *J)
     uint32_t ffid = J->fn->c.ffid;
     /* Handlers that only copy, compare or type-dispatch their arguments. */
     int generic = ffid == FF_type || ffid == FF_select || ffid == FF_assert ||
-		  ffid == FF_pcall || ffid == FF_xpcall || ffid == FF_rawequal;
+		  ffid == FF_pcall || ffid == FF_xpcall || ffid == FF_rawequal ||
+		  ffid == FF_rawget || ffid == FF_rawset;
     if (!generic)
       for (i = 0; i < J->maxslot; i++)
 	if (tref_istype(J->base[i], IRT_I64))

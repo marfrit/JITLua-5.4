@@ -1710,6 +1710,27 @@ static void rec_idx_abc(jit_State *J, TRef asizeref, TRef ikey, uint32_t asize)
 }
 
 /* Record indexed key lookup. */
+/* 5.4 integer hash keys (ADR-001b): an IRT_I64 key ref never addresses the
+** array part and must hold a value outside the int32 range (the canonical
+** encoding rule), which a key computed by a 64-bit op cannot promise by its
+** type alone -- so guard it. A constant becomes the key the hash part really
+** holds: the widened encoding (compared as a raw TValue word) or the
+** interned box (compared by pointer; the trace keeps it alive). */
+static TRef rec_idx_i64key(jit_State *J, TRef key)
+{
+  if (tref_isk(key)) {
+    int64_t v = (int64_t)ir_kint64(IR(tref_ref(key)))->u64;
+    if (lj_i64_iswidened(v))
+      return key;
+    return lj_ir_kgc(J, obj2gco(lj_i64_box(J->L, v)), IRT_UDATA);
+  } else {
+    TRef tr = emitir(IRTI(IR_CONV), key, IRCONV_INT_I64);  /* Truncate. */
+    tr = emitir(IRT(IR_CONV, IRT_I64), tr, IRCONV_I64_INT|IRCONV_SEXT);
+    emitir(IRTG(IR_NE, IRT_I64), key, tr);  /* Guard: does not fit int32. */
+    return key;
+  }
+}
+
 static TRef rec_idx_key(jit_State *J, RecordIndex *ix, IRRef *rbref,
 			IRType1 *rbguard)
 {
@@ -1719,16 +1740,45 @@ static TRef rec_idx_key(jit_State *J, RecordIndex *ix, IRRef *rbref,
   *rbref = 0;
   rbguard->irt = 0;
 
-  /* Integer keys are looked up in the array part first. */
   key = ix->key;
-  if (tref_isnumber(key)) {
-    int32_t k;
-    if (tvisint(&ix->keyv)) {
-      k = intV(&ix->keyv);
+  if (tref_isi64(key)) {  /* 5.4 integer outside int32: hash part only. */
+    key = rec_idx_i64key(J, key);
+    goto hashpart;
+  }
+  if (tref_isnum(key)) {
+    /* 5.4: an integral float is the integer key (int32 or int64); other
+    ** floats stay floats. The runtime value decides, under a guard. */
+    lua_Number n = numV(&ix->keyv);
+    int64_t v;
+    if (n >= -9223372036854775808.0 && n < 9223372036854775808.0 &&
+	(lua_Number)(v = (int64_t)n) == n) {
+      if ((int64_t)(int32_t)v == v) {
+	key = emitir(IRTGI(IR_CONV), key, IRCONV_INT_NUM|IRCONV_CHECK);
+      } else {
+	if (tref_isk(key)) {
+	  key = lj_ir_kint64(J, (uint64_t)v);
+	} else {
+	  TRef i = emitir(IRT(IR_CONV, IRT_I64), key, IRCONV_I64_NUM);
+	  emitir(IRTG(IR_EQ, IRT_NUM),
+		 emitir(IRTN(IR_CONV), i, IRCONV_NUM_I64), key);
+	  key = i;
+	}
+	key = rec_idx_i64key(J, key);
+	goto hashpart;
+      }
     } else {
-      int64_t i64;
-      if (!lj_num2int_check(numV(&ix->keyv), i64, k)) k = LJ_MAX_ASIZE;
+      if (!tref_isk(key))  /* Guard: stays non-integral (NaN passes). */
+	emitir(IRTG(IR_NE, IRT_NUM),
+	       emitir(IRTN(IR_FPMATH), key, IRFPM_FLOOR), key);
+      goto hashpart;
     }
+  }
+
+  /* Integer keys are looked up in the array part first. */
+  if (tref_isinteger(key)) {
+    int32_t k = tref_isk(key) ? IR(tref_ref(key))->i :
+		tvisint(&ix->keyv) ? intV(&ix->keyv) :
+		(int32_t)(int64_t)numV(&ix->keyv);
     if ((MSize)k < LJ_MAX_ASIZE) {  /* Potential array key? */
       TRef ikey = lj_opt_narrow_index(J, key);
       TRef asizeref = emitir(IRTI(IR_FLOAD), ix->tab, IRFL_TAB_ASIZE);
@@ -1736,17 +1786,14 @@ static TRef rec_idx_key(jit_State *J, RecordIndex *ix, IRRef *rbref,
 	TRef arrayref;
 	rec_idx_abc(J, asizeref, ikey, t->asize);
 	arrayref = emitir(IRT(IR_FLOAD, IRT_PGC), ix->tab, IRFL_TAB_ARRAY);
+	ix->nkey = ikey;
 	return emitir(IRT(IR_AREF, IRT_PGC), arrayref, ikey);
       } else {  /* Currently not in array (may be an array extension)? */
 	emitir(IRTGI(IR_ULE), asizeref, ikey);  /* Inv. bounds check. */
-	if (k == 0 && tref_isk(key))
-	  key = lj_ir_knum_zero(J);  /* Canonicalize 0 or +-0.0 to +0.0. */
 	/* And continue with the hash lookup. */
       }
     } else if (!tref_isk(key)) {
-      /* We can rule out const numbers which failed the integerness test
-      ** above. But all other numbers are potential array keys.
-      */
+      /* A negative or huge integer key now may be an array key later. */
       if (t->asize == 0) {  /* True sparse tables have an empty array part. */
 	/* Guard that the array part stays empty. */
 	TRef tmp = emitir(IRTI(IR_FLOAD), ix->tab, IRFL_TAB_ASIZE);
@@ -1757,15 +1804,16 @@ static TRef rec_idx_key(jit_State *J, RecordIndex *ix, IRRef *rbref,
     }
   }
 
-  /* Otherwise the key is located in the hash part. */
+hashpart:
+  /* Otherwise the key is located in the hash part. Integer keys are hashed
+  ** and compared as integers (int32 inline, widened, box), never as floats. */
+  ix->nkey = key;
   if (t->hmask == 0) {  /* Shortcut for empty hash part. */
     /* Guard that the hash part stays empty. */
     TRef tmp = emitir(IRTI(IR_FLOAD), ix->tab, IRFL_TAB_HMASK);
     emitir(IRTGI(IR_EQ), tmp, lj_ir_kint(J, 0));
     return lj_ir_kkptr(J, niltvg(J2G(J)));
   }
-  if (tref_isinteger(key))  /* Hash keys are based on numbers, not ints. */
-    key = emitir(IRTN(IR_CONV), key, IRCONV_NUM_INT);
   if (tref_isk(key)) {
     /* Optimize lookup of constant hash keys. */
     GCSize hslot = (GCSize)((char *)ix->oldv-(char *)&noderef(t->node)[0].val);
@@ -1863,11 +1911,6 @@ TRef lj_record_idx(jit_State *J, RecordIndex *ix)
     }
   }
 
-  /* ADR-001b: int64 keys (hashing a widened/boxed value) are not recorded;
-  ** the interpreter handles them exactly. */
-  if (tref_isi64(ix->key) || tvisi64any(&ix->keyv))
-    lj_trace_err(J, LJ_TRERR_NYIBC);
-
   /* Record the key lookup. */
   xref = rec_idx_key(J, ix, &rbref, &rbguard);
   xrefop = IR(tref_ref(xref))->o;
@@ -1917,17 +1960,12 @@ TRef lj_record_idx(jit_State *J, RecordIndex *ix)
       }
       lj_assertJ(!hasmm, "inconsistent metamethod handling");
       if (oldv == niltvg(J2G(J))) {  /* Need to insert a new key. */
-	TRef key = ix->key;
-	if (tref_isinteger(key)) {  /* NEWREF needs a TValue as a key. */
-	  key = emitir(IRTN(IR_CONV), key, IRCONV_NUM_INT);
-	} else if (tref_isnum(key)) {
-	  if (tref_isk(key)) {
-	    if (tvismzero(&ix->keyv))
-	      key = lj_ir_knum_zero(J);  /* Canonicalize -0.0 to +0.0. */
-	  } else {
-	    emitir(IRTG(IR_EQ, IRT_NUM), key, key);  /* Check for !NaN. */
-	  }
-	}
+	/* The canonical hash key from rec_idx_key(): int32/int64 keys stay
+	** integers (NEWREF with an IRT_I64 key calls lj_tab_seti64), floats
+	** are guarded non-integral there, so only NaN is left to exclude. */
+	TRef key = ix->nkey;
+	if (tref_isnum(key) && !tref_isk(key))
+	  emitir(IRTG(IR_EQ, IRT_NUM), key, key);  /* Check for !NaN. */
 	xref = emitir(IRT(IR_NEWREF, IRT_PGC), ix->tab, key);
 	keybarrier = 0;  /* NEWREF already takes care of the key barrier. */
 #ifdef LUAJIT_ENABLE_TABLE_BUMP

@@ -1669,8 +1669,11 @@ static void fs_fixup_k(FuncState *fs, GCproto *pt, void *kptr)
     Node *n = &node[i];
     if (tvhaskslot(&n->val)) {
       ptrdiff_t kidx = (ptrdiff_t)tvkslot(&n->val);
-      lj_assertFS(!tvisint(&n->key), "unexpected integer key");
-      if (tvisnum(&n->key)) {
+      if (tvisint(&n->key)) {
+	/* 5.4 integer constant (int32 or widened): the canonical table key
+	** is the constant itself. */
+	*(&((TValue *)kptr)[kidx]) = n->key;
+      } else if (tvisnum(&n->key)) {
 	TValue *tv = &((TValue *)kptr)[kidx];
 	if (LJ_DUALNUM) {
 	  int64_t i64;

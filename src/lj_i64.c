@@ -115,9 +115,8 @@ void LJ_FASTCALL lj_i64_remove(global_State *g, GCudata *ud)
   g->i64.num--;
 }
 
-GCudata *lj_i64_box(lua_State *L, int64_t v)
+GCudata *lj_i64_find(global_State *g, int64_t v)
 {
-  global_State *g = G(L);
   if (g->i64.tab) {
     MSize mask = g->i64.mask, h = i64_hash(v) & mask, i;
     for (i = h; ; i = (i + 1) & mask) {
@@ -126,6 +125,19 @@ GCudata *lj_i64_box(lua_State *L, int64_t v)
       if (u != I64_TOMB && *(int64_t *)uddata(gco2ud((GCobj *)(uintptr_t)u)) == v)
 	return gco2ud((GCobj *)(uintptr_t)u);
     }
+  }
+  return NULL;
+}
+
+GCudata *lj_i64_box(lua_State *L, int64_t v)
+{
+  global_State *g = G(L);
+  GCudata *found = lj_i64_find(g, v);
+  if (found) {
+    /* A box found during the sweep may carry the dead white: resurrect it,
+    ** like lj_str_new() does for strings. */
+    if (isdead(g, obj2gco(found))) flipwhite(obj2gco(found));
+    return found;
   }
   {
     /* Userdata must never have a NULL env: gc_mark() unconditionally marks it. */

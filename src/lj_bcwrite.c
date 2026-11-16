@@ -19,6 +19,7 @@
 #endif
 #include "lj_strfmt.h"
 #include "lj_bcdump.h"
+#include "lj_i64.h"
 #include "lj_vm.h"
 
 /* Context for bytecode writer. */
@@ -54,9 +55,14 @@ static void bcwrite_ktabk(BCWriteCtx *ctx, cTValue *o, int narrow)
     p = lj_buf_more(&ctx->sb, 5+len);
     p = lj_strfmt_wuleb128(p, BCDUMP_KTAB_STR+len);
     p = lj_buf_wmem(p, strdata(str), len);
-  } else if (tvisint(o)) {
+  } else if (tvisint(o) && !tvisi47w(o)) {
     *p++ = BCDUMP_KTAB_INT;
     p = lj_strfmt_wuleb128(p, intV(o));
+  } else if (tvisi47w(o) || tvisi64(o)) {  /* 5.4 integer outside int32. */
+    int64_t v = tvisi64(o) ? i64V(o) : intV47(o);
+    *p++ = BCDUMP_KTAB_I64;
+    p = lj_strfmt_wuleb128(p, (uint32_t)(uint64_t)v);
+    p = lj_strfmt_wuleb128(p, (uint32_t)((uint64_t)v >> 32));
   } else if (tvisnum(o)) {
     if (!LJ_DUALNUM && narrow) {  /* Narrow number constants to integers. */
       int64_t i64;

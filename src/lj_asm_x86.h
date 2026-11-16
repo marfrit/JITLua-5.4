@@ -1175,7 +1175,7 @@ static void asm_href(ASMState *as, IRIns *ir, IROp merge)
   int destused = ra_used(ir);
   Reg dest = ra_dest(as, ir, allow);
   Reg tab = ra_alloc1(as, ir->op1, rset_clear(allow, dest));
-  Reg key = RID_NONE, tmp = RID_NONE;
+  Reg key = RID_NONE, tmp = RID_NONE, tmp2 = RID_NONE;
   IRIns *irkey = IR(ir->op2);
   int isk = irref_isk(ir->op2);
   IRType1 kt = irkey->t;
@@ -1187,6 +1187,8 @@ static void asm_href(ASMState *as, IRIns *ir, IROp merge)
     key = ra_alloc1(as, ir->op2, irt_isnum(kt) ? RSET_FPR : allow);
     if (LJ_GC64 || !irt_isstr(kt))
       tmp = ra_scratch(as, rset_exclude(allow, key));
+    if (LJ_GC64 && irt_isint64(kt))
+      tmp2 = ra_scratch(as, rset_exclude(rset_exclude(allow, key), tmp));
   }
 
   /* Key not found in chain: jump to exit (if merged) or load niltv. */
@@ -1234,6 +1236,59 @@ static void asm_href(ASMState *as, IRIns *ir, IROp merge)
     emit_rmro(as, XO_CMP, key|REX_64, dest, offsetof(Node, key.u64));
 #endif
 #if LJ_GC64
+  } else if (irt_isinteger(kt) || (isk && irt_isint64(kt))) {
+    /* 5.4 integer key (ADR-001b): an int32 key or a widened constant is
+    ** compared as the raw TValue word (the hash part holds canonical
+    ** integer encodings, never integral floats). */
+    if (isk) {
+      TValue k;
+      k.u64 = ir_ki64word(irkey);
+      emit_gmroi(as, XG_ARITHi(XOg_CMP), dest, offsetof(Node, key.u32.lo),
+		 k.u32.lo);
+      emit_sjcc(as, CC_NE, l_next);
+      emit_gmroi(as, XG_ARITHi(XOg_CMP), dest, offsetof(Node, key.u32.hi),
+		 k.u32.hi);
+    } else {
+      emit_rmro(as, XO_CMP, tmp|REX_64, dest, offsetof(Node, key.u64));
+    }
+  } else if (irt_isint64(kt)) {
+    /* Non-constant int64 key: decode each node key (int32 inline, widened,
+    ** or interned box) and compare the value. Mirrors tab_findi64(). */
+    MCLabel l_d = emit_label(as), l_b, l_c;
+    /* B: not an int tag -- an interned box? */
+    emit_rmro(as, XO_CMP, key|REX_64, tmp, (int32_t)sizeof(GCudata));
+    emit_sjcc(as, CC_NE, l_next);
+    emit_i8(as, UDTYPE_I64BOX);
+    emit_rmro(as, XO_ARITHib, XOg_CMP, tmp, (int32_t)offsetof(GCudata, udtype));
+    emit_shifti(as, XOg_SHR|REX_64, tmp, 17);
+    emit_shifti(as, XOg_SHL|REX_64, tmp, 17);
+    emit_sjcc(as, CC_NE, l_next);
+    emit_i8(as, (int8_t)LJ_TUDATA);
+    emit_rr(as, XO_ARITHi8, XOg_CMP, tmp2);
+    l_b = emit_label(as);
+    checkmclim(as);
+    /* C: int32 inline -- sign-extend the low word. */
+    emit_sjmp(as, l_d);
+    emit_rr(as, XO_CMP, tmp|REX_64, key);
+    emit_shifti(as, XOg_SAR|REX_64, tmp, 32);
+    emit_shifti(as, XOg_SHL|REX_64, tmp, 32);
+    l_c = emit_label(as);
+    /* Widened: sign-extend the 47-bit payload. */
+    emit_sjmp(as, l_d);
+    emit_rr(as, XO_CMP, tmp|REX_64, key);
+    emit_shifti(as, XOg_SAR|REX_64, tmp, 17);
+    emit_shifti(as, XOg_SHL|REX_64, tmp, 17);
+    emit_sjcc(as, CC_Z, l_c);
+    emit_u32(as, 0x7fff);
+    emit_rr(as, XO_GROUP3, XOg_TEST, tmp2);
+    emit_shifti(as, XOg_SHR|REX_64, tmp2, 32);
+    emit_rr(as, XO_MOV, tmp2|REX_64, tmp);
+    emit_sjcc(as, CC_NE, l_b);
+    emit_i8(as, (int8_t)LJ_TISNUM);
+    emit_rr(as, XO_ARITHi8, XOg_CMP, tmp2);
+    emit_shifti(as, XOg_SAR|REX_64, tmp2, 47);
+    emit_rr(as, XO_MOV, tmp2|REX_64, tmp);
+    emit_rmro(as, XO_MOV, tmp|REX_64, dest, offsetof(Node, key.u64));
   } else if (irt_isaddr(kt)) {
     if (isk) {
       TValue k;
@@ -1268,7 +1323,8 @@ static void asm_href(ASMState *as, IRIns *ir, IROp merge)
   }
   emit_sfixup(as, l_loop);
 #if LJ_GC64
-  if (!isk && irt_isaddr(kt)) {
+  if (!isk && (irt_isaddr(kt) || irt_isinteger(kt))) {
+    /* Tagged key word; an int32 key register is zero-extended (32 bit ops). */
     emit_rr(as, XO_OR, tmp|REX_64, key);
     emit_loadu64(as, tmp, (uint64_t)irt_toitype(kt) << 47);
   }
@@ -1308,6 +1364,16 @@ static void asm_href(ASMState *as, IRIns *ir, IROp merge)
 	emit_rmro(as, XO_MOV, dest, RID_ESP, ra_spill(as, irkey)+4);
 	emit_rr(as, XO_MOVDto, key, tmp);
 #endif
+      } else if (irt_isinteger(kt)) {
+	/* hashi64() of the sign-extended int32: lo = key, hi = key >> 31. */
+	emit_rr(as, XO_MOV, tmp, key);
+	emit_shifti(as, XOg_SAR, dest, 31);
+	emit_rr(as, XO_MOV, dest, key);
+      } else if (irt_isint64(kt)) {
+	/* hashi64() of the int64 value: lo = low word, hi = high word. */
+	emit_rr(as, XO_MOV, tmp, key);
+	emit_shifti(as, XOg_SHR|REX_64, dest, 32);
+	emit_rr(as, XO_MOV, dest|REX_64, key);
       } else {
 	emit_rr(as, XO_MOV, tmp, key);
 #if LJ_GC64
@@ -1354,11 +1420,14 @@ static void asm_hrefk(ASMState *as, IRIns *ir)
     Reg key = ra_scratch(as, rset_exclude(RSET_GPR, node));
     emit_rmro(as, XO_CMP, key|REX_64, node,
 	       ofs + (int32_t)offsetof(Node, key.u64));
-    lj_assertA(irt_isnum(irkey->t) || irt_isgcv(irkey->t),
+    lj_assertA(irt_isnum(irkey->t) || irt_isgcv(irkey->t) ||
+	       irt_isinteger(irkey->t) || irt_isint64(irkey->t),
 	       "bad HREFK key type");
     /* Assumes -0.0 is already canonicalized to +0.0. */
     emit_loadu64(as, key, irt_isnum(irkey->t) ? ir_knum(irkey)->u64 :
 #if LJ_GC64
+			  (irt_isinteger(irkey->t) || irt_isint64(irkey->t)) ?
+			  ir_ki64word(irkey) :
 			  ((uint64_t)irt_toitype(irkey->t) << 47) |
 			  (uint64_t)ir_kgc(irkey));
 #else

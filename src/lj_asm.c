@@ -28,6 +28,7 @@
 #include "lj_asm.h"
 #include "lj_dispatch.h"
 #include "lj_vm.h"
+#include "lj_i64.h"
 #include "lj_target.h"
 #include "lj_prng.h"
 
@@ -1110,6 +1111,16 @@ static int32_t asm_stack_adjust(ASMState *as)
 }
 
 /* Must match with hash*() in lj_tab.c. */
+/* Raw TValue word of a 5.4 integer constant key (int32 inline or widened
+** 47-bit inline encoding, see setint47V). Boxed constants are KGC udata. */
+static uint64_t ir_ki64word(IRIns *ir)
+{
+  if (irt_isinteger(ir->t))
+    return ((uint64_t)LJ_TISNUM << 47) | (uint64_t)(uint32_t)ir->i;
+  return ((uint64_t)LJ_TISNUM << 47) |
+	 ((uint64_t)ir_kint64(ir)->u64 & 0x7fffffffffffULL);
+}
+
 static uint32_t ir_khash(ASMState *as, IRIns *ir)
 {
   uint32_t lo, hi;
@@ -1119,6 +1130,16 @@ static uint32_t ir_khash(ASMState *as, IRIns *ir)
   } else if (irt_isnum(ir->t)) {
     lo = ir_knum(ir)->u32.lo;
     hi = ir_knum(ir)->u32.hi << 1;
+  } else if (irt_isinteger(ir->t) || irt_isint64(ir->t) ||
+	     (irt_type(ir->t) == IRT_UDATA &&
+	      ir_kgc(ir)->ud.udtype == UDTYPE_I64BOX)) {
+    /* 5.4 integer key (ADR-001b): hash the int64 value, whatever the
+    ** encoding. Must match hashi64() in lj_tab.c. */
+    int64_t v = irt_isinteger(ir->t) ? (int64_t)ir->i :
+		irt_isint64(ir->t) ? (int64_t)ir_kint64(ir)->u64 :
+		*(int64_t *)uddata(&ir_kgc(ir)->ud);
+    lo = (uint32_t)(uint64_t)v;
+    hi = (uint32_t)((uint64_t)v >> 32);
   } else if (irt_ispri(ir->t)) {
     lj_assertA(!irt_isnil(ir->t), "hash of nil key");
     return irt_type(ir->t)-IRT_FALSE;
@@ -1368,6 +1389,17 @@ static void asm_newref(ASMState *as, IRIns *ir)
   if (ir->r == RID_SINK)
     return;
   asm_snap_prep(as);
+  if (irt_isint64(IR(ir->op2)->t)) {
+    /* 5.4 int64 key (ADR-001b): the C side builds the canonical encoding
+    ** (widened or interned box) and inserts it. */
+    ci = &lj_ir_callinfo[IRCALL_lj_tab_seti64];
+    args[0] = ASMREF_L;   /* lua_State *L */
+    args[1] = ir->op1;    /* GCtab *t     */
+    args[2] = ir->op2;    /* int64_t key  */
+    asm_setupresult(as, ir, ci);  /* TValue * */
+    asm_gencall(as, ci, args);
+    return;
+  }
   args[0] = ASMREF_L;     /* lua_State *L */
   args[1] = ir->op1;      /* GCtab *t     */
   args[2] = ASMREF_TMP1;  /* cTValue *key */

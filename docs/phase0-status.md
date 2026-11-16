@@ -798,3 +798,10 @@ defaults exactly (share, lib/lua, ./, ./?/init.lua; cpath lib/lua/5.4 plus
 ./?.so), dropping the luajit-2.1 share dir. Bare `luajit -e 'print(package.path,
 package.cpath)'` diffs empty against the PUC build. jit.* module lookup now has
 no luajit-2.1 default (they were unavailable anyway; MISSION extension note).
+
+## Session 27c — parser: return must be the last statement of a block
+
+`return;;` loaded before (empty statements after return were accepted). A return
+now allows exactly one optional `;` and then requires parse_isend (end/else/
+elseif/until/eof); the corpus errors.lua line58 case works. This is the Lua 5.4
+grammar rule that PUC enforces via luaY_checknext/luaK_return.

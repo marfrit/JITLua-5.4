@@ -24,7 +24,8 @@ ERRDEF(NEXTIDX,	"invalid key to " LUA_QL("next"))
 
 /* Metamethod resolving. */
 ERRDEF(BADCALL,	"attempt to call a %s value")
-ERRDEF(BADOPRT,	"attempt to %s %s " LUA_QS " (a %s value)")
+ERRDEF(BADOPRT,	"attempt to %s a %s value (%s " LUA_QS ")")
+ERRDEF(OPBIN54,	"attempt to %s a '%s' with a '%s'")
 ERRDEF(BADOPRV,	"attempt to %s a %s value")
 ERRDEF(BADCMPT,	"attempt to compare %s with %s")
 ERRDEF(BADCMPV,	"attempt to compare two %s values")

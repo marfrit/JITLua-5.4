@@ -1010,7 +1010,7 @@ LJ_NOINLINE void lj_err_optype(lua_State *L, cTValue *o, ErrMsg opm)
     const char *oname = NULL;
     const char *kind = lj_debug_slotname(pt, pc, (BCReg)(o-L->base), &oname);
     if (kind)
-      err_msgv(L, LJ_ERR_BADOPRT, opname, kind, oname, tname);
+      err_msgv(L, LJ_ERR_BADOPRT, opname, tname, kind, oname);
   }
   err_msgv(L, LJ_ERR_BADOPRV, opname, tname);
 }

@@ -279,6 +279,13 @@ TValue *lj_meta_arith(lua_State *L, TValue *ra, cTValue *rb, cTValue *rc,
     if (tvisnil(mo)) {
       mo = lj_meta_lookup(L, rc, mm);
       if (tvisnil(mo)) {
+	int n1 = tvisnumber(rb) || tvisi64(rb) || tvisi47w(rb);
+	int n2 = tvisnumber(rc) || tvisi64(rc) || tvisi47w(rc);
+	if (mm >= MM_add && mm <= MM_idiv && (tvisstr(rb) || tvisstr(rc))) {
+	  const char *verbs[] = {"add","sub","mul","div","mod","pow","unm","idiv"};
+	  lj_err_msgv(L, LJ_ERR_OPBIN54, verbs[mm-MM_add], lj_typename(rb),
+		      lj_typename(rc));
+	}
 	if (str2num(rb, &tempb) == NULL) rc = rb;
 	lj_err_optype(L, rc, LJ_ERR_OPARITH);
 	return NULL;  /* unreachable */

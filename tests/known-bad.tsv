@@ -2,7 +2,6 @@
 # M0 baseline: unported LuaJIT 2.1 (base 63c8f1a9) vs PUC-Lua 5.4.7, aarch64.
 # Reasons are triaged by root cause and tagged with the phase that fixes them.
 # Refresh with: tests/harness.sh --mode all --update-known-bad (keeps reasons).
-tests/corpus/puc54/attrib.lua	R	P5: require/loadlib 5.4 protocol: NAME mismatch on arm64 (x64 passes); three-value loadlib when==absent
 tests/corpus/puc54/sort.lua	A	IMPL-DEFINED: functional asserts pass; table.sort prints comparison counters/timings that differ from PUC
 tests/corpus/puc54/calls.lua	A	PERF: our side exceeds 60s (triage; raise timeout)
 tests/corpus/puc54/closure.lua	B	PERF: JIT-on side exceeds 60s while JIT-off finishes (mode A now passes; triage the slowdown)

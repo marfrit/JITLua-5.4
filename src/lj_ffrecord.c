@@ -709,6 +709,19 @@ static void LJ_FASTCALL recff_math_log(jit_State *J, RecordFFData *rd)
   UNUSED(rd);
 }
 
+/* Record math.atan: one argument is IRCALL_atan, two are atan2(y,x) (5.4). */
+static void LJ_FASTCALL recff_math_atan(jit_State *J, RecordFFData *rd)
+{
+  TRef tr = lj_ir_tonum(J, J->base[0]);
+  if (J->base[1]) {
+    TRef tr2 = lj_ir_tonum(J, J->base[1]);
+    J->base[0] = lj_ir_call(J, IRCALL_atan2, tr, tr2);
+  } else {
+    J->base[0] = emitir(IRTN(IR_CALLN), tr, IRCALL_atan);
+  }
+  UNUSED(rd);
+}
+
 /* Record math.atan2. */
 static void LJ_FASTCALL recff_math_atan2(jit_State *J, RecordFFData *rd)
 {

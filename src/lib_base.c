@@ -295,8 +295,22 @@ LJLIB_CF(select)		LJLIB_REC(.)
 LJLIB_ASM(tonumber)		LJLIB_REC(.)
 {
   int32_t base = lj_lib_optint(L, 2, 10);
-  if (base == 10) {
+  /* PUC 5.4: without an explicit base, tonumber uses the Lua numeral syntax
+  ** (0x... allowed); an explicit base 10 goes through the base parser, which
+  ** rejects a 0x prefix. */
+  int nobase = L->base + 1 >= L->top || tvisnil(L->base+1);
+  if (base == 10 && nobase) {
     TValue *o = lj_lib_checkany(L, 1);
+    /* 5.4 tonumber does not accept "inf"/"nan" (unlike some LuaJIT paths). */
+    if (tvisstr(o)) {
+      const char *p = strdata(strV(o));
+      while (lj_char_isspace((unsigned char)(*p))) p++;
+      if (*p == '+' || *p == '-') p++;
+      if ((p[0] | 0x20) == 'i' || (p[0] | 0x20) == 'n') {
+	setnilV(L->base-1-LJ_FR2);
+	return FFH_RES(1);
+      }
+    }
     if (lj_strscan_numberobj64(L, o)) {  /* 5.4: integers of any size. */
       copyTV(L, L->base-1-LJ_FR2, o);
       return FFH_RES(1);
@@ -321,7 +335,9 @@ LJLIB_ASM(tonumber)		LJLIB_REC(.)
     }
 #endif
   } else {
-    const char *p = strdata(lj_lib_checkstr(L, 1));
+    GCstr *str = lj_lib_checkstr(L, 1);
+    const char *p = strdata(str);
+    const char *pend = p + str->len;  /* embedded NULs are not a terminator */
     char *ep;
     unsigned int neg = 0;
     unsigned long long ul;
@@ -342,8 +358,8 @@ LJLIB_ASM(tonumber)		LJLIB_REC(.)
     if (lj_char_isalnum((unsigned char)(*p))) {
       ul = strtoull(p, &ep, base);
       if (p != ep) {
-	while (lj_char_isspace((unsigned char)(*ep))) ep++;
-	if (*ep == '\0') {
+	while (ep < pend && lj_char_isspace((unsigned char)(*ep))) ep++;
+	if (ep == pend) {
 	  /* 5.4 (l_str2int with a base): the value wraps around modulo 2^64
 	  ** and is always an integer. */
 	  if (neg) ul = ~ul+1u;
@@ -514,10 +530,15 @@ LJLIB_CF(collectgarbage)
     setnumV(L->top, (lua_Number)G(L)->gc.total/1024.0);
   } else {
     int res = lua_gc(L, opt, data);
-    if (opt == LUA_GCSTEP || opt == LUA_GCISRUNNING)
+    if (opt == LUA_GCSTEP || opt == LUA_GCISRUNNING) {
       setboolV(L->top, res);
-    else
+    } else if (opt == LUA_GCGEN || opt == LUA_GCINC) {
+      /* 5.4 collectgarbage returns the previous mode as a string. */
+      setstrV(L, L->top, res == LUA_GCGEN ?
+	      lj_str_newlit(L, "generational") : lj_str_newlit(L, "incremental"));
+    } else {
       setintV(L->top, res);
+    }
   }
   L->top++;
   return 1;

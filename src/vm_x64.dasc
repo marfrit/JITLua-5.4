@@ -2741,34 +2741,29 @@ static void build_subroutines(BuildCtx *ctx)
   |  vm_round vm_ceil,  1, JIT
   |  vm_round vm_trunc, 2, JIT
   |
-  |// FP modulo x%y. Called by BC_MOD* and vm_arith.
+  |// FP modulo x%y. vm_arith only; BC_MOD* goes through lj_meta_arith, which
+  |// uses C fmod (5.4 semantics, exact for large magnitudes).
   |->vm_mod:
-  |// Args in xmm0/xmm1, return value in xmm0.
-  |// Caveat: xmm0-xmm5 and RC (eax) modified!
   |  movaps xmm5, xmm0
   |  divsd xmm0, xmm1
   |  sseconst_abs xmm2, RD
   |  sseconst_2p52 xmm3, RD
   |  movaps xmm4, xmm0
-  |  andpd xmm4, xmm2			// |x/y|
-  |  ucomisd xmm3, xmm4			// No truncation if 2^52 <= |x/y|.
+  |  andpd xmm4, xmm2
+  |  ucomisd xmm3, xmm4
   |  jbe >1
-  |  andnpd xmm2, xmm0			// Isolate sign bit.
-  |  addsd xmm4, xmm3			// (|x/y| + 2^52) - 2^52
+  |  andnpd xmm2, xmm0
+  |  addsd xmm4, xmm3
   |  subsd xmm4, xmm3
-  |  orpd xmm4, xmm2			// Merge sign bit back in.
+  |  orpd xmm4, xmm2
   |  sseconst_1 xmm2, RD
-  |  cmpsd xmm0, xmm4, 1		// x/y < result?
+  |  cmpsd xmm0, xmm4, 1
   |  andpd xmm0, xmm2
-  |  subsd xmm4, xmm0			// If yes, subtract 1.0.
+  |  subsd xmm4, xmm0
   |  movaps xmm0, xmm5
   |  mulsd xmm1, xmm4
   |  subsd xmm0, xmm1
-  |  ret
   |1:
-  |  mulsd xmm1, xmm0
-  |  movaps xmm0, xmm5
-  |  subsd xmm0, xmm1
   |  ret
   |
   |//-----------------------------------------------------------------------
@@ -3699,16 +3694,14 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
   case BC_DIVVN: case BC_DIVNV: case BC_DIVVV:
     |  ins_arith divsd
     break;
-  case BC_MODVN:
-    |  ins_arithpre movsd, xmm1
-    |->BC_MODVN_Z:
-    |  call ->vm_mod
-    |  ins_arithpost
-    |  ins_next
+  case BC_MODVN:  // C fmod via lj_meta_arith: exact for large |x/y|
+    |  jmp ->vmeta_arith_vno
     break;
-  case BC_MODNV: case BC_MODVV:
-    |  ins_arithpre movsd, xmm1
-    |  jmp ->BC_MODVN_Z			// Avoid 3 copies. It's slow anyway.
+  case BC_MODNV:
+    |  jmp ->vmeta_arith_nvo
+    break;
+  case BC_MODVV:
+    |  jmp ->vmeta_arith_vvo
     break;
   case BC_IDIV:  // Lua 5.4 floor division: lj_meta_arith -> C helper
     |  movzx RAd, PC_RA	// dst index; vvo decodes the B/C operand slots

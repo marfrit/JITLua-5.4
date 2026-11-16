@@ -1277,6 +1277,33 @@ an #error; extra defines go in CFLAGS (`make CFLAGS="-DLUA_USE_ASSERT
 -DLUA_USE_APICHECK"`), which the Makefile appends. The arm64 assert-build
 runs in sessions 35-38 were valid (dual by default).
 
+
+## Session 39 — math 5.4, C-API surface, luaL_Stream, C-module corpus
+
+Math functional corpus now passes in mode A: string->number coercion in
+arithmetic (float and integer forms), unary minus, explicit-base tonumber rules
+(no 0x prefix; embedded NULs; inf/nan rejected; no-base keeps exact int64),
+lua_tointeger(x) exact numeric strings, math.atan(y,x)=atan2, math.max/min()
+"value expected", bitwise NUMNOINT variable context, and float modulo as 5.4
+luaV_modf (C fmod then divisor-sign adjust; BC_MOD* routes through
+lj_meta_arith so the exact path also covers |x/y| > 2^52). Only printed random
+statistics differ (IMPL-DEFINED, A) and JIT integer floor division with a
+negative divisor still yields nil under -jon (B, Fable recorder area).
+
+C API 5.4 surface filled: lua_rawlen/lua_Unsigned, lua_get/setuservalue,
+lua_tounsignedx, lua_pushglobaltable, luaL_checkversion,
+LUA_INTEGER_FMT/LUA_INTEGER_FRMLEN/LUAI_UACINT/LUA_MAX*INTEGER, LUA_FILEHANDLE,
+luaL_Stream, luaL_checkunsigned/optunsigned. IOFileUD starts with the PUC
+luaL_Stream prefix {FILE *fp; lua_CFunction closef} (type moved to offset16);
+opened files carry closef, std/popen handles NULL. debug.getinfo on library C
+functions reports nups 0 while Lua functions keep Fable's _ENV-inclusive count.
+
+tests/corpus-ext/shim-ours.h is deleted. luafilesystem, lpeg and lua-cjson build
+against our headers only and run on x64 and arm64; full corpus-ext x64: 15 arms
+SAME, 0 unexpected (cjson pair order known IMPL-DEFINED). collectgarbage now
+returns the previous GC mode string for "generational"/"incremental"
+(GCState.gcmode), matching PUC's observable API. gc_01's remaining divergence
+is table __gc finalizers (LuaJIT finalizes userdata only).
 ## Session 39 (branch x64-redzone) — first x64 assert-build run
 
 With the build recipe fixed (`make CFLAGS="-DLUA_USE_ASSERT

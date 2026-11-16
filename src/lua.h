@@ -103,6 +103,13 @@ typedef LUA_NUMBER lua_Number;
 /* type for integer functions */
 typedef LUA_INTEGER lua_Integer;
 
+/* type for unsigned integer functions (Lua 5.4 C API) */
+typedef LUA_UNSIGNED lua_Unsigned;
+
+#define lua_getuservalue(L,idx)	lua_getiuservalue(L,idx,1)
+#define lua_setuservalue(L,idx)	lua_setiuservalue(L,idx,1)
+#define lua_tounsignedx(L,i,is)	((lua_Unsigned)lua_tointegerx(L,i,is))
+
 
 
 /*
@@ -150,6 +157,8 @@ LUA_API lua_Integer     (lua_tointeger) (lua_State *L, int idx);
 LUA_API int             (lua_toboolean) (lua_State *L, int idx);
 LUA_API const char     *(lua_tolstring) (lua_State *L, int idx, size_t *len);
 LUA_API size_t          (lua_objlen) (lua_State *L, int idx);
+LUA_API lua_Unsigned    (lua_rawlen) (lua_State *L, int idx);
+LUA_API void            (lua_pushglobaltable) (lua_State *L);
 LUA_API void            (lua_len) (lua_State *L, int idx);
 LUA_API int             (lua_absindex) (lua_State *L, int idx);
 LUA_API int             (lua_isinteger) (lua_State *L, int idx);

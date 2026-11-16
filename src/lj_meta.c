@@ -19,6 +19,7 @@
 #include "lj_frame.h"
 #include "lj_bc.h"
 #include "lj_vm.h"
+#include <math.h>
 #include "lj_strscan.h"
 #include "lj_strfmt.h"
 #include "lj_lib.h"
@@ -278,6 +279,18 @@ TValue *lj_meta_arith(lua_State *L, TValue *ra, cTValue *rb, cTValue *rc,
       meta_i64_gccheck(L, ra);
       return NULL;
     }
+    if (mm == MM_unm) {
+      /* Unary minus on a coerced string: keep the integer form if the string
+      ** was an integer ("-\"10\"" is the integer -10 in 5.4). */
+      if (tvisint(b) || tvisi64(b)) {
+	if (lj_i64_unop(L, ra, b, I64_UNM)) {
+	  meta_i64_gccheck(L, ra);
+	  return NULL;
+	}
+      }
+      setnumV(ra, -numberVnum(b));
+      return NULL;
+    }
     if (mm == MM_idiv) {  /* no IR op for idiv: floor, as 5.4 does */
       setnumV(ra, lj_vm_floor(numberVnum(b) / numberVnum(c)));
       return NULL;
@@ -289,7 +302,13 @@ TValue *lj_meta_arith(lua_State *L, TValue *ra, cTValue *rb, cTValue *rc,
       case MM_sub: r = x - y; break;
       case MM_mul: r = x * y; break;
       case MM_div: r = x / y; break;
-      case MM_mod: r = (y == 0) ? x / y * 0 : x - lj_vm_floor(x / y) * y; break;
+      case MM_mod: {
+	lua_Number m;
+	if (y == 0) { r = x / y * 0; break; }  /* nan, as in Lua */
+	m = fmod(x, y);
+	r = ((m > 0 && y < 0) || (m < 0 && y > 0)) ? m + y : m;
+	break;
+      }
       case MM_pow: r = lj_vm_foldarith(x, y, (int)MM_pow - (int)MM_add); break;
       case MM_idiv: r = lj_vm_floor(x / y); break;
       default: r = x; break;

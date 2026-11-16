@@ -952,6 +952,36 @@ lua_getinfo finds 'rep' from the TAILCALL; LuaJIT's CALLT replaces the
 frame -- matching it means non-tail calls to C functions in the VM, not a
 cheap change).
 
+## Session 33 (branches jitutil-i64, corpus-ext) — JIT tooling smoke, real-program corpus
+
+jitutil-i64: the step-3-era -jv/-jdump segfault on boxed literals no longer
+reproduces on either arch (canonical literal folding + BCDUMP_KTAB_I64 fixed
+it on the way); tests/jitutil-smoke.sh (-jbc/-jv/-jdump=bimT/-jdump=+rs/-jp
+over six int64-heavy tests, 30 runs) is a ci-box stage.
+
+corpus-ext: tests/corpus-ext/run.sh runs the test suites of Penlight 1.14.0
+(37 scripts), serpent 0.30, luaunit 3.4, rxi json.lua 0.1.2 and dkjson 2.8
+under PUC 5.4.7, -joff, -jon and -jon with the GC on every allocation;
+archives pinned by sha256 in manifest.tsv, kept in .dlcache/ (no network on
+the boxes). Normalized away: addresses, timings, interpreter name, "[C]: in
+?" vs "[C]: at 0x...", the "no file ''" line. Results (both arches equal):
+Penlight and rxi json SAME in all arms; serpent and dkjson differ only by
+pairs() order / string.dump bytes (known-diff, IMPL-DEFINED); luaunit under
+jit.version=_VERSION differs only because _VERSION is "Lua 5.1" (lua.h
+LUA_VERSION) -- it then runs its 5.1-only tests (math.fmod(1, 0) is NaN in
+5.1, the 'zero' error in 5.4) and the 5.1 prettystr branch. VM finding for
+the C API owner: LUA_VERSION must be "Lua 5.4". Library-level findings
+(DeepSeek): tracebacks print "[C]: at 0x..." where PUC prints "[C]: in ?";
+module-not-found messages list "no file ''" for the ";;" default path
+expansion. lua-MessagePack needs lua-TestAssertion (not fetchable pinned
+today), inspect.lua needs busted: pinned, not run. The GC-stress arm never
+differed from -jon. -0.0 / 1/-0 / 1/(-0.0) match PUC exactly.
+Gates at 2c97250b (corpus-ext, contains jitutil-i64), both arches identical:
+A+B 89 PASS / 0 FAIL / 10 XFAIL / 1 XPASS (dump_03_version B, DeepSeek's
+entry), opt 0-3 196/0/0/4, R 50, GC stress 58/0/2, JIT tooling smoke 30/30,
+corpus "arms same 6, unexpected diffs 0", C API 81 + i64 14/14, fuzz
+160/160. Test/tooling-only branches: no bench run.
+
 ## Session 34 (branch b2-sort) — B2 gap: inline int64 compares, exact lua_lessthan
 
 ISLT/ISGE/ISLE/ISGT compare two 5.4 integers of any encoding (int32,

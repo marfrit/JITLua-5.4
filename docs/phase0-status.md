@@ -976,4 +976,8 @@ module-not-found messages list "no file ''" for the ";;" default path
 expansion. lua-MessagePack needs lua-TestAssertion (not fetchable pinned
 today), inspect.lua needs busted: pinned, not run. The GC-stress arm never
 differed from -jon. -0.0 / 1/-0 / 1/(-0.0) match PUC exactly.
-GATESLINE3
+Gates at 2c97250b (corpus-ext, contains jitutil-i64), both arches identical:
+A+B 89 PASS / 0 FAIL / 10 XFAIL / 1 XPASS (dump_03_version B, DeepSeek's
+entry), opt 0-3 196/0/0/4, R 50, GC stress 58/0/2, JIT tooling smoke 30/30,
+corpus "arms same 6, unexpected diffs 0", C API 81 + i64 14/14, fuzz
+160/160. Test/tooling-only branches: no bench run.

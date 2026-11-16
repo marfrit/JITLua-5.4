@@ -1000,4 +1000,4 @@ operand and cost the int32 default sort 15-40 %), both arches identical:
 A+B 91 PASS / 0 FAIL / 9 XFAIL / 1 XPASS (dump_03_version B), opt 0-3
 196/0/0/4, R 50, GC stress 58/0/2, JIT tooling smoke 30/30, corpus 6/0, C
 API + i64 14/14, fuzz 160/160. Bench arm64: B1 16.7, B2 829.1 (was 1496.6;
-FFI 607.8, PUC 549.5), B2b 155.9, B3 21.1 / 223.6 ms; x64: X64GATE4
+FFI 607.8, PUC 549.5), B2b 155.9, B3 21.1 / 223.6 ms; x64: B1 30.3, B2 3188.7 (was 3211.6; FFI 2612.7, PUC 2161.0), B2b 758.4, B3 47.7 / 1068.9 ms.

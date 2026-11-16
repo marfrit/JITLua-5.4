@@ -851,3 +851,11 @@ source in the error token; EOF cases no longer append the EOF byte (matches
 `lexerror([["abc\x]], [[\x]])` etc.). corpus literals.lua advances to line100
 (decimal escape overflow `\999"` needs the trailing source char in the token;
 the lexer's sb only holds bytes up to the failure - a look-ahead scan is needed).
+
+## Session 27g — decimal overflow + \u overflow lexer tokens
+
+Decimal overflow (\999, \300, \256) error tokens now include the source up to
+the string terminator; \u error tokens include the consumed digits/characters
+and too-large is checked before the shift (uint32 wrap used to hide
+\u{100000000}). All the literals.lua lexerror cases through the UTF-8 block now
+find their "near ..." text; corpus literals.lua advances further.

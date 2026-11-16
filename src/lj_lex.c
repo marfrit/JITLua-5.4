@@ -300,12 +300,12 @@ static void lex_string(LexState *ls, TValue *tv, LexChar delim)
 	    lj_buf_putmem(&ls->sb, eb, nb);
 	    goto err_xesc;
 	  }
-	  u = (u << 4) | (uint32_t)(ls->c & 15u);
-	  if (!lj_char_isdigit(ls->c)) u += 9;
-	  if (u > 0x7FFFFFFFu) {
+	  if (u > (0x7FFFFFFFu >> 4)) {  /* check before shifting: no uint32 wrap */
 	    lj_buf_putmem(&ls->sb, eb, nb);
 	    goto err_xesc;  /* escape sequence too large */
 	  }
+	  u = (u << 4) | (uint32_t)(ls->c & 15u);
+	  if (!lj_char_isdigit(ls->c)) u += 9;
 	  if (lex_next(ls) == '}') break;
 	}
 	/* Encode as UTF-8 (1..6 bytes), backwards like the reference. */
@@ -340,16 +340,31 @@ static void lex_string(LexState *ls, TValue *tv, LexChar delim)
 	  }
 	  goto err_xesc;
 	}
-	c -= '0';  /* Decimal escape '\ddd'. */
-	if (lj_char_isdigit(lex_next(ls))) {
-	  c = c*10 + (ls->c - '0');
+	{  /* Decimal escape '\ddd' with PUC's error token text. */
+	  char eb[8]; int nb = 0;
+	  eb[nb++] = '\\'; eb[nb++] = (char)c;
+	  c -= '0';
 	  if (lj_char_isdigit(lex_next(ls))) {
+	    eb[nb++] = (char)ls->c;
 	    c = c*10 + (ls->c - '0');
-	    if (c > 255) {
-	    err_xesc:
-	      lj_lex_error(ls, TK_string, LJ_ERR_XESC);
+	    if (lj_char_isdigit(lex_next(ls))) {
+	      eb[nb++] = (char)ls->c;
+	      c = c*10 + (ls->c - '0');
+	      if (c > 255) {
+		/* Include the source characters up to the string terminator. */
+		for (;;) {
+		  if (lex_next(ls) == LEX_EOF || ls->c == '"' || ls->c == '\'') {
+		    if (ls->c != LEX_EOF) eb[nb++] = (char)ls->c;
+		    break;
+		  }
+		  if (nb < (int)sizeof(eb)) eb[nb++] = (char)ls->c;
+		}
+		lj_buf_putmem(&ls->sb, eb, nb);
+	      err_xesc:
+		lj_lex_error(ls, TK_string, LJ_ERR_XESC);
+	      }
+	      lex_next(ls);
 	    }
-	    lex_next(ls);
 	  }
 	}
 	lex_save(ls, c);

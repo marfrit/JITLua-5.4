@@ -1150,3 +1150,47 @@ objlen), d54 debug_03_uservalue (the Lua-visible surface). Library note:
 lua.h has no lua_rawlen (5.2+ name of lua_objlen) -- C modules built
 against our headers that use it will not link; for the C API owner.
 
+## Session 37 (branch corpus-cmod) — real-program corpus with C modules
+
+LPeg 1.1.0, lua-cjson 2.1.0.14 and LuaFileSystem 1.8.0 (pinned tarballs in
+.dlcache, sha256 in tests/corpus-ext/manifest.tsv) are built on the boxes
+twice: against PUC's headers (tests/ref/src/lua-5.4.7/src, left behind by
+fetch-ref.sh) for the PUC arm and against ours for -joff/-jon/-jon+GC
+stress; LUA_CPATH per arm. LFS also unlocks Penlight's five LFS-dependent
+scripts (they used to fail under PUC too). Results and findings:
+
+* LPeg: all arms SAME (1667-line suite incl. re.lua).
+* lua-cjson: SAME apart from pairs() order of object keys (impl-defined,
+  known-diff). Real finding fixed here: lua_pushnumber canonicalised every
+  injected NaN to the negative quiet NaN, so cjson's decoded "NaN" printed
+  "-nan" where PUC prints "nan"; the sign is kept now (a positive quiet NaN
+  never aliases a tagged value).
+* LuaFileSystem: lfs.setmode/lock read the FILE* userdata as 5.4's
+  luaL_Stream {FILE *f; lua_CFunction closef}; ours is {FILE *fp; uint32_t
+  type}, so closef reads the type word (plus padding -- one arm passes by
+  luck). Library finding (lib_io), known-diff with the reason.
+* Penlight (42 scripts now): test-pretty failed because _G held an "_ENV"
+  entry (luaopen_base and load(..., env) materialised it; PUC's _ENV is an
+  upvalue, _G._ENV is nil) -- removed, the VM/recorder special case on the
+  interned key serves reads and writes. test-tablex failed because ipairs
+  ignored __index (5.3+ semantics; tablex.readonly is a proxy): tables
+  with a metatable now take the C path of ipairs_aux (lua_gettable), the
+  recorder leaves them to the interpreter; d54 meta_04_ipairs. Remaining
+  (known-diff, queued as the next VM item "env-uv"): test-class,
+  test-class2, test-__vector and test-utils3 need `_ENV` to be visible as
+  an upvalue (debug.getupvalue(f, n) == "_ENV", setupvalue/upvaluejoin on
+  it) -- Penlight's compat.getfenv/setfenv, like PUC's db.lua:722 and its
+  nups count. Plan: a parser flag (PROTO bit 0x40 is free in pt->flags
+  after fs_finish) marking functions that touch globals or contain one
+  that does (main chunks always), and the debug API (lj_debug uvname,
+  lua_get/setupvalue, debug.upvalueid/upvaluejoin, getinfo nups)
+  synthesising "_ENV" as upvalue 1 backed by fn->env, real upvalues shifted
+  by one. No bytecode or VM change.
+* C API headers (DeepSeek): all three modules compile against our headers
+  only with tests/corpus-ext/shim-ours.h -- lua.h/luaconf.h/lauxlib.h lack
+  lua_rawlen, lua_getuservalue/lua_setuservalue, lua_Unsigned/LUA_UNSIGNED,
+  LUA_INTEGER_FMT/LUA_INTEGER_FRMLEN, luaL_Stream/LUA_FILEHANDLE (also
+  luaL_checkversion, lua_pushglobaltable, not hit yet). The runner prints
+  "shimmed" for every build so the gap stays visible; the shim shrinks as
+  the headers grow.
+

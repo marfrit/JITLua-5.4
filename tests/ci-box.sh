@@ -54,7 +54,7 @@ say "JIT tooling smoke (-jv/-jdump/-jbc/-jp over the int64 tests)"
 sh tests/jitutil-smoke.sh | tail -4
 
 say "real-program corpus (tests/corpus-ext: PUC vs -joff / -jon / -jon+GC-stress)"
-sh tests/corpus-ext/run.sh | grep -v "^      " | tail -24
+sh tests/corpus-ext/run.sh | grep -v "^      " | tail -44
 
 say "C API"
 tests/capi/run.sh | grep -E '^== (capi|i64):'

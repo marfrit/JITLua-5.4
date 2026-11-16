@@ -425,15 +425,17 @@ LUA_API int lua_isinteger(lua_State *L, int idx)
 ** with the exact integer key. */
 static void api_pushkey(lua_State *L, lua_Integer n)
 {
-  TValue *o = L->top;
-  if (LJ_DUALNUM && n == (int64_t)(int32_t)n)
-    setintV(o, (int32_t)n);
+  if (LJ_DUALNUM && n == (int64_t)(int32_t)n) {
+    setintV(L->top, (int32_t)n);
 #if LJ_GC64
-  else if (i47_fits((int64_t)n))
-    setint47V(o, (int64_t)n);
+  } else if (i47_fits((int64_t)n)) {
+    setint47V(L->top, (int64_t)n);
 #endif
-  else
-    setudataV(L, o, lj_i64_box(L, (int64_t)n));
+  } else {
+    /* Box allocation may move the stack: take L->top only after it. */
+    GCudata *ud = lj_i64_box(L, (int64_t)n);
+    setudataV(L, L->top, ud);
+  }
   incr_top(L);
 }
 
@@ -513,7 +515,7 @@ LUA_API void lua_seti(lua_State *L, int idx, lua_Integer n)
     copyTV(L, L->top, L->top - 3);  /* copy of the value for lua_settable */
     incr_top(L);
     lua_settable(L, -3);
-    L->top--;  /* consume the original value */
+    L->top -= 2;  /* drop the pushed table copy and the consumed value */
   }
 }
 
@@ -600,6 +602,8 @@ LUA_API lua_Number lua_tonumber(lua_State *L, int idx)
   TValue tmp;
   if (LJ_LIKELY(tvisnumber(o)))
     return numberVnum(o);
+  else if (tvisi64(o))
+    return (lua_Number)i64V(o);
   else if (tvisstr(o) && lj_strscan_num(strV(o), &tmp))
     return numV(&tmp);
   else
@@ -613,6 +617,9 @@ LUA_API lua_Number lua_tonumberx(lua_State *L, int idx, int *ok)
   if (LJ_LIKELY(tvisnumber(o))) {
     if (ok) *ok = 1;
     return numberVnum(o);
+  } else if (tvisi64(o)) {
+    if (ok) *ok = 1;
+    return (lua_Number)i64V(o);
   } else if (tvisi47w(o)) {  /* widened inline int as a double */
     if (ok) *ok = 1;
     return (lua_Number)intV47(o);
@@ -656,13 +663,15 @@ LUA_API lua_Integer lua_tointeger(lua_State *L, int idx)
   lua_Number n;
   if (LJ_LIKELY(tvisint(o))) {
     return tvisi47w(o) ? (lua_Integer)intV47(o) : intV(o);
+  } else if (tvisi64(o)) {  /* boxed int64 must not read the udata word */
+    return (lua_Integer)i64V(o);
   } else if (LJ_LIKELY(tvisnum(o))) {
     n = numV(o);
   } else {
     if (!(tvisstr(o) && lj_strscan_number(strV(o), &tmp)))
       return 0;
     if (tvisint(&tmp))
-      return intV(&tmp);
+      return tvisi47w(&tmp) ? (lua_Integer)intV47(&tmp) : intV(&tmp);
     n = numV(&tmp);
   }
   return lj_num2int_type(n, lua_Integer);

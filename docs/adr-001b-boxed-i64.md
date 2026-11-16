@@ -465,3 +465,33 @@ corrupting the intern table; the lexer boxed hex literals that wrap into int32;
   `vmeta_equal_i64` on both backends).
 - `lj_i64_arith`'s mixed int64/float path read the low word of a widened
   operand (`(1<<40) + 0.5` gave `0.5`).
+
+### Gates (commit deadff71, 2026-11-16)
+
+`tests/ci-box.sh` on both boxes: modes A+B 55 PASS / 0 FAIL / 16 XFAIL / 1
+XPASS (meta_02_compare_len, now removed from known-bad: exact int/float
+equality), mode B at opt 0-3 144 PASS, mode R 36 PASS, C API 34 + i64 14/14,
+fuzz 160/160. Pre-existing and unchanged: `-jv`/`-jdump` of a script with
+boxed literals segfaults in jit.util (also at the base commit 1e883ab8).
+
+Benchmark gate `tests/bench/run.sh`, median of 3, same box, same moment:
+
+| bench (arm64, escher) | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
+|---|---|---|---|---|
+| B1 FNV-1a-64, 10 MiB | **16.4 ms** (1.08x FFI) | 6870.6 ms | 15.2 ms | 292.1 ms |
+| B2 1e6 64-bit values | 2279.7 ms, 522 MB | 2264.2 ms | 698.7 ms | 565.3 ms |
+| B2b 1e6 ~2^41 values | 270.0 ms, 79 MB | 285.2 ms | 147.6 ms (float) | 162.9 ms |
+| B3 int32 control (fnv / table) | **20.9 / 209.3 ms** | 4323.7 / 684.9 ms | 37.9 / 200.8 ms | 308.9 / 253.5 ms |
+
+| bench (x64, pve2 NUC) | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
+|---|---|---|---|---|
+| B1 | **30.2 ms** (1.03x FFI) | 21468 ms | 29.2 ms | 1332 ms |
+| B2 | 7327.7 ms | 7600.5 ms | 2596.0 ms | 2159.7 ms |
+| B2b | 1135.4 ms | 1134.2 ms | 613.0 ms | 730.0 ms |
+| B3 | **47.6 / 945.3 ms** | 10722 / 1838.7 ms | 96.9 / 860.6 ms | 1296.7 / 989.3 ms |
+
+Checksums: B1 343592796160 and B3 1196193376 on both arches, JIT == -joff ==
+PUC. Against the step-3 gates: B1 within 1.5x of the FFI yardstick on both
+arches; B3 faster than stock; B2/B2b unchanged (their loops store int64 values
+into tables, which is still a NYI abort -- the next step: `ALOAD/HLOAD` with
+the unified int64 guard and a `lj_i64_tvstore` + TBAR store path).

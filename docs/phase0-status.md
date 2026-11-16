@@ -1099,4 +1099,25 @@ Files: lj_dispatch.c/.h, lj_debug.c/.h, lib_debug.c, lj_parse.c, lj_obj.h
 hookepoch, hookftransfer/ntransfer, tailofs, ffretry), lj_state.c,
 lj_err.c/.h (lj_err_funcname_loaded exported), lua.h (LUA_HOOKTAILCALL,
 lua_Debug istailcall/ftransfer/ntransfer), vm_arm64.dasc, vm_x64.dasc.
+Gates at 5eaff309 (main 5316a836 is its ancestor, no merge needed), both
+arches identical: A+B 95 PASS / 0 FAIL / 8 XFAIL / 1 XPASS (dump_03_version
+B), opt 0-3 204/0/0/4, R 52, GC stress 58/0/2, JIT tooling smoke 30/30,
+corpus 6/0, C API 81 + i64 14/14, fuzz 160/160. No bench (hooks cost
+nothing while no hook is set: the only new instructions on hot paths are a
+hookmask load+branch after a C-function return and at fast-function
+return, both behind the existing hookmask byte).
+First run of an assert build (-DLUA_USE_ASSERT -DLUA_USE_APICHECK) over
+the whole suite, arm64: three findings fixed on this branch -- the main
+thread's tail bitmap leaked at close (32 bytes), the int64 key conversion
+in rec_idx_key carried check mode 0 (the narrowing fold's assert), and
+select(i, ...) typed a boxed int64 vararg as UDATA (rec_check_slots); the
+assert suite is green afterwards (A+B 95/0, opt 204/0, GC stress all d54
+198/0, fuzz 240/0, smoke 30/30). The x64 assert build segfaults at start-up
+on main as well (5316a836, `-DLUA_USE_ASSERT` alone, `luajit -e
+'print(1)'`): pre-existing, not investigated here; a Debian 13 gcc on pve2.
+tests/soak/gc-soak.sh is the overnight GC soak (item 4): GC-stress harness
+over all of d54 (A, B@0, B@3, R), the fuzzer with a fresh seed per round
+and the real-program corpus, in a loop; one summary line per round,
+failure details only; a round takes ~5 s on the arm box (the suites are
+small), so 8 h is several thousand rounds with thousands of fuzz seeds.
 

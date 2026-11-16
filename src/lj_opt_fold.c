@@ -165,7 +165,28 @@ typedef IRRef (LJ_FASTCALL *FoldFunc)(jit_State *J);
    (J->chain[IR_SNEW] || J->chain[IR_XSNEW] || \
     J->chain[IR_TNEW] || J->chain[IR_TDUP] || \
     J->chain[IR_CNEW] || J->chain[IR_CNEWI] || \
-    J->chain[IR_BUFSTR] || J->chain[IR_TOSTR] || J->chain[IR_CALLA]))
+    J->chain[IR_BUFSTR] || J->chain[IR_TOSTR] || J->chain[IR_CALLA] || \
+    gcstep_i64store(J)))
+
+/* 5.4 (ADR-001b): an int64 store may intern a new box (lj_i64_tvstore), so
+** it drives the GC forward like an allocation. Without this the loop copy
+** of a TBAR/OBAR was CSEd away and a GC step at LOOP could blacken the
+** table before the next boxed store (boxes freed under a live table).
+*/
+static int gcstep_i64store(jit_State *J)
+{
+  static const IROp ops[] = { IR_ASTORE, IR_HSTORE, IR_USTORE, IR_FSTORE };
+  size_t i;
+  for (i = 0; i < sizeof(ops)/sizeof(ops[0]); i++) {
+    IRRef ref = J->chain[ops[i]];
+    while (ref > REF_BIAS) {
+      IRIns *ir = IR(ref);
+      if (irt_isi64(ir->t)) return 1;
+      ref = ir->prev;
+    }
+  }
+  return 0;
+}
 
 /* -- Constant folding for FP numbers ------------------------------------- */
 

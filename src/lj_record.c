@@ -320,7 +320,7 @@ static TRef rec_i64_sext(jit_State *J, TRef tr)
 static TRef rec_i64_narrow(jit_State *J, TRef tr, int64_t v)
 {
   if ((int64_t)(int32_t)v == v)
-    return emitir(IRTGI(IR_CONV), tr, IRCONV_INT_I64|IRCONV_CHECK);
+    return emitir(IRTGI(IR_CONV), tr, IRCONV_I64_INT|IRCONV_CHECK);
   return tr;
 }
 

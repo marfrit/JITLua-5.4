@@ -88,7 +88,7 @@ LJLIB_ASM_(math_cos)		LJLIB_REC(math_call IRCALL_cos)
 LJLIB_ASM_(math_tan)		LJLIB_REC(math_call IRCALL_tan)
 LJLIB_ASM_(math_asin)		LJLIB_REC(math_call IRCALL_asin)
 LJLIB_ASM_(math_acos)		LJLIB_REC(math_call IRCALL_acos)
-LJLIB_ASM(math_atan)		LJLIB_REC(math_call IRCALL_atan)
+LJLIB_ASM(math_atan)		LJLIB_REC(math_atan)
 {
   lua_Number y = lj_lib_checknum(L, 1);
   lua_Number x;

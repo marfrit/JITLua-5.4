@@ -1277,3 +1277,17 @@ an #error; extra defines go in CFLAGS (`make CFLAGS="-DLUA_USE_ASSERT
 -DLUA_USE_APICHECK"`), which the Makefile appends. The arm64 assert-build
 runs in sessions 35-38 were valid (dual by default).
 
+## Session 39 (branch x64-redzone) — first x64 assert-build run
+
+With the build recipe fixed (`make CFLAGS="-DLUA_USE_ASSERT
+-DLUA_USE_APICHECK"`), the x64 assert suite ran for the first time. One
+finding: `lj_asm.c checkmclim: red zone overflow` on i64_01_box and
+i64_04_keys in mode B -- the x86/x64 int64 sequences for EQ (op 8) and
+HLOAD (op 67) with a boxed/widened operand (load the udata pointer, check
+the type, load the payload, widened fallback) emit more than the 64-byte
+machine-code red zone for a single IR. The red zone only guards the
+distance to the mcode limit check; the sequences themselves are correct.
+MCLIM_REDZONE is 128 on x86/x64 now (arm64's fixed-width sequences stay
+below 64). The rest of the x64 assert suite was already green (fuzz 240/0,
+GC stress all d54 212/3 with only this assert).
+

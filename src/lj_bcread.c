@@ -175,7 +175,6 @@ static const void *bcread_varinfo(GCproto *pt)
 {
   const uint8_t *p = proto_uvinfo(pt);
   MSize n = pt->sizeuv;
-  MSize envuv;
   if (n) while (*p++ || --n) ;
   return p;
 }
@@ -327,7 +326,7 @@ GCproto *lj_bcread_proto(LexState *ls)
   GCproto *pt;
   MSize framesize, numparams, flags, sizeuv, sizekgc, sizekn, sizebc, sizept;
   MSize ofsk, ofsuv, ofsdbg;
-  MSize sizedbg = 0;
+  MSize sizedbg = 0, envuv;
   BCLine firstline = 0, numline = 0;
 
   /* Read prototype header. */

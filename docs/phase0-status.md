@@ -1318,3 +1318,28 @@ MCLIM_REDZONE is 128 on x86/x64 now (arm64's fixed-width sequences stay
 below 64). The rest of the x64 assert suite was already green (fuzz 240/0,
 GC stress all d54 212/3 with only this assert).
 
+
+
+
+## Session 40 — files.lua byte-identical to PUC; debug for-state view
+
+tests/corpus/puc54/files.lua now passes in mode A on x64 and arm64 (known-bad
+row removed). Fixes: debug.getlocal presents numeric/generic-for hidden locals
+as four "(for state)" entries in PUC's gen/state/control/toclose order (LuaJIT
+physically stores toclose first for ITERC, so the debug view remaps slots);
+loadfile sees a binary chunk after a '#' comment line (no synthetic newline
+before ESC); explicit nil env sets _ENV nil (arm64 GGET NULL-env pushes nil);
+PUC load-mode error wording; io.popen POSIX mode validation; os.date formats
+literal bytes piecewise so NULs survive (only specifiers through strftime);
+lua_tointeger(x) requires exact integral floats. db.lua remains known-bad at
+line 619: istailcall is true in PUC without a hook, while Fable's tail marks
+exist only while a call hook is installed.
+
+Deliberate divergence (Markus decision, 2026-11-16): LuaJIT interns every
+string by design (interning/hash/equality, table string keys, JIT constant
+folding all rely on pointer equality). PUC 5.4 does not intern long strings
+(> LUAI_MAXSHORTLEN), so `%p`/lua_topointer identity after concat/gsub differs.
+The observable is only debug identity; un-interning long strings would be a
+large VM change. The corpus copies of literals.lua:231 and pm.lua:436 therefore
+assert the values but not `%p` identity, with the reason inline; both known-bad
+rows are removed.

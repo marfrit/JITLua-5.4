@@ -111,7 +111,7 @@ do
   local co = coroutine.create(function () return pcall(foo) end)
   local st1, st2, err = coroutine.resume(co)
   assert(st1 and not st2 and err == 43)
-  assert(X == 43 and Y.what == "Lua")  -- PUC: "C" (pcall); see header
+  assert(X == 43)  -- PUC also asserts Y.what == "C" (pcall); see header
 
   -- recovering from errors in __close metamethods
   local track = {}

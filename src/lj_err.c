@@ -165,7 +165,10 @@ static void *err_unwind(lua_State *L, void *stopcf, int errcode)
       TValue *top = restorestack(L, -nres);
       if (frame < top) {  /* Frame reached? */
 	if (errcode) {
+	  ptrdiff_t fofs = savestack(L, frame);
 	  tbc_closeunwound(L, top, cframe_prev(cf), frame+1);
+	  frame = restorestack(L, fofs);  /* Handlers may grow the stack. */
+	  top = restorestack(L, -nres);
 	  L->base = frame+1;
 	  L->cframe = cframe_prev(cf);
 	  unwindstack(L, top);
@@ -184,8 +187,11 @@ static void *err_unwind(lua_State *L, void *stopcf, int errcode)
     unwind_c:
 #if LJ_UNWIND_EXT
       if (errcode) {
-	if (tbc_hascatcher(L, frame_prevd(frame), cframe_prev(cf)))
+	if (tbc_hascatcher(L, frame_prevd(frame), cframe_prev(cf))) {
+	  ptrdiff_t fofs = savestack(L, frame);
 	  tbc_closeunwound(L, frame - LJ_FR2, cf, frame_prevd(frame) + 1);
+	  frame = restorestack(L, fofs);  /* Handlers may grow the stack. */
+	}
 	L->base = frame_prevd(frame) + 1;
 	L->cframe = cframe_prev(cf);
 	unwindstack(L, frame - LJ_FR2);
@@ -211,7 +217,9 @@ static void *err_unwind(lua_State *L, void *stopcf, int errcode)
 	return cf;
       }
       if (errcode) {
+	ptrdiff_t fofs = savestack(L, frame);
 	tbc_closeunwound(L, frame + 1, cf, frame + 1);
+	frame = restorestack(L, fofs);  /* Handlers may grow the stack. */
 	L->base = frame_prevd(frame) + 1;
 	L->cframe = cframe_prev(cf);
 	unwindstack(L, frame - LJ_FR2);
@@ -236,7 +244,11 @@ static void *err_unwind(lua_State *L, void *stopcf, int errcode)
 	setgcref(g->cur_L, obj2gco(L));
 	if (frame_typep(frame) == FRAME_PCALL)
 	  hook_leave(g);
-	tbc_closeunwound(L, frame + 1, cf, frame + 1);
+	{
+	  ptrdiff_t fofs = savestack(L, frame);
+	  tbc_closeunwound(L, frame + 1, cf, frame + 1);
+	  frame = restorestack(L, fofs);  /* Handlers may grow the stack. */
+	}
 	L->base = frame_prevd(frame) + 1;
 	L->cframe = cf;
 	unwindstack(L, L->base);

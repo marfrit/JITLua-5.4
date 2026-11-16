@@ -323,7 +323,11 @@ static int handle_script(lua_State *L, char **argx)
     /* Fetch args from arg table. LUA_INIT or -e might have changed them. */
     int narg = 0;
     lua_getglobal(L, "arg");
-    if (lua_istable(L, -1)) {
+    if (!lua_istable(L, -1)) {
+      lua_pop(L, 1);
+      luaL_error(L, "'arg' is not a table");  /* PUC pushargs */
+    }
+    {
       do {
 	narg++;
 	lua_rawgeti(L, -narg, narg);
@@ -331,8 +335,6 @@ static int handle_script(lua_State *L, char **argx)
       lua_pop(L, 1);
       lua_remove(L, -narg);
       narg--;
-    } else {
-      lua_pop(L, 1);
     }
     status = docall(L, narg, 0);
   }

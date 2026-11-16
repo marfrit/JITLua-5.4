@@ -321,13 +321,44 @@ TValue *lj_meta_arith(lua_State *L, TValue *ra, cTValue *rb, cTValue *rc,
 /* Helper for bit operators. Lua 5.4 semantics (ADR-001b): integer operands are
 ** 64-bit, floats must have an exact integer representation; cdata keeps the
 ** LuaJIT extension behaviour. */
-void lj_meta_bitop(lua_State *L, TValue *ra, cTValue *rb, cTValue *rc, BCReg op)
+/* 5.4 bitwise metamethod for a bit operator bytecode (MM__MAX: none). */
+static MMS bitop_mm(BCReg op)
+{
+  switch (op) {
+  case BC_BAND: return MM_band;
+  case BC_BOR: return MM_bor;
+  case BC_BXOR: return MM_bxor;
+  case BC_BSHL: return MM_shl;
+  case BC_BSHR: return MM_shr;
+  case BC_BNOT: return MM_bnot;
+  default: return MM__MAX;  /* BSAR/BROL/BROR: LuaJIT-only, no metamethod. */
+  }
+}
+
+/* Returns NULL when done, or the new base of a metamethod call (like
+** lj_meta_arith): 5.4 tries __band/__bor/__bxor/__shl/__shr/__bnot on the
+** first, then the second operand (__bnot gets the operand twice). */
+TValue *lj_meta_bitop(lua_State *L, TValue *ra, cTValue *rb, cTValue *rc, BCReg op)
 {
 #if LJ_HASFFI
   if (!(tviscdata(rb) || tviscdata(rc))) {
-    if (lj_i64_bitop(L, ra, rb, rc, op)) {
-      meta_i64_gccheck(L, ra);
-      return;
+    int bnum = tvisnumber(rb) || tvisi64(rb), cnum = tvisnumber(rc) || tvisi64(rc);
+    /* Two numbers: the integer path, which raises "number has no integer
+    ** representation" itself. Otherwise the metamethod comes first (PUC
+    ** luaT_trybinTM): 3.5 & obj calls obj's __band. */
+    if (bnum && cnum) {
+      if (lj_i64_bitop(L, ra, rb, rc, op)) {
+	meta_i64_gccheck(L, ra);
+	return NULL;
+      }
+    } else {
+      MMS mm = bitop_mm(op);
+      if (mm != MM__MAX) {
+	cTValue *mo = lj_meta_lookup(L, rb, mm);
+	if (tvisnil(mo)) mo = lj_meta_lookup(L, rc, mm);
+	if (!tvisnil(mo))
+	  return mmcall(L, lj_cont_ra, mo, rb, rc);
+      }
     }
     {
       cTValue *o = (tvisint(rb) || tvisi64(rb) || tvisnum(rb)) ? rc : rb;
@@ -379,6 +410,7 @@ void lj_meta_bitop(lua_State *L, TValue *ra, cTValue *rb, cTValue *rc, BCReg op)
   } else {
     setintV(ra, (int32_t)b);
   }
+  return NULL;
 #else
 #if LJ_DUALNUM
   uint32_t b = 0, c = 0;

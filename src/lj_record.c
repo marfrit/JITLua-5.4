@@ -1443,7 +1443,7 @@ static TRef rec_mm_arith(jit_State *J, RecordIndex *ix, MMS mm)
   copyTV(J->L, basev+1+LJ_FR2, &ix->tabv);
   copyTV(J->L, basev+2+LJ_FR2, &ix->keyv);
   if (!lj_record_mm_lookup(J, ix, mm)) {  /* Lookup mm on 1st operand. */
-    if (mm != MM_unm) {
+    if (mm != MM_unm && mm != MM_bnot) {
       ix->tab = ix->key;
       copyTV(J->L, &ix->tabv, &ix->keyv);
       if (lj_record_mm_lookup(J, ix, mm))  /* Lookup mm on 2nd operand. */
@@ -2883,6 +2883,12 @@ void lj_record_ins(jit_State *J)
       rc = rec_i64_bitop(J, rc, 0, rcv, NULL, IR_BNOT);
       break;
     }
+    if (!tref_isnumber(rc)) {  /* 5.4 __bnot(a, a). */
+      ix.tab = rc; ix.key = rc;
+      copyTV(J->L, &ix.tabv, rcv); copyTV(J->L, &ix.keyv, rcv);
+      rc = rec_mm_arith(J, &ix, MM_bnot);
+      break;
+    }
     rc = lj_opt_narrow_tobit(J, rc);
     rc = emitir(IRTI(IR_BNOT), rc, 0);
     break;
@@ -2894,6 +2900,11 @@ void lj_record_ins(jit_State *J)
       break;
     }
 #endif
+    if (!(tref_isnumber(rb) || tref_isi64(rb)) ||
+	!(tref_isnumber(rc) || tref_isi64(rc))) {  /* 5.4 __band/__bor/__bxor. */
+      rc = rec_mm_arith(J, &ix, (MMS)((int)MM_band + ((int)op - (int)BC_BAND)));
+      break;
+    }
     if (tref_isi64(rb) || tref_isi64(rc)) {
       rc = rec_i64_bitop(J, rb, rc, rbv, rcv,
 			 (IROp)((int)op - (int)BC_BAND + (int)IR_BAND));
@@ -2915,6 +2926,12 @@ void lj_record_ins(jit_State *J)
       rc = xrc;  /* Shift amount may have been converted. */
     }
 #endif
+    if (op != BC_BSAR &&
+	(!(tref_isnumber(rb) || tref_isi64(rb)) ||
+	 !(tref_isnumber(rc) || tref_isi64(rc)))) {  /* 5.4 __shl/__shr. */
+      rc = rec_mm_arith(J, &ix, op == BC_BSHL ? MM_shl : MM_shr);
+      break;
+    }
     /* 5.4 shifts are 64-bit even for int32 operands (1 << 40 == 2^40). */
     rc = rec_i64_shift(J, rb, rc, rbv, rcv, op);
     break;

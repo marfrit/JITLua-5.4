@@ -574,7 +574,9 @@ enum {
   /* The following are used in the standard libraries. */ \
   _(metatable) _(tostring) MMDEF_FFI(_) MMDEF_PAIRS(_) \
   /* 5.4 to-be-closed variables (appended: arith ids stay). */ \
-  _(close)
+  _(close) \
+  /* 5.4 bitwise metamethods (appended, same order as BC_BAND..). */ \
+  _(band) _(bor) _(bxor) _(shl) _(shr) _(bnot)
 
 typedef enum {
 #define MMENUM(name)	MM_##name,

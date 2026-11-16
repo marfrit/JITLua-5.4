@@ -459,6 +459,16 @@ LJLIB_CF(io_method___gc)
   return 0;
 }
 
+/* 5.4: file handles are to-be-closed values; io.lines() returns the file as
+** the generic for's 4th value, so the loop closes it on break/exit. */
+LJLIB_CF(io_method___close)
+{
+  IOFileUD *iof = io_tofilep(L);
+  if (iof->fp != NULL && (iof->type & IOFILE_TYPE_MASK) != IOFILE_TYPE_STDF)
+    io_file_close(L, iof);
+  return 0;
+}
+
 LJLIB_CF(io_method___tostring)
 {
   IOFileUD *iof = io_tofilep(L);

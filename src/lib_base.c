@@ -312,8 +312,12 @@ LJLIB_ASM(tonumber)		LJLIB_REC(.)
     char *ep;
     unsigned int neg = 0;
     unsigned long long ul;
-    if (base < 2 || base > 36)
-      lj_err_arg(L, 2, LJ_ERR_BASERNG);
+    if (base < 2 || base > 36) {
+      /* PUC 5.4 luaL_argerror carries the caller location; LuaJIT's
+      ** lj_err_arg does not, so match PUC here explicitly. */
+      luaL_where(L, 1);
+      luaL_error(L, "bad argument #2 to 'tonumber' (base out of range)");
+    }
     while (lj_char_isspace((unsigned char)(*p))) p++;
     if (*p == '-') { p++; neg = 1; } else if (*p == '+') { p++; }
     /* 5.4: with an explicit base, a "0x" prefix is not allowed (strtoull

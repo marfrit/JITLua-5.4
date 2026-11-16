@@ -100,15 +100,13 @@ static void lex_number(LexState *ls, TValue *tv)
   lj_assertLS(lj_char_isdigit(ls->c), "bad usage");
   if ((c = ls->c) == '0') {
     lex_save(ls, c);
-    do { c = lex_next(ls); } while (c == '_');
+    c = lex_next(ls);
     if ((c | 0x20) == 'x') xp = 'p';
   }
   while (lj_char_isident(ls->c) || ls->c == '.' ||
 	 ((ls->c == '-' || ls->c == '+') && (c | 0x20) == xp)) {
-    if (LJ_LIKELY(ls->c != '_')) {
-      c = ls->c;
-      lex_save(ls, ls->c);
-    }
+    c = ls->c;
+    lex_save(ls, ls->c);
     lex_next(ls);
   }
   lex_save(ls, '\0');

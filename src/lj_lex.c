@@ -438,11 +438,14 @@ static int lex_linedir(LexState *ls)
 /* -- Main lexical scanner ------------------------------------------------ */
 
 /* Get next lexical token. */
+#define lex_isident5(c) \
+  (lj_char_isalpha(c) || lj_char_isdigit(c) || (c) == '_')
+
 static LexToken lex_scan(LexState *ls, TValue *tv)
 {
   lj_buf_reset(&ls->sb);
   for (;;) {
-    if (lj_char_isident(ls->c)) {
+    if (lex_isident5(ls->c)) {
       GCstr *s;
       if (lj_char_isdigit(ls->c)) {  /* Numeric literal. */
 	lex_number(ls, tv);
@@ -451,7 +454,7 @@ static LexToken lex_scan(LexState *ls, TValue *tv)
       /* Identifier or reserved word. */
       do {
 	lex_savenext(ls);
-      } while (lj_char_isident(ls->c));
+      } while (lex_isident5(ls->c));
       s = lj_parse_keepstr(ls, ls->sb.b, sbuflen(&ls->sb));
       setstrV(ls->L, tv, s);
       if (s->reserved > 0)  /* Reserved word? */

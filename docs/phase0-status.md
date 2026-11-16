@@ -859,3 +859,14 @@ the string terminator; \u error tokens include the consumed digits/characters
 and too-large is checked before the shift (uint32 wrap used to hide
 \u{100000000}). All the literals.lua lexerror cases through the UTF-8 block now
 find their "near ..." text; corpus literals.lua advances further.
+
+## Session 27h — fork dump version 0x84
+
+BCDump format changed (KGC_I64BOX inserted before KGC_STR, KTAB_I64 added, 5.4
+bytecode), so BCDUMP_VERSION is now 0x84 (>= 0x80, the private fork range).
+The reader stays strict: any other version/flags produce the normal "cannot
+load malformed bytecode / bad precompiled chunk" error (no crash). Stock LuaJIT
+2.1 dumps are rejected instead of misparsed, and stock 2.1 rejects ours.
+tests/d54/dump_03_version.lua checks round-trip, a hand-crafted version-2 header
+rejection and the >=0x80 version byte; A/B are known-bad (PUC dump format
+differs), mode R runs it.

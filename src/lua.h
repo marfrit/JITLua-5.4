@@ -225,7 +225,7 @@ LUA_API int (lua_dump) (lua_State *L, lua_Writer writer, void *data);
 ** coroutine functions
 */
 LUA_API int  (lua_yield) (lua_State *L, int nresults);
-LUA_API int  (lua_resume) (lua_State *L, int narg);
+LUA_API int  (lua_resume) (lua_State *L, lua_State *from, int narg, int *nres);
 LUA_API int  (lua_status) (lua_State *L);
 
 /*
@@ -370,6 +370,13 @@ LUA_API lua_Integer lua_tointegerx (lua_State *L, int idx, int *isnum);
 
 /* From Lua 5.3. */
 LUA_API int lua_isyieldable (lua_State *L);
+
+/* From Lua 5.4. */
+LUA_API void *lua_newuserdatauv (lua_State *L, size_t sz, int nuvalue);
+LUA_API int lua_getiuservalue (lua_State *L, int idx, int n);
+LUA_API int lua_setiuservalue (lua_State *L, int idx, int n);
+LUA_API void lua_warning (lua_State *L, const char *msg, int tocont);
+LUA_API int lua_setcstacklimit (lua_State *L, unsigned int limit);
 
 
 struct lua_Debug {

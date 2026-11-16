@@ -2927,6 +2927,10 @@ static void parse_return(LexState *ls, int eflags)
   if ((fs->flags & PROTO_CHILD) || fs->ntbc)
     bcemit_AJ(fs, BC_UCLO, 0, 0);  /* May need to close upvalues/<close> first. */
   bcemit_INS(fs, ins);
+  /* Lua 5.4: a return must be the last statement of a block. */
+  if (ls->tok == ';') lj_lex_next(ls);  /* One separator is allowed. */
+  if (!parse_isend(ls->tok))
+    err_syntax(ls, LJ_ERR_XSYNTAX);
 }
 
 /* Parse 'break' statement. */

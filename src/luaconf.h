@@ -35,7 +35,7 @@
 #define LUA_LMULTILIB	"lib"
 #endif
 #define LUA_LROOT	"/usr/local"
-#define LUA_LUADIR	"/lua/5.1/"
+#define LUA_LUADIR	"/lua/5.4/"
 
 #ifdef LUA_ROOT
 #define LUA_JROOT	LUA_ROOT
@@ -60,8 +60,12 @@
 #define LUA_LCPATH1	";" LUA_LCDIR "?.so"
 #define LUA_LCPATH2	";" LUA_LCDIR "loadall.so"
 
-#define LUA_PATH_DEFAULT	"./?.lua" LUA_JPATH LUA_LLPATH LUA_RLPATH
-#define LUA_CPATH_DEFAULT	"./?.so" LUA_LCPATH1 LUA_RCPATH LUA_LCPATH2
+#define LUA_PATH_DEFAULT \
+  LUA_LLDIR "?.lua;" LUA_LLDIR "?/init.lua;" \
+  LUA_LCDIR "?.lua;" LUA_LCDIR "?/init.lua;" \
+  "./?.lua;./?/init.lua"  /* 5.4 layout: no luajit-2.1 dir */
+#define LUA_CPATH_DEFAULT \
+  LUA_LCDIR "?.so;" LUA_LCDIR "loadall.so;" "./?.so"
 #endif
 
 /* Environment variable names for path overrides and initialization code. */

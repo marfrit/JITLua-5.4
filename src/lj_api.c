@@ -9,6 +9,9 @@
 #define lj_api_c
 #define LUA_CORE
 
+#include <stdio.h>
+#include <string.h>
+
 #include "lj_obj.h"
 #include "lj_gc.h"
 #include "lj_err.h"
@@ -91,6 +94,24 @@ static GCtab *getcurrenv(lua_State *L)
 {
   GCfunc *fn = curr_func(L);
   return fn->c.gct == ~LJ_TFUNC ? tabref(fn->c.env) : tabref(L->env);
+}
+
+/* Lua 5.4 user values. The GCudata layout has one GCRef (env) available for
+** user values. The existing unused2 padding byte records the shape:
+** bit 0 = nuvalue (0 or 1), bit 1 = a value is present (otherwise nil).
+** Objects of UDTYPE_USERDATA are only created by lua_newuserdatauv; internal
+** userdata types have no user values. env always holds a valid GC object
+** (the current environment when the value is nil), so GC marking stays safe.
+*/
+#define lj_uvcount(ud) \
+  ((ud)->udtype == UDTYPE_USERDATA ? ((ud)->unused2 & 1) : 0)
+#define lj_uvhas(ud) \
+  ((ud)->udtype == UDTYPE_USERDATA ? ((ud)->unused2 & 2) : 0)
+
+static void lj_api_set_uv(TValue *o, GCudata *ud)
+{
+  GCobj *e = gcref(ud->env);
+  if (e != NULL) setgcVraw(o, e, ~e->gch.gct); else setnilV(o);
 }
 
 /* -- Miscellaneous API functions ----------------------------------------- */
@@ -893,16 +914,26 @@ LUA_API lua_State *lua_newthread(lua_State *L)
   return L1;
 }
 
-LUA_API void *lua_newuserdata(lua_State *L, size_t size)
+LUA_API void *lua_newuserdatauv(lua_State *L, size_t size, int nuvalue)
 {
   GCudata *ud;
+  if (nuvalue < 0)
+    lj_err_callermsg(L, "lua_newuserdatauv: invalid user value count");
+  if (nuvalue > 1)
+    lj_err_callermsg(L, "lua_newuserdatauv: more than one user value not supported");
   lj_gc_check(L);
   if (size > LJ_MAX_UDATA)
     lj_err_msg(L, LJ_ERR_UDATAOV);
   ud = lj_udata_new(L, (MSize)size, getcurrenv(L));
+  ud->unused2 = (uint8_t)(nuvalue ? 1 : 0);  /* nuvalue 1 starts as nil. */
   setudataV(L, L->top, ud);
   incr_top(L);
   return uddata(ud);
+}
+
+LUA_API void *lua_newuserdata(lua_State *L, size_t size)
+{
+  return lua_newuserdatauv(L, size, 1);
 }
 
 LUA_API void lua_concat(lua_State *L, int n)
@@ -927,6 +958,68 @@ LUA_API void lua_concat(lua_State *L, int n)
     incr_top(L);
   }
   /* else n == 1: nothing to do. */
+}
+
+/* -- Warnings ------------------------------------------------------------ */
+
+/* PUC 5.4 default warn handler state machine, stored in the registry because
+** LuaJIT has no global_State warnf fields here: 0 = off, 1 = on, 2 = continuing
+** a message. lua_warning never dispatches to a Lua `warn` replacement (PUC: the
+** C API hook is independent of the library function). */
+#define WARN_REG_STATE	"_LJ_WARN_STATE"
+
+static int lj_api_warn_state(lua_State *L)
+{
+  int st = 0;
+  lua_pushliteral(L, WARN_REG_STATE);
+  lua_rawget(L, LUA_REGISTRYINDEX);
+  if (lua_isnumber(L, -1)) st = (int)lua_tointeger(L, -1);
+  lua_pop(L, 1);
+  return st;
+}
+
+static void lj_api_warn_setstate(lua_State *L, int st)
+{
+  lua_pushliteral(L, WARN_REG_STATE);
+  lua_pushinteger(L, st);
+  lua_rawset(L, LUA_REGISTRYINDEX);
+}
+
+/* The default 5.4 warning emitters (lauxlib warnfon/warnfcont semantics). */
+LJ_FUNC void lj_api_warn_emit(lua_State *L, const char *msg, int tocont)
+{
+  int st = lj_api_warn_state(L);
+  if (msg == NULL) msg = "";
+  if (!tocont && msg[0] == '@') {  /* control message */
+    if (strcmp(msg, "@off") == 0) { lj_api_warn_setstate(L, 0); return; }
+    if (strcmp(msg, "@on") == 0) { lj_api_warn_setstate(L, 1); return; }
+    return;  /* unknown control: ignored */
+  }
+  if (st == 0) return;  /* warnings off */
+  if (st != 2) fputs("Lua warning: ", stderr);  /* start a new warning */
+  fputs(msg, stderr);
+  if (tocont) {
+    lj_api_warn_setstate(L, 2);
+  } else {
+    fputc('\n', stderr);
+    fflush(stderr);
+    lj_api_warn_setstate(L, 1);
+  }
+}
+
+LUA_API void lua_warning(lua_State *L, const char *msg, int tocont)
+{
+  lj_api_warn_emit(L, msg, tocont);
+}
+
+#ifndef LUAI_MAXCCALLS
+#define LUAI_MAXCCALLS 200
+#endif
+
+LUA_API int lua_setcstacklimit(lua_State *L, unsigned int limit)
+{
+  UNUSED(L); UNUSED(limit);
+  return LUAI_MAXCCALLS;  /* LuaJIT keeps its own stack limits */
 }
 
 /* -- Object getters ------------------------------------------------------ */
@@ -1016,7 +1109,20 @@ LUA_API void lua_getfenv(lua_State *L, int idx)
   if (tvisfunc(o)) {
     settabV(L, L->top, tabref(funcV(o)->c.env));
   } else if (tvisudata(o)) {
-    settabV(L, L->top, tabref(udataV(o)->env));
+    GCudata *ud = udataV(o);
+    if (ud->udtype == UDTYPE_USERDATA) {
+      if (lj_uvcount(ud) == 1 && lj_uvhas(ud))
+	lj_api_set_uv(L->top, ud);  /* first user value, any GC type */
+      else {  /* no user value: the 5.1 fenv view, a table env if any */
+	GCobj *e = gcref(ud->env);
+	if (e != NULL && e->gch.gct == ~LJ_TTAB)
+	  settabV(L, L->top, gco2tab(e));
+	else
+	  setnilV(L->top);
+      }
+    } else {
+      settabV(L, L->top, tabref(ud->env));
+    }
   } else if (tvisthread(o)) {
     settabV(L, L->top, tabref(threadV(o)->env));
   } else {
@@ -1214,7 +1320,10 @@ LUA_API int lua_setfenv(lua_State *L, int idx)
   if (tvisfunc(o)) {
     setgcref(funcV(o)->c.env, obj2gco(t));
   } else if (tvisudata(o)) {
-    setgcref(udataV(o)->env, obj2gco(t));
+    GCudata *ud = udataV(o);
+    setgcref(ud->env, obj2gco(t));
+    if (ud->udtype == UDTYPE_USERDATA && (ud->unused2 & 1))
+      ud->unused2 = 3;  /* declared one user value: present now */
   } else if (tvisthread(o)) {
     setgcref(threadV(o)->env, obj2gco(t));
   } else {
@@ -1224,6 +1333,55 @@ LUA_API int lua_setfenv(lua_State *L, int idx)
   lj_gc_objbarrier(L, gcV(o), t);
   L->top--;
   return 1;
+}
+
+LUA_API int lua_getiuservalue(lua_State *L, int idx, int n)
+{
+  cTValue *o = index2adr(L, idx);
+  lj_checkapi_slot(1);
+  GCudata *ud;
+  lj_checkapi(tvisudata(o), "stack slot %d is not a userdata", idx);
+  ud = udataV(o);
+  if (n <= 0 || n > lj_uvcount(ud)) {
+    setnilV(L->top);
+    incr_top(L);
+    return LUA_TNONE;
+  }
+  if (lj_uvhas(ud))
+    lj_api_set_uv(L->top, ud);
+  else
+    setnilV(L->top);
+  incr_top(L);
+  return lua_type(L, -1);
+}
+
+LUA_API int lua_setiuservalue(lua_State *L, int idx, int n)
+{
+  cTValue *o = index2adr(L, idx);
+  GCudata *ud;
+  int res = 0;
+  lj_checkapi_slot(1);
+  lj_checkapi(tvisudata(o), "stack slot %d is not a userdata", idx);
+  ud = udataV(o);
+  if (n == 1 && lj_uvcount(ud) == 1) {
+    cTValue *v = L->top-1;
+    if (tvisnil(v)) {
+      GCobj *e = obj2gco(getcurrenv(L));
+      setgcref(ud->env, e);  /* Keep a GC anchor for the absent value. */
+      ud->unused2 = 1;
+      lj_gc_objbarrier(L, ud, e);
+      res = 1;
+    } else if (tvisgcv(v)) {
+      GCobj *e = gcV(v);
+      setgcref(ud->env, e);
+      ud->unused2 = 3;
+      lj_gc_objbarrier(L, ud, e);
+      res = 1;
+    }
+    /* Non-GC values cannot be stored in the single GCRef slot: res stays 0. */
+  }
+  L->top--;  /* PUC always pops the value, also for an out-of-range n. */
+  return res;
 }
 
 LUA_API const char *lua_setupvalue(lua_State *L, int idx, int n)
@@ -1374,12 +1532,21 @@ LUA_API int lua_yield(lua_State *L, int nresults)
   return 0;  /* unreachable */
 }
 
-LUA_API int lua_resume(lua_State *L, int nargs)
+/* Lua 5.4 signature: from is the resuming thread (ignored here; LuaJIT resumes
+** on the state itself) and *nres receives the number of results. */
+LUA_API int lua_resume(lua_State *L, lua_State *from, int nargs, int *nres)
 {
-  if (L->cframe == NULL && L->status <= LUA_YIELD)
-    return lj_vm_resume(L,
+  int st;
+  UNUSED(from);
+  if (nres) *nres = 0;
+  if (L->cframe == NULL && L->status <= LUA_YIELD) {
+    st = lj_vm_resume(L,
       L->status == LUA_OK ? api_call_base(L, nargs) : L->top - nargs,
       0, 0);
+    if (nres && (st == LUA_OK || st == LUA_YIELD))
+      *nres = (int)(L->top - L->base);
+    return st;
+  }
   L->top = L->base;
   setstrV(L, L->top, lj_err_str(L, LJ_ERR_COSUSP));
   incr_top(L);

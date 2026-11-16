@@ -765,6 +765,56 @@ Bench (JIT arm, median of 3): arm64 B1 14.9 ms (FFI 15.2), B2 1358.6 ms /
 7327.7; FFI 2589.7, PUC 2151.5), B2b 675.4 (was 1135.4; FFI 612.6, PUC
 729.7), B3 47.7 / 967.3 ms. Checksums equal (B2 4047905256 now stable).
 
+## Session 27 — C API 5.4 landed after review; main thawed and merged with step 3 + <close>
+
+origin/main fast-forwarded to 18af030f (step 3 int64 JIT, <close>/__close in the
+VM, i64 part 2, all library work); this tree was rebased onto it and the C API
+work sits on top.
+
+C API (reviewed by a read-only reviewer; blockers fixed):
+- lua_newuserdatauv/getiuservalue/setiuservalue: single user value uses
+  GCudata.env with unused2 bit0=nuvalue, bit1=value-present; nuvalue 0/1 only,
+  >1 aborts with a clear message (GC layout change needed for arrays); non-GC
+  user values cannot be stored in the GCRef slot (return 0, documented).
+- lua_getfenv returns the table env for nuvalue=0/userdata with no value (no
+  mistagged objects); lua_setfenv only marks the value present when the object
+  declared one; debug.getuservalue/setuservalue now route through the new APIs.
+- lua_warning/warn(): PUC state machine (off/on/continuing) in the registry,
+  "Lua warning: " prefix and newline, no dispatch to a Lua warn replacement
+  (the old recursion blocker), controls only in the default handler; warn()
+  requires at least one string argument and has no boolean tocont; auxlib
+  default is warnings OFF like PUC luaL_newstate; lua_setcstacklimit returns
+  LUAI_MAXCCALLS (200); lua_getiuservalue checks stack slots.
+- luaL_addgsub/buffsub/pushfail added (addgsub guards the empty pattern).
+- Not done: lua_resume's 5.4 signature (lua.h + one definition + external call
+  sites; in-tree has only the definition), lua_setwarnf/lua_WarnFunction,
+  userdata arrays >1. Tests: tests/capi/test_capi.c now 75 checks.
+
+## Session 27b — luaconf default paths = PUC 5.4.7
+
+luaconf.h now targets /lua/5.4 (/usr/local/share/lua/5.4, /usr/local/lib/
+lua/5.4) and the LUA_PATH_DEFAULT/LUA_CPATH_DEFAULT ordering matches PUC build
+defaults exactly (share, lib/lua, ./, ./?/init.lua; cpath lib/lua/5.4 plus
+./?.so), dropping the luajit-2.1 share dir. Bare `luajit -e 'print(package.path,
+package.cpath)'` diffs empty against the PUC build. jit.* module lookup now has
+no luajit-2.1 default (they were unavailable anyway; MISSION extension note).
+
+## Session 27c — parser: return must be the last statement of a block
+
+`return;;` loaded before (empty statements after return were accepted). A return
+now allows exactly one optional `;` and then requires parse_isend (end/else/
+elseif/until/eof); the corpus errors.lua line58 case works. This is the Lua 5.4
+grammar rule that PUC enforces via luaY_checknext/luaK_return.
+
+## Session 27d — lexer escape-error token text: attempt reverted
+
+PUC's lexerror corpus cases need the consumed escape text in the "near '...'"
+token (e.g. \x5"). The lexer builds the *parsed string* in ls->sb, so appending
+the escape bytes corrupts valid literals (literals.lua line32 broke). A correct
+fix must collect the source chars in a side buffer and append only on the error
+path (x: '\\','x',up to two digits + offending char; u: '\\','u','{',digits +
+offending char). Reverted to keep the tree green; literals.lua stays known-bad.
+
 ## Session 29 (branch i64-keys) — int64 table keys
 
 Integral keys live in the hash part as canonical integers (int32 inline,

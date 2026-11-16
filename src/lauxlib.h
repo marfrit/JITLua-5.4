@@ -156,6 +156,10 @@ LUALIB_API void (luaL_addlstring) (luaL_Buffer *B, const char *s, size_t l);
 LUALIB_API void (luaL_addstring) (luaL_Buffer *B, const char *s);
 LUALIB_API void (luaL_addvalue) (luaL_Buffer *B);
 LUALIB_API void (luaL_pushresult) (luaL_Buffer *B);
+LUALIB_API void (luaL_addgsub) (luaL_Buffer *B, const char *s,
+                                  const char *p, const char *r);
+#define luaL_buffsub(B,s)	((B)->p -= (s))
+#define luaL_pushfail(L)	lua_pushnil(L)
 
 
 /* }====================================================== */

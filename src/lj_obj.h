@@ -391,9 +391,11 @@ typedef struct GCproto {
   uint8_t numparams;	/* Number of parameters. */
   uint8_t framesize;	/* Fixed frame size. */
   MSize sizebc;		/* Number of bytecode instructions. */
-#if LJ_GC64
-  uint32_t unused_gc64;
-#endif
+  /* 5.4 debug view: 0 = no _ENV upvalue, else 1 + the position at which PUC
+  ** would have created the _ENV upvalue (first global access, in upvalue
+  ** creation order). The debug API inserts a synthesized "_ENV" there,
+  ** backed by fn->l.env; the bytecode has no such upvalue (GGET model). */
+  uint32_t envuv;
   GCRef gclist;
   MRef k;		/* Split constant array (points to the middle). */
   MRef uv;		/* Upvalue list. local slot|0x8000 or parent uv idx. */
@@ -419,6 +421,7 @@ typedef struct GCproto {
 #define PROTO_NOJIT		0x08	/* JIT disabled for this function. */
 #define PROTO_ILOOP		0x10	/* Patched bytecode with ILOOP etc. */
 #define PROTO_BITOP		0x80	/* Uses bit operator bytecodes. */
+#define PROTO_DUMP_ENVUV	0x08	/* Dump-only flag: envuv follows the header. */
 /* Only used during parsing. */
 #define PROTO_HAS_RETURN	0x20	/* Already emitted a return. */
 #define PROTO_FIXUP_RETURN	0x40	/* Need to fixup emitted returns. */

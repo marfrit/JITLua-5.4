@@ -30,6 +30,9 @@ typedef struct lj_Debug {
 } lj_Debug;
 
 LJ_FUNC cTValue *lj_debug_frame(lua_State *L, int level, int *size);
+LJ_FUNC uint32_t lj_debug_envuv(GCfunc *fn);
+LJ_FUNC uint32_t lj_debug_nupvalues(GCfunc *fn);
+LJ_FUNC void lj_debug_uvjoin(lua_State *L, GCfunc *fn1, GCRef *r1, int e1, GCfunc *fn2, GCRef *r2, int e2);
 LJ_FUNC void lj_debug_tailmark(lua_State *L, MSize ofs, int tail);
 LJ_FUNC int lj_debug_istailcall(lua_State *L, cTValue *frame);
 LJ_FUNC void lj_debug_tailfree(global_State *g, lua_State *L);

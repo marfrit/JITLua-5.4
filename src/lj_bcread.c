@@ -175,6 +175,7 @@ static const void *bcread_varinfo(GCproto *pt)
 {
   const uint8_t *p = proto_uvinfo(pt);
   MSize n = pt->sizeuv;
+  MSize envuv;
   if (n) while (*p++ || --n) ;
   return p;
 }
@@ -334,6 +335,8 @@ GCproto *lj_bcread_proto(LexState *ls)
   numparams = bcread_byte(ls);
   framesize = bcread_byte(ls);
   sizeuv = bcread_byte(ls);
+  envuv = (flags & PROTO_DUMP_ENVUV) ? bcread_uleb128(ls) : 0;  /* 5.4 _ENV view. */
+  flags &= ~PROTO_DUMP_ENVUV;
   sizekgc = bcread_uleb128(ls);
   sizekn = bcread_uleb128(ls);
   sizebc = bcread_uleb128(ls) + 1;
@@ -367,6 +370,7 @@ GCproto *lj_bcread_proto(LexState *ls)
   pt->sizept = sizept;
   pt->sizeuv = (uint8_t)sizeuv;
   pt->flags = (uint8_t)flags;
+  pt->envuv = envuv;
   pt->trace = 0;
   setgcref(pt->chunkname, obj2gco(ls->chunkname));
 

@@ -1178,18 +1178,32 @@ LUA_API const char *lua_getupvalue(lua_State *L, int idx, int n)
   GCobj *o;
   const char *name = lj_debug_uvnamev(index2adr(L, idx), (uint32_t)(n-1), &val, &o);
   if (name) {
-    copyTV(L, L->top, val);
+    if (val == NULL)  /* 5.4 debug view: _ENV is the function's env table. */
+      settabV(L, L->top, tabref(gco2func(o)->l.env));
+    else
+      copyTV(L, L->top, val);
     incr_top(L);
   }
   return name;
 }
 
+/* Upvalue reference by debug index; *isenv for the synthesized _ENV. */
+static GCRef *api_uvref(GCfunc *fn, uint32_t n, int *isenv)
+{
+  uint32_t ei = lj_debug_envuv(fn);
+  *isenv = 0;
+  if (n == ei) { *isenv = 1; return &fn->l.env; }
+  if (n > ei) n--;
+  return &fn->l.uvptr[n];
+}
+
 LUA_API void *lua_upvalueid(lua_State *L, int idx, int n)
 {
   GCfunc *fn = funcV(index2adr(L, idx));
+  int isenv;
   n--;
-  lj_checkapi((uint32_t)n < fn->l.nupvalues, "bad upvalue %d", n);
-  return isluafunc(fn) ? (void *)gcref(fn->l.uvptr[n]) :
+  lj_checkapi((uint32_t)n < lj_debug_nupvalues(fn), "bad upvalue %d", n);
+  return isluafunc(fn) ? (void *)gcref(*api_uvref(fn, (uint32_t)n, &isenv)) :
 			 (void *)&fn->c.upvalue[n];
 }
 
@@ -1197,13 +1211,16 @@ LUA_API void lua_upvaluejoin(lua_State *L, int idx1, int n1, int idx2, int n2)
 {
   GCfunc *fn1 = funcV(index2adr(L, idx1));
   GCfunc *fn2 = funcV(index2adr(L, idx2));
+  GCRef *r1, *r2;
+  int e1, e2;
   n1--; n2--;
   lj_checkapi(isluafunc(fn1), "stack slot %d is not a Lua function", idx1);
   lj_checkapi(isluafunc(fn2), "stack slot %d is not a Lua function", idx2);
-  lj_checkapi((uint32_t)n1 < fn1->l.nupvalues, "bad upvalue %d", n1+1);
-  lj_checkapi((uint32_t)n2 < fn2->l.nupvalues, "bad upvalue %d", n2+1);
-  setgcrefr(fn1->l.uvptr[n1], fn2->l.uvptr[n2]);
-  lj_gc_objbarrier(L, fn1, gcref(fn1->l.uvptr[n1]));
+  lj_checkapi((uint32_t)n1 < lj_debug_nupvalues(fn1), "bad upvalue %d", n1+1);
+  lj_checkapi((uint32_t)n2 < lj_debug_nupvalues(fn2), "bad upvalue %d", n2+1);
+  r1 = api_uvref(fn1, (uint32_t)n1, &e1);
+  r2 = api_uvref(fn2, (uint32_t)n2, &e2);
+  lj_debug_uvjoin(L, fn1, r1, e1, fn2, r2, e2);
 }
 
 LUALIB_API void *luaL_testudata(lua_State *L, int idx, const char *tname)
@@ -1405,8 +1422,14 @@ LUA_API const char *lua_setupvalue(lua_State *L, int idx, int n)
   name = lj_debug_uvnamev(f, (uint32_t)(n-1), &val, &o);
   if (name) {
     L->top--;
-    copyTV(L, val, L->top);
-    lj_gc_barrier(L, o, L->top);
+    if (val == NULL) {  /* 5.4 debug view: set the env (a table here). */
+      if (!tvistab(L->top)) return NULL;
+      setgcref(gco2func(o)->l.env, obj2gco(tabV(L->top)));
+      lj_gc_objbarrier(L, o, tabV(L->top));
+    } else {
+      copyTV(L, val, L->top);
+      lj_gc_barrier(L, o, L->top);
+    }
   }
   return name;
 }

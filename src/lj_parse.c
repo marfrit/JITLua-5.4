@@ -159,6 +159,7 @@ typedef struct FuncState {
   BCLine minline, maxline;	/* Min/max line number. */
   MSize vbase;			/* Base of variable stack for this function. */
   uint8_t flags;		/* Prototype flags. */
+  uint8_t envuv;		/* 5.4 _ENV upvalue position + 1, 0 = none. */
   uint8_t numparams;		/* Number of parameters. */
   uint8_t framesize;		/* Fixed frame size. */
   uint8_t nuv;			/* Number of upvalues */
@@ -493,6 +494,7 @@ static void expr_discharge(FuncState *fs, ExpDesc *e)
   if (e->k == VUPVAL) {
     ins = BCINS_AD(BC_UGET, 0, e->u.s.info);
   } else if (e->k == VGLOBAL) {
+    fs_markenv(fs);
     ins = BCINS_AD(BC_GGET, 0, const_str(fs, e));
   } else if (e->k == VINDEXED) {
     BCReg rc = e->u.s.aux;
@@ -694,6 +696,7 @@ static void bcemit_store(FuncState *fs, ExpDesc *var, ExpDesc *e)
       ins = BCINS_AD(BC_USETV, var->u.s.info, expr_toanyreg(fs, e));
   } else if (var->k == VGLOBAL) {
     BCReg ra = expr_toanyreg(fs, e);
+    fs_markenv(fs);
     ins = BCINS_AD(BC_GSET, ra, const_str(fs, var));
   } else {
     BCReg ra, rc;
@@ -1884,6 +1887,7 @@ static GCproto *fs_finish(LexState *ls)
   pt->sizept = (MSize)sizept;
   pt->trace = 0;
   pt->flags = (uint8_t)(fs->flags & ~(PROTO_HAS_RETURN|PROTO_FIXUP_RETURN));
+  pt->envuv = fs->envuv;
   pt->numparams = fs->numparams;
   pt->framesize = fs->framesize;
   setgcref(pt->chunkname, obj2gco(ls->chunkname));
@@ -1908,6 +1912,15 @@ static GCproto *fs_finish(LexState *ls)
 }
 
 /* Initialize a new FuncState. */
+/* 5.4 debug view: note where PUC would create the _ENV upvalue (first
+** global access in this function and, like PUC's upvalue resolution, in
+** every enclosing function that has none yet). */
+static void fs_markenv(FuncState *fs)
+{
+  for (; fs && !fs->envuv; fs = fs->prev)
+    fs->envuv = (uint8_t)(fs->nuv + 1);
+}
+
 static void fs_init(LexState *ls, FuncState *fs)
 {
   lua_State *L = ls->L;
@@ -1917,6 +1930,7 @@ static void fs_init(LexState *ls, FuncState *fs)
   fs->L = L;
   fs->pc = 0;
   fs->lasttarget = 0;
+  fs->envuv = 0;
   fs->jpc = NO_JMP;
   fs->freereg = 0;
   fs->nkgc = 0;
@@ -3368,6 +3382,7 @@ GCproto *lj_parse(LexState *ls)
   ls->level = 0;
   memset(ls->vhash, 0xff, sizeof(ls->vhash));
   fs_init(ls, &fs);
+  fs.envuv = 1;  /* 5.4: a main chunk always has _ENV as its first upvalue. */
   fs.maxline = fs.minline = 0;
   fs.numparams = 0;
   fs.bcbase = NULL;

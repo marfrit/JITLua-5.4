@@ -293,12 +293,67 @@ const char *lj_debug_uvname(GCproto *pt, uint32_t idx)
 }
 
 /* Get name and value of upvalue. */
+/* -- 5.4 debug view of _ENV ---------------------------------------------- */
+
+/* Index of the synthesized "_ENV" upvalue of a Lua function, or ~0u. The
+** bytecode resolves globals through fn->l.env (GGET), so the debug API
+** presents that env table as an upvalue named _ENV at the position PUC
+** would have it (pt->envuv, recorded by the parser); the real upvalues
+** after it shift up by one.
+*/
+uint32_t lj_debug_envuv(GCfunc *fn)
+{
+  if (isluafunc(fn)) {
+    uint32_t e = funcproto(fn)->envuv;
+    if (e) return e-1;
+  }
+  return ~0u;
+}
+
+/* debug.upvaluejoin(f1, n1, f2, n2) with the _ENV view: a real upvalue
+** pair shares the upvalue object; an env side copies the table (per-closure
+** env, not a shared cell): fn1's env takes fn2's upvalue value if that is a
+** table, a real upvalue of fn1 takes fn2's env table as its value. */
+void lj_debug_uvjoin(lua_State *L, GCfunc *fn1, GCRef *r1, int e1,
+		     GCfunc *fn2, GCRef *r2, int e2)
+{
+  if (!e1 && !e2) {
+    setgcrefr(*r1, *r2);
+    lj_gc_objbarrier(L, fn1, gcref(*r1));
+  } else if (e1) {
+    GCtab *t = NULL;
+    if (e2) t = tabref(*r2);
+    else { cTValue *v = uvval(&gcref(*r2)->uv); if (tvistab(v)) t = tabV(v); }
+    if (t) { setgcref(*r1, obj2gco(t)); lj_gc_objbarrier(L, fn1, t); }
+  } else {  /* Real upvalue of fn1 takes fn2's env table as its value. */
+    GCupval *uv = &gcref(*r1)->uv;
+    settabV(L, uvval(uv), tabref(*r2));
+    lj_gc_barrier(L, uv, uvval(uv));
+  }
+  UNUSED(fn2);
+}
+
+/* Number of upvalues as the debug API counts them (incl. _ENV). */
+uint32_t lj_debug_nupvalues(GCfunc *fn)
+{
+  return fn->c.nupvalues + (lj_debug_envuv(fn) != ~0u);
+}
+
+/* Get name and value of an upvalue by debug index. For the synthesized
+** _ENV upvalue *tvp is NULL (the callers read/write fn->l.env). */
 const char *lj_debug_uvnamev(cTValue *o, uint32_t idx, TValue **tvp, GCobj **op)
 {
   if (tvisfunc(o)) {
     GCfunc *fn = funcV(o);
     if (isluafunc(fn)) {
       GCproto *pt = funcproto(fn);
+      uint32_t ei = lj_debug_envuv(fn);
+      if (idx == ei) {
+	*tvp = NULL;
+	*op = obj2gco(fn);
+	return "_ENV";
+      }
+      if (idx > ei) idx--;
       if (idx < pt->sizeuv) {
 	GCobj *uvo = gcref(fn->l.uvptr[idx]);
 	*tvp = uvval(&uvo->uv);
@@ -561,7 +616,7 @@ int lj_debug_getinfo(lua_State *L, const char *what, lj_Debug *ar, int ext)
     } else if (*what == 'l') {
       ar->currentline = frame ? debug_frameline(L, fn, nextframe) : -1;
     } else if (*what == 'u') {
-      ar->nups = fn->c.nupvalues;
+      ar->nups = (int)lj_debug_nupvalues(fn);  /* 5.4 view: incl. _ENV. */
       if (ext) {
 	if (isluafunc(fn)) {
 	  GCproto *pt = funcproto(fn);

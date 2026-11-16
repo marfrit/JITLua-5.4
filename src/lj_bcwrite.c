@@ -350,14 +350,16 @@ static void bcwrite_proto(BCWriteCtx *ctx, GCproto *pt)
 
   /* Start writing the prototype info to a buffer. */
   p = lj_buf_need(&ctx->sb,
-		  5+4+6*5+(pt->sizebc-1)*(MSize)sizeof(BCIns)+pt->sizeuv*2);
+		  5+4+7*5+(pt->sizebc-1)*(MSize)sizeof(BCIns)+pt->sizeuv*2);
   p += 5;  /* Leave room for final size. */
 
   /* Write prototype header. */
-  *p++ = (pt->flags & (PROTO_CHILD|PROTO_VARARG|PROTO_FFI|PROTO_BITOP));
+  *p++ = (pt->flags & (PROTO_CHILD|PROTO_VARARG|PROTO_FFI|PROTO_BITOP)) |
+	 (pt->envuv ? PROTO_DUMP_ENVUV : 0);
   *p++ = pt->numparams;
   *p++ = pt->framesize;
   *p++ = pt->sizeuv;
+  if (pt->envuv) p = lj_strfmt_wuleb128(p, pt->envuv);  /* 5.4 _ENV view. */
   p = lj_strfmt_wuleb128(p, pt->sizekgc);
   p = lj_strfmt_wuleb128(p, pt->sizekn);
   p = lj_strfmt_wuleb128(p, pt->sizebc-1);

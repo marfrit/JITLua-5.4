@@ -386,7 +386,7 @@ LUA_API int lua_absindex(lua_State *L, int idx)
 LUA_API int lua_isinteger(lua_State *L, int idx)
 {
   cTValue *o = index2adr(L, idx);
-  return tvisint(o) || tvisi64(o);  /* ADR-001b: boxed int64 is an integer */
+  return tvisint(o) || tvisi47w(o) || tvisi64(o);  /* inline/widened/boxed int */
 }
 
 LUA_API void lua_geti(lua_State *L, int idx, lua_Integer n)
@@ -521,6 +521,9 @@ LUA_API lua_Number lua_tonumberx(lua_State *L, int idx, int *ok)
   if (LJ_LIKELY(tvisnumber(o))) {
     if (ok) *ok = 1;
     return numberVnum(o);
+  } else if (tvisi47w(o)) {  /* widened inline int as a double */
+    if (ok) *ok = 1;
+    return (lua_Number)intV47(o);
   } else if (tvisi64(o)) {  /* ADR-001b: boxed int64 as a double */
     if (ok) *ok = 1;
     return (lua_Number)i64V(o);
@@ -535,13 +538,10 @@ LUA_API lua_Number lua_tonumberx(lua_State *L, int idx, int *ok)
 
 LUALIB_API lua_Number luaL_checknumber(lua_State *L, int idx)
 {
-  cTValue *o = index2adr(L, idx);
-  TValue tmp;
-  if (LJ_LIKELY(tvisnumber(o)))
-    return numberVnum(o);
-  else if (!(tvisstr(o) && lj_strscan_num(strV(o), &tmp)))
-    lj_err_argt(L, idx, LUA_TNUMBER);
-  return numV(&tmp);
+  int ok;
+  lua_Number n = lua_tonumberx(L, idx, &ok);
+  if (!ok) lj_err_argt(L, idx, LUA_TNUMBER);
+  return n;
 }
 
 LUALIB_API lua_Number luaL_optnumber(lua_State *L, int idx, lua_Number def)
@@ -615,42 +615,21 @@ LUA_API lua_Integer lua_tointegerx(lua_State *L, int idx, int *ok)
 
 LUALIB_API lua_Integer luaL_checkinteger(lua_State *L, int idx)
 {
-  cTValue *o = index2adr(L, idx);
-  TValue tmp;
-  lua_Number n;
-  if (LJ_LIKELY(tvisint(o))) {
-    return intV(o);
-  } else if (LJ_LIKELY(tvisnum(o))) {
-    n = numV(o);
-  } else {
-    if (!(tvisstr(o) && lj_strscan_number(strV(o), &tmp)))
-      lj_err_argt(L, idx, LUA_TNUMBER);
-    if (tvisint(&tmp))
-      return (lua_Integer)intV(&tmp);
-    n = numV(&tmp);
-  }
-  return lj_num2int_type(n, lua_Integer);
+  int ok;
+  lua_Integer n = lua_tointegerx(L, idx, &ok);
+  if (!ok) lj_err_argt(L, idx, LUA_TNUMBER);
+  return n;
 }
 
 LUALIB_API lua_Integer luaL_optinteger(lua_State *L, int idx, lua_Integer def)
 {
-  cTValue *o = index2adr(L, idx);
-  TValue tmp;
-  lua_Number n;
-  if (LJ_LIKELY(tvisint(o))) {
-    return intV(o);
-  } else if (LJ_LIKELY(tvisnum(o))) {
-    n = numV(o);
-  } else if (tvisnil(o)) {
-    return def;
-  } else {
-    if (!(tvisstr(o) && lj_strscan_number(strV(o), &tmp)))
-      lj_err_argt(L, idx, LUA_TNUMBER);
-    if (tvisint(&tmp))
-      return (lua_Integer)intV(&tmp);
-    n = numV(&tmp);
+  int ok;
+  lua_Integer n = lua_tointegerx(L, idx, &ok);
+  if (!ok) {
+    if (tvisnil(index2adr(L, idx))) return def;
+    lj_err_argt(L, idx, LUA_TNUMBER);
   }
-  return lj_num2int_type(n, lua_Integer);
+  return n;
 }
 
 LUA_API int lua_toboolean(lua_State *L, int idx)

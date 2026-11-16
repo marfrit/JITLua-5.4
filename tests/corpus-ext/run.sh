@@ -113,7 +113,9 @@ run_suite() {
         puc) cmd="$REF $s"; cpath=$CPATH_PUC ;;
         joff) printf '#!/bin/sh\nexec "%s" -joff %s "$@"\n' "$LUAJIT" "$pre" > "$OUT/lua-joff"; cmd="$OUT/lua-joff $s"; cpath=$CPATH_OURS ;;
         jon) printf '#!/bin/sh\nexec "%s" -jon %s "$@"\n' "$LUAJIT" "$pre" > "$OUT/lua-jon"; cmd="$OUT/lua-jon $s"; cpath=$CPATH_OURS ;;
-        gcs) printf '#!/bin/sh\nexec "%s" -jon %s -e %s "$@"\n' "$LUAJIT" "$pre" "'collectgarbage(\"setpause\",0)'" > "$OUT/lua-gcs"; cmd="$OUT/lua-gcs $s"; cpath=$CPATH_OURS ;;
+        # The GC-stress arm sets its pause through LUA_INIT (inherited by
+        # re-executed interpreters, and arg[] stays free of a quoted -e).
+        gcs) printf '#!/bin/sh\nLUA_INIT=%s exec "%s" -jon %s "$@"\n' "'collectgarbage(\"setpause\",0)'" "$LUAJIT" "$pre" > "$OUT/lua-gcs"; cmd="$OUT/lua-gcs $s"; cpath=$CPATH_OURS ;;
       esac
       chmod +x "$OUT"/lua-* 2>/dev/null
       ( cd "$dir" && LUA_PATH="$lpath" LUA_CPATH="${cpath:-;;}" timeout 600 $cmd ) > "$OUT/tmp.txt" 2>&1; rc=$?

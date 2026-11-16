@@ -100,7 +100,7 @@ static int64_t io_toint64(lua_State *L, int narg, int64_t def)
 
 static IOFileUD *io_file_new(lua_State *L)
 {
-  IOFileUD *iof = (IOFileUD *)lua_newuserdata(L, sizeof(IOFileUD));
+  IOFileUD *iof = (IOFileUD *)lua_newuserdatauv(L, sizeof(IOFileUD), 0);  /* PUC: no user values. */
   GCudata *ud = udataV(L->top-1);
   ud->udtype = UDTYPE_IO_FILE;
   /* NOBARRIER: The GCudata is new (marked white). */
@@ -633,7 +633,7 @@ LJLIB_CF(io_type)
 
 static GCobj *io_std_new(lua_State *L, FILE *fp, const char *name)
 {
-  IOFileUD *iof = (IOFileUD *)lua_newuserdata(L, sizeof(IOFileUD));
+  IOFileUD *iof = (IOFileUD *)lua_newuserdatauv(L, sizeof(IOFileUD), 0);  /* PUC: no user values. */
   GCudata *ud = udataV(L->top-1);
   ud->udtype = UDTYPE_IO_FILE;
   /* NOBARRIER: The GCudata is new (marked white). */

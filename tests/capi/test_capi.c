@@ -294,6 +294,21 @@ static void test_warning(void)
   lua_close(L);
 }
 
+static void test_resume54(void)
+{
+  lua_State *L = newL();
+  lua_State *co;
+  int nres = -1;
+  luaL_dostring(L, "co = coroutine.create(function() return 1, 2 end)");
+  lua_getglobal(L, "co");
+  co = lua_tothread(L, -1);
+  ok(co != NULL, "resume54: coroutine object");
+  ok(lua_resume(co, L, 0, &nres) == LUA_OK, "lua_resume(co, from, 0, &nres) OK");
+  ok(nres == 2, "lua_resume sets *nres to the result count");
+  lua_pop(L, 1);
+  lua_close(L);
+}
+
 static void test_lauxlib54(void)
 {
   lua_State *L = newL();
@@ -353,7 +368,7 @@ int main(void)
 {
   test_absindex(); test_getseti(); test_len(); test_compare();
   test_stringtonumber(); test_getsubtable(); test_isinteger(); test_rotate();
-  test_newuserdatauv(); test_iuservalue(); test_warning(); test_lauxlib54();
+  test_newuserdatauv(); test_iuservalue(); test_warning(); test_resume54(); test_lauxlib54();
   printf("== capi: %d checks, %d failures ==\n", checks, failures);
   return failures ? 1 : 0;
 }

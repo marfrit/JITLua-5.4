@@ -1532,12 +1532,21 @@ LUA_API int lua_yield(lua_State *L, int nresults)
   return 0;  /* unreachable */
 }
 
-LUA_API int lua_resume(lua_State *L, int nargs)
+/* Lua 5.4 signature: from is the resuming thread (ignored here; LuaJIT resumes
+** on the state itself) and *nres receives the number of results. */
+LUA_API int lua_resume(lua_State *L, lua_State *from, int nargs, int *nres)
 {
-  if (L->cframe == NULL && L->status <= LUA_YIELD)
-    return lj_vm_resume(L,
+  int st;
+  UNUSED(from);
+  if (nres) *nres = 0;
+  if (L->cframe == NULL && L->status <= LUA_YIELD) {
+    st = lj_vm_resume(L,
       L->status == LUA_OK ? api_call_base(L, nargs) : L->top - nargs,
       0, 0);
+    if (nres && (st == LUA_OK || st == LUA_YIELD))
+      *nres = (int)(L->top - L->base);
+    return st;
+  }
   L->top = L->base;
   setstrV(L, L->top, lj_err_str(L, LJ_ERR_COSUSP));
   incr_top(L);

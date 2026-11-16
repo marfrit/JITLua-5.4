@@ -1,6 +1,9 @@
 --! 5.4 to-be-closed variables: the <close> sections of the PUC 5.4.7 test
 --! suite's locals.lua (lines 206-571, 861-1046 and 1047-1057 of the vendored
---! file), unchanged except for this header and the final print. Sections
+--! file), unchanged except for this header, the final print and four
+--! `assert(debug.getinfo(2).name == "pcall")` lines inside __close handlers
+--! run on the error path (LuaJIT has no C frame for pcall(): the frame below
+--! the handler is the caller of pcall, a documented divergence). Sections
 --! needing the PUC test library (T), hooks or a forced stack overflow are
 --! left out.
 
@@ -226,13 +229,11 @@ do print("testing errors in __close")
       func2close(function (self, msg)
         -- after error, 'foo' was discarded, so caller now
         -- must be 'pcall'
-        assert(debug.getinfo(2).name == "pcall")
         assert(string.find(msg, "@x1"))
       end)
 
     local x1 <close> =
       func2close(function (self, msg)
-        assert(debug.getinfo(2).name == "pcall")
         assert(string.find(msg, "@y"))
         error("@x1")
       end)
@@ -241,7 +242,6 @@ do print("testing errors in __close")
 
     local y <close> =
       func2close(function (self, msg)
-        assert(debug.getinfo(2).name == "pcall")
         assert(string.find(msg, "@z"))
         error("@y")
       end)
@@ -249,7 +249,6 @@ do print("testing errors in __close")
     local first = true
     local z <close> =
       func2close(function (self, msg)
-        assert(debug.getinfo(2).name == "pcall")
         -- 'z' close is called once
         assert(first and msg == 4)
         first = false

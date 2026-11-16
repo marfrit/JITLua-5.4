@@ -3876,6 +3876,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  mov SAVE_PC, PC
     |  lea CARG2, [BASE+RA*8]		// Caveat: CARG2 == BASE
     |  mov CARG3d, MULTRES
+    |  shl CARG3d, 3			// Byte count, as on the other backends.
     |  mov L:CARG1, L:RB		// Caveat: CARG1 == RA
     |  call extern lj_meta_tbcclose	// (lua_State *L, TValue *level, MSize multres)
     |  mov BASE, L:RB->base

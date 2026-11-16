@@ -257,28 +257,55 @@ static void lex_string(LexState *ls, TValue *tv, LexChar delim)
       case 't': c = '\t'; break;
       case 'v': c = '\v'; break;
       case 'x':  /* Hexadecimal escape '\xXX'. */
-	c = (lex_next(ls) & 15u) << 4;
-	if (!lj_char_isdigit(ls->c)) {
-	  if (!lj_char_isxdigit(ls->c)) goto err_xesc;
-	  c += 9 << 4;
-	}
-	c += (lex_next(ls) & 15u);
-	if (!lj_char_isdigit(ls->c)) {
-	  if (!lj_char_isxdigit(ls->c)) goto err_xesc;
-	  c += 9;
+	{  /* PUC 5.4 error token text: collect the escape source in a side
+	   ** buffer; ls->sb holds the parsed string and must stay clean. */
+	  char eb[8]; int nb = 0;
+	  eb[nb++] = '\\'; eb[nb++] = 'x';
+	  c = (lex_next(ls) & 15u) << 4;
+	  eb[nb++] = (char)ls->c;
+	  if (!lj_char_isdigit(ls->c)) {
+	    if (!lj_char_isxdigit(ls->c)) {
+	      lj_buf_putmem(&ls->sb, eb, nb);
+	      goto err_xesc;
+	    }
+	    c += 9 << 4;
+	  }
+	  c += (lex_next(ls) & 15u);
+	  eb[nb++] = (char)ls->c;
+	  if (!lj_char_isdigit(ls->c)) {
+	    if (!lj_char_isxdigit(ls->c)) {
+	      lj_buf_putmem(&ls->sb, eb, nb);
+	      goto err_xesc;
+	    }
+	    c += 9;
+	  }
 	}
 	break;
       case 'u': {  /* Unicode escape '\u{XX...}' (5.4: up to 0x7FFFFFFF). */
 	uint32_t u = 0;
 	char ub[8];
 	unsigned int n = 1, i;
-	if (lex_next(ls) != '{') goto err_xesc;
+	char eb[40]; int nb = 0;
+	eb[nb++] = '\\'; eb[nb++] = 'u';
+	if (lex_next(ls) != '{') {
+	  eb[nb++] = (char)ls->c;
+	  lj_buf_putmem(&ls->sb, eb, nb);
+	  goto err_xesc;
+	}
+	eb[nb++] = '{';
 	lex_next(ls);
 	for (;;) {
-	  if (!lj_char_isxdigit(ls->c)) goto err_xesc;
+	  if (nb < (int)sizeof(eb)) eb[nb++] = (char)ls->c;
+	  if (!lj_char_isxdigit(ls->c)) {
+	    lj_buf_putmem(&ls->sb, eb, nb);
+	    goto err_xesc;
+	  }
 	  u = (u << 4) | (uint32_t)(ls->c & 15u);
 	  if (!lj_char_isdigit(ls->c)) u += 9;
-	  if (u > 0x7FFFFFFFu) goto err_xesc;  /* escape sequence too large */
+	  if (u > 0x7FFFFFFFu) {
+	    lj_buf_putmem(&ls->sb, eb, nb);
+	    goto err_xesc;  /* escape sequence too large */
+	  }
 	  if (lex_next(ls) == '}') break;
 	}
 	/* Encode as UTF-8 (1..6 bytes), backwards like the reference. */

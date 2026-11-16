@@ -835,3 +835,11 @@ Gates at 87dfc75e, both arches identical: A+B 81 PASS / 0 FAIL / 13 XFAIL /
 fuzz 160/160. Bench unchanged against part 2: arm64 B1 16.5, B2 1520.6, B2b
 130.7, B3 23.7 / 212.9 ms; x64 B1 30.2, B2 3124.3, B2b 662.3, B3 47.6 /
 955.6 ms; checksums equal.
+
+## Session 27e — lexer escape-error token text (side buffer)
+
+x/u escape parse errors now include the consumed escape source in the "near"
+token (PUC lexerror cases); the text is collected in a side buffer and appended
+to ls->sb only on the error path, so valid literals stay intact. literals.lua
+advances from line32 to its lexerror block (line83, second case still differs);
+known-bad.

@@ -877,3 +877,12 @@ luaconf.h defines the versioned env names; package setpath prefers
 LUA_PATH_5_4/LUA_CPATH_5_4 over LUA_PATH/LUA_CPATH (PUC lloadlib order), and
 luajit.c initialises from LUA_INIT_5_4 before LUA_INIT. Path defaults themselves
 were already PUC-identical (session 27b). Gate pending in the next context.
+
+## Session 28 — identifiers are strict Lua 5.4 (deliberate divergence)
+
+Markus decision (2026-11-16): identifiers are ASCII letters/digits/underscore
+only; bytes 128-255 are rejected. Stock LuaJIT's lexer accepts them
+(lj_char_bits marks 128-255 as IDENT); this fork deliberately follows PUC 5.4
+(no compatibility switch). Implemented with lex_isident5 in lj_lex.c; new
+tests/d54/lex_02_identifiers.lua asserts the same normalized syntax error as
+PUC for UTF-8/byte>=128 identifiers and that ASCII names still load.

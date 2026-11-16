@@ -199,7 +199,7 @@ static void test_newuserdatauv(void)
     lua_pop(L, 4);
     ok(((unsigned char *)p)[0] == 0x5a && ((unsigned char *)p)[2] == 0x5a,
        "payload untouched by user values");
-    ok(lua_rawlen(L, uidx) == 3, "rawlen is the payload size");
+    ok(lua_objlen(L, uidx) == 3, "objlen is the payload size");  /* lua_rawlen: not in lua.h yet */
     /* The user values keep their objects alive across a full GC. */
     lua_newtable(L); lua_pushinteger(L, 7); lua_rawseti(L, -2, 1);
     ok(lua_setiuservalue(L, uidx, 2) == 1, "set uv2 table");

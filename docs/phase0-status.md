@@ -1132,3 +1132,21 @@ assertion. First suspects: an assert-only code path in the x64 VM/C glue
 (LJ_GC64 + LUAJIT_NUMMODE=2) or a struct whose size changes with
 LUA_USE_ASSERT between buildvm and the C side.
 
+## Session 36 (branch udata-uv) — userdata user values (lua_newuserdatauv n > 1)
+
+5.4 user values are now a TValue array behind the 8-byte aligned payload:
+GCudata.nuvalue (the former alignment pad) holds the count (0..65534, PUC's
+api_check range, an error here), lj_udata_newuv allocates and nils them,
+gc_mark marks them with the userdata (userdata are black at once, so
+lua_setiuservalue uses the forward barrier), sizeudata covers them for
+free and accounting. Internal userdata (io handles, int64 boxes, buffers,
+clib) have none; the earlier single value lived in ud->env and could hold
+GC objects only, env is the 5.1 fenv view again. lua_getiuservalue /
+lua_setiuservalue copy any value; debug.getuservalue(u, n) returns value,
+true or fail, debug.setuservalue(u, v, n) returns u or fail (ldblib 5.4).
+io file handles are created with zero user values like PUC's newprefile.
+Tests: capi (4 values of mixed types on a 3-byte payload, GC survival,
+objlen), d54 debug_03_uservalue (the Lua-visible surface). Library note:
+lua.h has no lua_rawlen (5.2+ name of lua_objlen) -- C modules built
+against our headers that use it will not link; for the C API owner.
+

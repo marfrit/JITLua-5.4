@@ -2,13 +2,13 @@
 # LuaJIT-5.4 differential verification harness (MISSION Phase 0).
 #
 #   tests/harness.sh                      # modes A + B over the whole corpus
-#   tests/harness.sh --mode A             # interpreter vs PUC-Lua 5.4.7
+#   tests/harness.sh --mode A             # interpreter vs PUC-Lua 5.4.9
 #   tests/harness.sh --mode B --opt-levels 0,1,2,3
 #   tests/harness.sh --mode R             # string.dump -> load -> re-run
 #   tests/harness.sh --filter 'd54/numeric*' --verbose
 #   tests/harness.sh --update-known-bad   # refresh the expected-failure baseline
 #
-# Environment overrides: LUAJIT (our binary), REF (PUC 5.4.7 binary).
+# Environment overrides: LUAJIT (our binary), REF (PUC 5.4.9 binary).
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 LUAJIT=${LUAJIT:-$ROOT/src/luajit}

@@ -1,10 +1,10 @@
 #!/bin/sh
 # Real-program corpus: well-known Lua libraries with their own test suites,
-# run under PUC-Lua 5.4.7 and under ours (-joff, -jon, -jon with the GC on
+# run under PUC-Lua 5.4.9 and under ours (-joff, -jon, -jon with the GC on
 # every allocation), outputs and exit codes compared per arm. The C modules
 # (LPeg, lua-cjson, LuaFileSystem) are built twice from the pinned sources,
 # against PUC's headers for the PUC arm and against ours for the other three
-# (tests/ref/src/lua-5.4.7/src is left behind by fetch-ref.sh). LFS also
+# (tests/ref/src/lua-5.4.9/src is left behind by fetch-ref.sh). LFS also
 # unlocks Penlight's five LFS-dependent scripts.
 #
 # The release archives live in .dlcache/ (downloaded once on a machine with
@@ -28,7 +28,7 @@ trap 'rm -rf "$OUT"' EXIT
 fail=0; ndiff=0; nsame=0
 say() { printf '%s\n' "$*"; }
 CC=${CC:-cc}
-PUCINC=$ROOT/tests/ref/src/lua-5.4.7/src
+PUCINC=$ROOT/tests/ref/src/lua-5.4.9/src
 MOD=$OUT/cmod
 mkdir -p "$MOD/puc" "$MOD/ours"
 CPATH_PUC=; CPATH_OURS=

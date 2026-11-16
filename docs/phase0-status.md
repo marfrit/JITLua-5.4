@@ -700,6 +700,47 @@ math_os_01 B from main), R 42, C API + i64 14/14, fuzz 160/160.
 Bench unchanged: arm64 B1 13.7 ms (FFI 8.9 this run, 15.2 the run before),
 B3 22.9 / 214 ms; x64 B1 30.2 (FFI 29.3), B3 52.3 / 1564 ms; checksums equal.
 
+## Session 26 (DeepSeek, main) — P5 library exactness batch; C API 5.4 WIP awaiting review
+
+Landed (all gates green on x64-box and arm-box; last counts 67 PASS / 0 FAIL /
+14 XFAIL, opt 156, R 41, i64 14/14, fuzz 160/160):
+- C API integer acceptance: lua_tonumberx/luaL_checknumber/luaL_checkinteger/
+  luaL_optinteger accept widened/boxed 5.4 integers; lua_isinteger too.
+- io (subagent): 5.4 read formats n/a/l/L, byte-count args, io.lines 4-value
+  shape, seek returns the position, setvbuf sizes, input/output(name) opening,
+  closed-default messages; tests/d54/io_02_exact.lua PUC-identical.
+- package (subagent): package.searchers two-result protocol, require(name,data)
+  -> (module,data), loader data (filename / ":preload:"), PUC error
+  accumulation, searchpath shapes; tests/d54/pkg_02_searchers.lua PUC-identical;
+  corpus attrib.lua now passes.
+- string patterns (subagent): gsub lastmatch/empty-match/changed-tracking, %0,
+  %%, replacement errors, gmatch init, invalid-capture-index and %b wording;
+  tests/d54/str_03_patterns.lua PUC-identical; pm.lua matches except its final
+  %p identity assert (interning, needs lj_str.c).
+- os.date/os.time: PUC getfield rules (non-integer/out-of-bound errors, deltas),
+  os.time normalises and rewrites the table, "cannot be represented" errors;
+  tests/d54/os_02_date_time.lua PUC-identical.
+
+WIP (UNCOMMITTED, awaiting review): C API 5.4 additions by a coder subagent —
+lua_newuserdatauv (nuvalue 0/1; >1 errors), lua_getiuservalue/
+lua_setiuservalue (single user value in GCudata.env, unused2 bit flags),
+lua_warning + Lua warn() builtin (registry `_LJ_WARN_ENABLED`/
+`_LJ_WARN_BUILTIN`, default ON — a policy divergence from PUC auxlib),
+lua_setcstacklimit no-op returning 0, luaL_addgsub/buffsub/pushfail,
+lua_getfenv/setfenv adapted for UDTYPE_USERDATA; 69 capi checks. A read-only
+reviewer is running over the diff; apply its fixes before committing.
+Known limitations reported there: userdata user-values >1 need a GC layout
+change; non-GC user values cannot be stored in the GCRef slot; lua_resume keeps
+the LuaJIT signature; debug.getuservalue still assumes a table env.
+
+Merge gate: His will announce merge-step3 (branch step3-i64 from Fable). Then
+`git merge --ff-only origin/merge-step3` and re-run both boxes. Until then stay
+away from lj_i64.c/.h, lj_meta.c, ISEQV/ISEQN in vm_arm64/x64 and UCLO/close.
+
+Queue after this: remaining known-bad corpus items (constructs/literals/math/
+errors/locals/vararg/strings/sort/debug/files), then C API lua_resume signature
+and debug.getuservalue, luaconf default paths (lua/5.4 vs luajit-2.1).
+
 ## Session 28 (branch i64-part2) — int64 in the JIT, part 2: tables, upvalues, varargs, //
 
 On top of close-tbc f7362562. Loads of widened/boxed values from tables,

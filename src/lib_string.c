@@ -174,7 +174,7 @@ static int check_capture(MatchState *ms, int l)
 {
   l -= '1';
   if (l < 0 || l >= ms->level || ms->capture[l].len == CAP_UNFINISHED)
-    lj_err_caller(ms->L, LJ_ERR_STRCAPI);
+    luaL_error(ms->L, "invalid capture index %%%d", l + 1);
   return l;
 }
 
@@ -266,7 +266,7 @@ static const char *match(MatchState *ms, const char *s, const char *p);
 static const char *matchbalance(MatchState *ms, const char *s, const char *p)
 {
   if (p >= ms->p_end - 1)
-    lj_err_caller(ms->L, LJ_ERR_STRPATU);
+    luaL_error(ms->L, "malformed pattern (missing arguments to '%%b')");
   if (*s != *p) {
     return NULL;
   } else {
@@ -440,7 +440,7 @@ static void push_onecapture(MatchState *ms, int i, const char *s, const char *e)
     if (i == 0)  /* ms->level == 0, too */
       lua_pushlstring(ms->L, s, (size_t)(e - s));  /* add whole match */
     else
-      lj_err_caller(ms->L, LJ_ERR_STRCAPI);
+      luaL_error(ms->L, "invalid capture index %%%d", i + 1);
   } else {
     ptrdiff_t l = ms->capture[i].len;
     if (l == CAP_UNFINISHED) lj_err_caller(ms->L, LJ_ERR_STRCAPU);
@@ -556,10 +556,17 @@ LJLIB_NOREG LJLIB_CF(string_gmatch_aux)
 
 LJLIB_CF(string_gmatch)
 {
-  lj_lib_checkstr(L, 1);
+  GCstr *str = lj_lib_checkstr(L, 1);
   lj_lib_checkstr(L, 2);
+  int32_t start = lj_lib_optint(L, 3, 1);  /* 5.4 init argument */
+  MSize init;
+  if (start < 0) start += (int32_t)str->len; else start--;
+  if (start < 0) start = 0;
+  init = (MSize)start;
+  if (init > str->len) init = str->len+1;  /* avoid overflows in s+init */
   L->top = L->base+3;
   (L->top-1)->u64 = 0;
+  (L->top-1)->u32.lo = init;
   (L->top-1)->u32.hi = 0xFFFFFFFFu;  /* lastmatch = none */
   lj_lib_pushcc(L, lj_cf_string_gmatch_aux, FF_string_gmatch_aux, 3);
   return 1;
@@ -567,34 +574,41 @@ LJLIB_CF(string_gmatch)
 
 static void add_s(MatchState *ms, luaL_Buffer *b, const char *s, const char *e)
 {
-  size_t l, i;
-  const char *news = lua_tolstring(ms->L, 3, &l);
-  for (i = 0; i < l; i++) {
-    if (news[i] != L_ESC) {
-      luaL_addchar(b, news[i]);
-    } else {
-      i++;  /* skip ESC */
-      if (!lj_char_isdigit(uchar(news[i]))) {
-	luaL_addchar(b, news[i]);
-      } else if (news[i] == '0') {
-	luaL_addlstring(b, s, (size_t)(e - s));
-      } else {
-	push_onecapture(ms, news[i] - '1', s, e);
-	luaL_addvalue(b);  /* add capture to accumulated result */
-      }
+  size_t l;
+  lua_State *L = ms->L;
+  const char *news = lua_tolstring(L, 3, &l);
+  const char *p;
+  while ((p = (char *)memchr(news, L_ESC, l)) != NULL) {
+    luaL_addlstring(b, news, p - news);
+    p++;  /* skip ESC */
+    if (*p == L_ESC)  /* '%%' */
+      luaL_addchar(b, *p);
+    else if (*p == '0')  /* '%0' */
+      luaL_addlstring(b, s, (size_t)(e - s));
+    else if (lj_char_isdigit(uchar(*p))) {  /* '%n' */
+      push_onecapture(ms, *p - '1', s, e);
+      luaL_addvalue(b);  /* add capture to accumulated result */
     }
+    else
+      luaL_error(L, "invalid use of '%c' in replacement string", L_ESC);
+    l -= p + 1 - news;
+    news = p + 1;
   }
+  luaL_addlstring(b, news, l);
 }
 
-static void add_value(MatchState *ms, luaL_Buffer *b,
-		      const char *s, const char *e)
+/* Add the replacement value to the buffer. Return true if the subject
+** was changed. Function/table results of nil or false leave it unchanged.
+*/
+static int add_value(MatchState *ms, luaL_Buffer *b,
+		     const char *s, const char *e)
 {
   lua_State *L = ms->L;
   switch (lua_type(L, 3)) {
     case LUA_TNUMBER:
     case LUA_TSTRING: {
       add_s(ms, b, s, e);
-      return;
+      return 1;
     }
     case LUA_TFUNCTION: {
       int n;
@@ -611,11 +625,13 @@ static void add_value(MatchState *ms, luaL_Buffer *b,
   }
   if (!lua_toboolean(L, -1)) {  /* nil or false? */
     lua_pop(L, 1);
-    lua_pushlstring(L, s, (size_t)(e - s));  /* keep original text */
+    luaL_addlstring(b, s, (size_t)(e - s));  /* keep original text */
+    return 0;
   } else if (!lua_isstring(L, -1)) {
     lj_err_callerv(L, LJ_ERR_STRGSRV, luaL_typename(L, -1));
   }
   luaL_addvalue(b);  /* add result to accumulator */
+  return 1;
 }
 
 LJLIB_CF(string_gsub)
@@ -624,10 +640,12 @@ LJLIB_CF(string_gsub)
   const char *src = luaL_checklstring(L, 1, &srcl);
   const char *p = luaL_checklstring(L, 2, &plen);
   const char *p_end = p + plen;
+  const char *lastmatch = NULL;  /* end of previous match (5.4) */
   int  tr = lua_type(L, 3);
   int max_s = luaL_optint(L, 4, (int)(srcl+1));
   int anchor = (*p == '^') ? (p++, 1) : 0;
   int n = 0;
+  int changed = 0;  /* subject changed by this substitution? */
   MatchState ms;
   luaL_Buffer b;
   if (!(tr == LUA_TNUMBER || tr == LUA_TSTRING ||
@@ -641,22 +659,24 @@ LJLIB_CF(string_gsub)
   while (n < max_s) {
     const char *e;
     ms.level = ms.depth = 0;
-    e = match(&ms, src, p);
-    if (e) {
+    if ((e = match(&ms, src, p)) != NULL && e != lastmatch) {  /* match? */
       n++;
-      add_value(&ms, &b, src, e);
+      changed = add_value(&ms, &b, src, e) | changed;
+      src = lastmatch = e;
     }
-    if (e && e>src) /* non empty match? */
-      src = e;  /* skip it */
-    else if (src < ms.src_end)
+    else if (src < ms.src_end)  /* otherwise skip one character */
       luaL_addchar(&b, *src++);
     else
-      break;
+      break;  /* end of subject */
     if (anchor)
       break;
   }
-  luaL_addlstring(&b, src, (size_t)(ms.src_end-src));
-  luaL_pushresult(&b);
+  if (!changed)  /* no changes? return original string */
+    lua_pushvalue(L, 1);
+  else {
+    luaL_addlstring(&b, src, (size_t)(ms.src_end-src));
+    luaL_pushresult(&b);
+  }
   lua_pushinteger(L, n);  /* number of substitutions */
   return 2;
 }

@@ -674,10 +674,11 @@ const char *lj_lex_token2str(LexState *ls, LexToken tok)
 {
   if (tok > TK_OFS)
     return tokennames[tok-TK_OFS-1];
-  else if (!lj_char_iscntrl(tok))
+  else if (tok >= 0x20 && tok < 0x7f)
     return lj_strfmt_pushf(ls->L, "%c", tok);
   else
-    return lj_strfmt_pushf(ls->L, "char(%d)", tok);
+    /* 5.4: non-ASCII bytes and control chars are '<\\%d>'. */
+    return lj_strfmt_pushf(ls->L, "<\\%d>", tok);
 }
 
 /* Lexer error. */

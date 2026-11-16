@@ -123,6 +123,7 @@ typedef struct FuncScope {
 #define FSCOPE_UPVAL		0x08	/* Upvalue in scope. */
 #define FSCOPE_NOCLOSE		0x10	/* Do not close upvalues. */
 #define FSCOPE_CONT		0x20	/* Continue used in scope. */
+#define FSCOPE_TBC		0x40	/* Generic for with a hidden closing slot (5.4). */
 
 #define NAME_BREAK		((GCstr *)(uintptr_t)1)
 #define NAME_CONT		((GCstr *)(uintptr_t)2)
@@ -1500,7 +1501,7 @@ static void gola_fixup(LexState *ls, FuncScope *bl)
 	setgcrefnull(v->name);  /* Invalidate label that goes out of scope. */
 	for (vg = v+1; vg < ve; vg++)  /* Resolve pending backward gotos. */
 	  if (strref(vg->name) == name && gola_isgoto(vg)) {
-	    if ((bl->flags&FSCOPE_UPVAL) && vg->slot > v->slot)
+	    if ((bl->flags&(FSCOPE_UPVAL|FSCOPE_TBC)) && vg->slot > v->slot)
 	      gola_close(ls, vg);
 	    gola_patch(ls, vg, v);
 	  }
@@ -1510,7 +1511,7 @@ static void gola_fixup(LexState *ls, FuncScope *bl)
 			     name == NAME_CONT ? FSCOPE_CONT :
 			     FSCOPE_GOLA;
 	  v->slot = bl->nactvar;
-	  if ((bl->flags & FSCOPE_UPVAL))
+	  if ((bl->flags & (FSCOPE_UPVAL|FSCOPE_TBC)))
 	    gola_close(ls, v);
 	} else {  /* No outer scope: undefined goto label or no loop. */
 	  ls->linenumber = ls->fs->bcbase[v->startpc].line;
@@ -1573,6 +1574,10 @@ static void fscope_end(FuncState *fs)
     ls->vtop = idx;  /* Drop break label immediately. */
     gola_resolve(ls, bl, idx);
   }
+  /* 5.4 generic for: close the hidden closing value when the loop is left,
+  ** by falling out or by break (the label above lands here). */
+  if ((bl->flags & FSCOPE_TBC))
+    bcemit_AJ(fs, BC_TBCCLO, bl->nactvar, 0);
   if ((bl->flags & (FSCOPE_GOLA|FSCOPE_BREAK|FSCOPE_CONT))) {
     gola_fixup(ls, bl);
   }
@@ -3123,11 +3128,15 @@ static void parse_for_iter(LexState *ls, GCstr *indexname)
   ExpDesc e;
   BCReg nvars = 0;
   BCLine line;
-  BCReg base = fs->freereg + 3;
+  BCReg base = fs->freereg + 4;
   BCPos loop, loopend, exprpc = fs->pc;
   FuncScope bl;
   int isnext;
-  /* Hidden control variables. */
+  /* Hidden control variables. 5.4: the explist yields a 4th, to-be-closed
+  ** value; it lives below the iterator triple so ITERC/ITERN keep their
+  ** layout (func, state, control right below the loop variables). */
+  var_new_fixed(ls, nvars++, VARNAME_FOR_CLOSE);
+  ls->vstack[fs->varmap[fs->nactvar]].info = VSTACK_CLOSE;
   var_new_fixed(ls, nvars++, VARNAME_FOR_GEN);
   var_new_fixed(ls, nvars++, VARNAME_FOR_STATE);
   var_new_fixed(ls, nvars++, VARNAME_FOR_CTL);
@@ -3137,22 +3146,33 @@ static void parse_for_iter(LexState *ls, GCstr *indexname)
     var_new(ls, nvars++, lex_str(ls));
   lex_check(ls, TK_in);
   line = ls->linenumber;
-  assign_adjust(ls, 3, expr_list(ls, &e), &e);
+  assign_adjust(ls, 4, expr_list(ls, &e), &e);
+  {  /* Rotate func,state,ctl,close -> close,func,state,ctl. */
+    BCReg r = base - 4;
+    bcemit_AD(fs, BC_MOV, r+4, r+3);
+    bcemit_AD(fs, BC_MOV, r+3, r+2);
+    bcemit_AD(fs, BC_MOV, r+2, r+1);
+    bcemit_AD(fs, BC_MOV, r+1, r);
+    bcemit_AD(fs, BC_MOV, r, r+4);
+    bcemit_AD(fs, BC_TBC, r, 0);
+    fs->ntbc++;
+    fs->bl->flags |= FSCOPE_TBC;
+  }
   /* The iterator needs another 3 [4] slots (func [pc] | state ctl). */
   bcreg_bump(fs, 3+ls->fr2);
-  isnext = (nvars <= 5 && fs->pc > exprpc && predict_next(ls, fs, exprpc));
-  var_add(ls, 3);  /* Hidden control variables. */
+  isnext = (nvars <= 6 && fs->pc > exprpc && predict_next(ls, fs, exprpc));
+  var_add(ls, 4);  /* Hidden control variables. */
   lex_check(ls, TK_do);
   loop = bcemit_AJ(fs, isnext ? BC_ISNEXT : BC_JMP, base, NO_JMP);
   fscope_begin(fs, &bl, 0);  /* Scope for visible variables. */
-  var_add(ls, nvars-3);
-  bcreg_reserve(fs, nvars-3);
+  var_add(ls, nvars-4);
+  bcreg_reserve(fs, nvars-4);
   parse_block(ls);
   fscope_end(fs);
   /* Perform loop inversion. Loop control instructions are at the end. */
   jmp_patchins(fs, loop, fs->pc);
   fscope_continue(fs, fs->pc);
-  bcemit_ABC(fs, isnext ? BC_ITERN : BC_ITERC, base, nvars-3+1, 2+1);
+  bcemit_ABC(fs, isnext ? BC_ITERN : BC_ITERC, base, nvars-4+1, 2+1);
   loopend = bcemit_AJ(fs, BC_ITERL, base, NO_JMP);
   fs->bcbase[loopend-1].line = line;  /* Fix line for control ins. */
   fs->bcbase[loopend].line = line;

@@ -879,14 +879,11 @@ static void build_subroutines(BuildCtx *ctx)
   |
   |->cont_tbc:				// __close returned (5.4 <close>).
   |  endbr
-  |  // BC_UCLO stashed MULTRES in the top 16 bits of the [cont|PC] slot;
-  |  // restore it (return f() in a <close> scope is CALLM + UCLO + RETM) and
-  |  // re-execute the UCLO, which PC points at.
-  |  mov TMPR, PC
-  |  shr TMPR, 48
+  |  // RB = meta base. BC_UCLO parked MULTRES in the slot below the
+  |  // continuation; restore it (return f() in a <close> scope is CALLM +
+  |  // UCLO + RETM) and re-execute the UCLO, which PC points at.
+  |  mov TMPRd, dword [RB-40]
   |  mov MULTRES, TMPRd
-  |  shl PC, 16
-  |  shr PC, 16
   |  ins_next
   |
   |3:  // Call __newindex metamethod.
@@ -3866,6 +3863,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  ins_next
     break;
   case BC_UCLO:
+  case BC_TBCCLO:
     |  ins_AD	// RA = level, RD = target
     |  mov L:RB, SAVE_L
     |  cmp dword L:RB->tbcn, 0
@@ -3883,9 +3881,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  test RC, RC
     |  jz >3
     |  mov TMPRd, MULTRES
-    |  shl TMPR, 48
+    |  mov [RC-40], TMPR		// Park MULTRES for cont_tbc.
     |  sub PC, 4			// Re-execute this UCLO after the call.
-    |  or PC, TMPR			// Stash MULTRES for cont_tbc.
     |  jmp ->vmeta_binop		// BASE = base, RC = new base.
     |3:
     |  movzx RAd, PC_RA		// The call clobbered RA and RD.

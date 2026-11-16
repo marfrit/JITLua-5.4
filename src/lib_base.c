@@ -731,6 +731,11 @@ LJ_FUNCA_NORET void LJ_FASTCALL lj_ffh_coroutine_wrap_err(lua_State *L,
 /* Error handler, called from assembler VM. */
 void LJ_FASTCALL lj_ffh_coroutine_wrap_err(lua_State *L, lua_State *co)
 {
+  if (co->tbcn > 0) {  /* 5.4: an error in a wrapped coroutine closes it. */
+    co->status = LUA_OK;
+    lj_meta_tbccloseall(co, tvref(co->stack), co->top-1);
+    co->status = LUA_ERRRUN;
+  }
   co->top--; copyTV(L, L->top, co->top); L->top++;
   if (tvisstr(L->top-1))
     lj_err_callermsg(L, strVdata(L->top-1));

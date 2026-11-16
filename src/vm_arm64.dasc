@@ -837,11 +837,10 @@ static void build_subroutines(BuildCtx *ctx)
   |
   |->cont_tbc:				// __close returned (5.4 <close>).
   |  bti_jump
-  |  // BC_UCLO stashed MULTRES in the top 16 bits of the [cont|PC] slot;
-  |  // restore it (return f() in a <close> scope is CALLM + UCLO + RETM) and
-  |  // re-execute the UCLO, which PC points at.
-  |  lsr TMP0, PC, #48
-  |  and PC, PC, #U64x(0000ffff,ffffffff)
+  |  // CARG4 = meta base. BC_UCLO parked MULTRES in the slot below the
+  |  // continuation; restore it (return f() in a <close> scope is CALLM +
+  |  // UCLO + RETM) and re-execute the UCLO, which PC points at.
+  |  ldr TMP0w, [CARG4, #-40]
   |  str TMP0w, SAVE_MULTRES
   |  ins_next
   |
@@ -3285,6 +3284,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     break;
 
   case BC_UCLO:
+  case BC_TBCCLO:
     |  // RA = level, RC = target
     |  ldr TMP1w, L->tbcn
     |   str BASE, L->base
@@ -3301,7 +3301,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  cbz CRET1, >2
     |  ldr TMP0w, SAVE_MULTRES
     |  sub PC, PC, #4			// Re-execute this UCLO after the call.
-    |  orr PC, PC, TMP0, lsl #48		// Stash MULTRES for cont_tbc.
+    |  str TMP0, [CRET1, #-40]		// Park MULTRES for cont_tbc.
     |  b ->vmeta_binop
     |2:
     |  ldr CARG3, L->openupval

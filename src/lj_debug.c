@@ -321,6 +321,13 @@ const char *lj_debug_funcname(lua_State *L, cTValue *frame, const char **name)
     } else if (mm != MM__MAX) {
       *name = strdata(mmname_str(G(L), mm));
       return "metamethod";
+    } else if (bc_op(*ip) == BC_UCLO || bc_op(*ip) == BC_TBCCLO ||
+	       (pc+1 < pt->sizebc &&
+		(bc_op(ip[1]) == BC_UCLO || bc_op(ip[1]) == BC_TBCCLO))) {
+      /* 5.4 __close called from a UCLO (its continuation returns to the
+      ** UCLO itself, so the frame PC points at it, not past it). */
+      *name = "close";
+      return "metamethod";
     }
   }
   return NULL;

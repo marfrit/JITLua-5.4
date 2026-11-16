@@ -733,14 +733,24 @@ TValue *lj_meta_tbcclose(lua_State *L, TValue *level)
     int32_t *list = mref(L->tbclist, int32_t);
     TValue *o = restorestack(L, list[L->tbcn-1]);
     cTValue *mo;
+    TValue *top;
     if (o < level) return NULL;
     L->tbcn--;
     mo = lj_meta_lookup(L, o, MM_close);
-    {
-      TValue nilv;
-      setnilV(&nilv);
-      return mmcall(L, lj_cont_tbc, mo, o, &nilv);  /* nil mo: "attempt to call" */
-    }
+    if (tvisnil(mo))
+      lj_err_msgv(L, LJ_ERR_TBCCALL, lj_typename(mo));
+    /* Like mmcall(), with one extra slot below the continuation where the
+    ** VM parks MULTRES across the call (return f() in a <close> scope is
+    ** CALLM + UCLO + RETM). Layout: [mres][cont][PC][mo][frame][o][nil]. */
+    top = curr_topL(L);
+    setintV(top, 0);
+    setcont(top+1, lj_cont_tbc);
+    setnilV(top+2);
+    copyTV(L, top+3, mo);
+    setnilV(top+4);
+    copyTV(L, top+5, o);
+    setnilV(top+6);
+    return top+5;  /* Trigger metamethod call. */
   }
   return NULL;
 }

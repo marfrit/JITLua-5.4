@@ -313,7 +313,11 @@ static char *lj_strfmt_wfnum(SBuf *sb, SFormat sf, lua_Number n, char *p)
     int prefix = 0, ch = (sf & STRFMT_F_UPPER) ? 0x202020 : 0;
     if (((t.u32.hi & 0x000fffff) | t.u32.lo) != 0) {
       ch ^= ('n' << 16) | ('a' << 8) | 'n';
-      if ((sf & STRFMT_F_SPACE)) prefix = ' ';
+      /* 5.4 (printf %.14g): a NaN carries its sign, "-nan" on x86 for the
+      ** default NaN of 0/0 or sqrt(-1), "nan" on arm64. */
+      if ((t.u32.hi & 0x80000000)) prefix = '-';
+      else if ((sf & STRFMT_F_PLUS)) prefix = '+';
+      else if ((sf & STRFMT_F_SPACE)) prefix = ' ';
     } else {
       ch ^= ('i' << 16) | ('n' << 8) | 'f';
       if ((t.u32.hi & 0x80000000)) prefix = '-';

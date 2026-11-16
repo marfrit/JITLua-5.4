@@ -24,4 +24,4 @@ tests/d54/env_01_fenv.lua	A	P1: _ENV now a table alias (env_02 passes); remainin
 tests/d54/err_02_tailname.lua	A	P1.8b: tail-call error names -- LuaJIT reuses the caller frame, so the loaded-module fallback reports 'string.rep' where 5.4 reports the short 'rep'. Non-tail and pcall paths match.
 tests/d54/gc_01_tbc_gc.lua	A	P1/P4: <close>/__close, generational GC options
 tests/d54/tbl_03_border_divergence.lua	A	IMPL-DEFINED: runtime-built sparse tables may report any legal border (5.4 manual 3.4.7); LuaJIT's array-growth policy differs from PUC's alimit hint
-tests/d54/dump_03_version.lua	A,B	FORK: private dump format (LuaJIT-5.4 fork); PUC 5.4.7 cannot round-trip it, mode R checks ours
+tests/d54/dump_03_version.lua	A	FORK: private dump format (LuaJIT-5.4 fork); PUC 5.4.7 cannot round-trip it, mode R checks ours

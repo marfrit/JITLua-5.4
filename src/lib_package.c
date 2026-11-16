@@ -603,10 +603,26 @@ static void setpath(lua_State *L, const char *fieldname, const char *envname,
   if (path == NULL || noenv) {
     lua_pushstring(L, def);
   } else {
-    path = luaL_gsub(L, path, LUA_PATHSEP LUA_PATHSEP,
-			      LUA_PATHSEP AUXMARK LUA_PATHSEP);
-    luaL_gsub(L, path, AUXMARK, def);
-    lua_remove(L, -2);
+    /* PUC 5.4: replace the first ";;" only, and do not leave a stray
+    ** separator at the ends (that produced an extra "no file ''"). */
+    const char *dftmark = strstr(path, LUA_PATHSEP LUA_PATHSEP);
+    if (dftmark == NULL) {
+      lua_pushstring(L, path);
+    } else {
+      const char *pe = path + strlen(path);
+      luaL_Buffer b;
+      luaL_buffinit(L, &b);
+      if (dftmark != path) {  /* prefix before ";;" */
+	luaL_addlstring(&b, path, (size_t)(dftmark - path));
+	luaL_addstring(&b, LUA_PATHSEP);
+      }
+      luaL_addstring(&b, def);
+      if (dftmark + 2 < pe) {  /* suffix after ";;" */
+	luaL_addstring(&b, LUA_PATHSEP);
+	luaL_addlstring(&b, dftmark + 2, (size_t)(pe - (dftmark + 2)));
+      }
+      luaL_pushresult(&b);
+    }
   }
   setprogdir(L);
   lua_setfield(L, -2, fieldname);

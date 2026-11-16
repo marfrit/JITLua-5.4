@@ -13,6 +13,7 @@
 #include "lj_ctype.h"
 #include "lj_cdata.h"
 #include "lj_cconv.h"
+#include "lj_i64.h"
 #include "lj_ccallback.h"
 
 /* -- Conversion errors --------------------------------------------------- */
@@ -549,10 +550,18 @@ void lj_cconv_ct_tv(CTState *cts, CType *d,
   CTypeID sid = CTID_P_VOID;
   CType *s;
   void *tmpptr;
+  TValue tmpi64;
   uint8_t tmpbool, *sp = (uint8_t *)&tmpptr;
-  if (LJ_LIKELY(tvisint(o))) {
+  if (LJ_LIKELY(tvisint(o) && !tvisi47w(o))) {
     sp = (uint8_t *)&o->i;
     sid = CTID_INT32;
+    flags |= CCF_FROMTV;
+  } else if (tvisi47w(o) || tvisi64(o)) {  /* widened/boxed int64 */
+    int64_t v;
+    lj_i64_getint(o, &v);
+    tmpi64.u64 = (uint64_t)v;
+    sp = (uint8_t *)&tmpi64.u64;
+    sid = CTID_INT64;
     flags |= CCF_FROMTV;
   } else if (LJ_LIKELY(tvisnum(o))) {
     sp = (uint8_t *)&o->n;

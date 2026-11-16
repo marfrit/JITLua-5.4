@@ -13,6 +13,7 @@
 #include "lj_ctype.h"
 #include "lj_cconv.h"
 #include "lj_cdata.h"
+#include "lj_i64.h"
 
 /* -- C data allocation --------------------------------------------------- */
 
@@ -129,8 +130,10 @@ collect_attrib:
   /* Interning rejects refs to refs. */
   lj_assertCTS(!ctype_isref(ct->info), "bad ref of ref");
 
-  if (tvisint(key)) {
-    idx = (ptrdiff_t)intV(key);
+  if (tvisint(key) || tvisi64(key)) {
+    int64_t k;
+    lj_i64_getint(key, &k);
+    idx = (ptrdiff_t)k;
     goto integer_key;
   } else if (tvisnum(key)) {  /* Numeric key. */
     idx = lj_num2int_type(numV(key), ptrdiff_t);

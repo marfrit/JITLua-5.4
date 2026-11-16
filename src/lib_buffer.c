@@ -16,6 +16,7 @@
 #include "lj_gc.h"
 #include "lj_err.h"
 #include "lj_buf.h"
+#include "lj_i64.h"
 #include "lj_str.h"
 #include "lj_tab.h"
 #include "lj_udata.h"
@@ -122,8 +123,13 @@ LJLIB_CF(buffer_method_put)		LJLIB_REC(.)
   retry:
     if (tvisstr(o)) {
       lj_buf_putstr((SBuf *)sbx, strV(o));
-    } else if (tvisint(o)) {
-      lj_strfmt_putint((SBuf *)sbx, intV(o));
+    } else if (tvisint(o) || tvisi64(o)) {  /* int32, widened, boxed int64 */
+      int64_t v;
+      if (o < L->top && lj_i64_getint(o, &v)) {
+	lj_buf_putstr((SBuf *)sbx, lj_strfmt_i64(L, v));
+      } else {
+	lj_strfmt_putint((SBuf *)sbx, intV(o));
+      }
     } else if (tvisnum(o)) {
       lj_strfmt_putfnum((SBuf *)sbx, STRFMT_G14, numV(o));
     } else if (tvisbuf(o)) {

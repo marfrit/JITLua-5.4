@@ -5,6 +5,3 @@ serpent	gcs	IMPL-DEFINED: pairs() order of hash keys and string.dump bytes diffe
 dkjson	joff	IMPL-DEFINED: key order of encoded sparse/mixed tables follows pairs() order
 dkjson	jon	IMPL-DEFINED: key order of encoded sparse/mixed tables follows pairs() order
 dkjson	gcs	IMPL-DEFINED: key order of encoded sparse/mixed tables follows pairs() order
-luaunit	joff	VM FINDING: _VERSION is "Lua 5.1" (lua.h LUA_VERSION), so luaunit runs its 5.1-only tests (math.fmod(1, 0) is NaN there, 'zero' error in 5.4) and the 5.1 prettystr branch; fix LUA_VERSION to "Lua 5.4" and drop this entry
-luaunit	jon	VM FINDING: _VERSION is "Lua 5.1" (see joff)
-luaunit	gcs	VM FINDING: _VERSION is "Lua 5.1" (see joff)

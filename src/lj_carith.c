@@ -377,7 +377,10 @@ uint64_t lj_carith_checkbit64(lua_State *L, cTValue *o, CTypeID *id)
 		   (uint8_t *)&x, sp, 0);
     return x;
   } else if (LJ_LIKELY(tvisint(o))) {
-    return (uint64_t)intV(o);  /* Sign-extended. */
+    /* Widened 47-bit integers must not use the packed low word. */
+    return (uint64_t)(tvisi47w(o) ? intV47(o) : (int64_t)intV(o));
+  } else if (tvisi64(o)) {
+    return (uint64_t)i64V(o);
   } else {
     if (!tvisnum(o)) lj_err_optype(L, o, LJ_ERR_OPARITH);
     return (uint64_t)lj_num2bit(numV(o));  /* Sign-extended. */

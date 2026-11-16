@@ -43,7 +43,7 @@ static int32_t bit_checkbit(lua_State *L, int narg)
   if (!(o < L->top && lj_strscan_numberobj(o)))
     lj_err_argt(L, narg, LUA_TNUMBER);
   if (LJ_LIKELY(tvisint(o))) {
-    return intV(o);
+    return tvisi47w(o) ? (int32_t)intV47(o) : intV(o);
   } else {
     int32_t i = lj_num2bit(numV(o));
     if (LJ_DUALNUM) setintV(o, i);

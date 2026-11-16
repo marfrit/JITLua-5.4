@@ -302,34 +302,37 @@ static int readable(const char *filename)
   return 1;
 }
 
-static const char *pushnexttemplate(lua_State *L, const char *path)
-{
-  const char *l;
-  while (*path == *LUA_PATHSEP) path++;  /* skip separators */
-  if (*path == '\0') return NULL;  /* no more templates */
-  l = strchr(path, *LUA_PATHSEP);  /* find next separator */
-  if (l == NULL) l = path + strlen(path);
-  lua_pushlstring(L, path, (size_t)(l - path));  /* template */
-  return l;
-}
-
+/*
+** PUC 5.4 semantics: expand the whole path first, then iterate its
+** ';'-separated segments. Consecutive separators yield empty segments
+** (readable("") fails); the error message is built from the same split,
+** with "\n\t" between entries and no leading prefix (the caller adds it).
+*/
 static const char *searchpath (lua_State *L, const char *name,
 			       const char *path, const char *sep,
 			       const char *dirsep)
 {
   luaL_Buffer msg;  /* to build error message */
-  luaL_buffinit(L, &msg);
-  if (*sep != '\0')  /* non-empty separator? */
+  const char *expanded, *p, *end;
+  int appended = 0;
+  if (*sep != '\0' && strchr(name, *sep) != NULL)  /* separator in name? */
     name = luaL_gsub(L, name, sep, dirsep);  /* replace it by 'dirsep' */
-  while ((path = pushnexttemplate(L, path)) != NULL) {
-    const char *filename = luaL_gsub(L, lua_tostring(L, -1),
-				     LUA_PATH_MARK, name);
-    lua_remove(L, -2);  /* remove path template */
-    if (readable(filename))  /* does file exist and is readable? */
-      return filename;  /* return that file name */
-    lua_pushfstring(L, "\n\tno file " LUA_QS, filename);
+  expanded = luaL_gsub(L, path, LUA_PATH_MARK, name);
+  luaL_buffinit(L, &msg);
+  end = expanded + strlen(expanded);
+  for (p = expanded; p <= end; p++) {
+    const char *s = strchr(p, *LUA_PATHSEP);
+    size_t len = (s != NULL) ? (size_t)(s - p) : (size_t)(end - p);
+    lua_pushlstring(L, p, len);  /* candidate file name */
+    if (readable(lua_tostring(L, -1)))  /* does file exist and is readable? */
+      return lua_tostring(L, -1);  /* return that file name */
+    if (appended) luaL_addstring(&msg, "\n\t");
+    lua_pushfstring(L, "no file " LUA_QS, lua_tostring(L, -1));
     lua_remove(L, -2);  /* remove file name */
     luaL_addvalue(&msg);  /* concatenate error msg. entry */
+    appended = 1;
+    if (s == NULL) break;
+    p = s;  /* for-loop increment skips the separator */
   }
   luaL_pushresult(&msg);  /* create error message */
   return NULL;  /* not found */
@@ -375,7 +378,8 @@ static int lj_cf_package_loader_lua(lua_State *L)
   if (filename == NULL) return 1;  /* library not found in this path */
   if (luaL_loadfile(L, filename) != 0)
     loaderror(L, filename);
-  return 1;  /* library loaded successfully */
+  lua_pushstring(L, filename);  /* will be 2nd argument to module */
+  return 2;  /* return open function and file name */
 }
 
 static int lj_cf_package_loader_c(lua_State *L)
@@ -385,7 +389,8 @@ static int lj_cf_package_loader_c(lua_State *L)
   if (filename == NULL) return 1;  /* library not found in this path */
   if (ll_loadfunc(L, filename, name, 0) != 0)
     loaderror(L, filename);
-  return 1;  /* library loaded successfully */
+  lua_pushstring(L, filename);  /* will be 2nd argument to module */
+  return 2;  /* return open function and file name */
 }
 
 static int lj_cf_package_loader_croot(lua_State *L)
@@ -400,11 +405,12 @@ static int lj_cf_package_loader_croot(lua_State *L)
   if (filename == NULL) return 1;  /* root not found */
   if ((st = ll_loadfunc(L, filename, name, 0)) != 0) {
     if (st != PACKAGE_ERR_FUNC) loaderror(L, filename);  /* real error */
-    lua_pushfstring(L, "\n\tno module " LUA_QS " in file " LUA_QS,
+    lua_pushfstring(L, "no module " LUA_QS " in file " LUA_QS,
 		    name, filename);
     return 1;  /* function not found */
   }
-  return 1;
+  lua_pushstring(L, filename);  /* will be 2nd argument to module */
+  return 2;  /* return open function and file name */
 }
 
 static int lj_cf_package_loader_preload(lua_State *L)
@@ -417,20 +423,57 @@ static int lj_cf_package_loader_preload(lua_State *L)
   if (lua_isnil(L, -1)) {  /* Not found? */
     const char *bcname = mksymname(L, name, SYMPREFIX_BC);
     const char *bcdata = ll_bcsym(NULL, bcname);
-    if (bcdata == NULL || luaL_loadbuffer(L, bcdata, ~(size_t)0, name) != 0)
-      lua_pushfstring(L, "\n\tno field package.preload['%s']", name);
+    if (bcdata == NULL || luaL_loadbuffer(L, bcdata, ~(size_t)0, name) != 0) {
+      lua_pushfstring(L, "no field package.preload['%s']", name);
+      return 1;  /* error message string */
+    }
   }
-  return 1;
+  lua_pushliteral(L, ":preload:");
+  return 2;  /* loader function and loader data */
 }
 
 /* ------------------------------------------------------------------------ */
+
+/* PUC 5.4 findloader: iterate 'package.searchers', each searcher gets the
+** module name and must deliver up to two results: (loader [, data]) or an
+** error-message string. Push loader function and loader data on success.
+** Stack on entry: 1 = name, 2 = LOADED; searchers go to index 3.
+*/
+static void findloader(lua_State *L, const char *name)
+{
+  int i;
+  luaL_Buffer msg;  /* to build error message */
+  lua_getfield(L, LUA_ENVIRONINDEX, "searchers");
+  if (!lua_istable(L, -1))
+    luaL_error(L, LUA_QL("package.searchers") " must be a table");
+  luaL_buffinit(L, &msg);
+  for (i = 1; ; i++) {
+    lua_rawgeti(L, 3, i);  /* get a searcher */
+    if (lua_isnil(L, -1)) {  /* no more searchers? */
+      lua_pop(L, 1);  /* remove nil */
+      luaL_pushresult(&msg);  /* create error message */
+      luaL_error(L, "module " LUA_QS " not found:%s",
+		 name, lua_tostring(L, -1));
+    }
+    lua_pushstring(L, name);
+    lua_call(L, 1, 2);  /* call it, expect (loader [, data]) */
+    if (lua_isfunction(L, -2))  /* did it find a loader? */
+      return;  /* module loader found */
+    else if (lua_isstring(L, -2)) {  /* searcher returned error message? */
+      lua_pop(L, 1);  /* remove extra return */
+      luaL_addstring(&msg, "\n\t");  /* error-message prefix */
+      luaL_addvalue(&msg);  /* concatenate error message */
+    } else {  /* no error message */
+      lua_pop(L, 2);  /* remove both returns */
+    }
+  }
+}
 
 #define KEY_SENTINEL	(U64x(81000000,00000000)|'s')
 
 static int lj_cf_package_require(lua_State *L)
 {
   const char *name = luaL_checkstring(L, 1);
-  int i;
   lua_settop(L, 1);  /* _LOADED table will be at index 2 */
   lua_getfield(L, LUA_REGISTRYINDEX, "_LOADED");
   lua_getfield(L, 2, name);
@@ -439,39 +482,31 @@ static int lj_cf_package_require(lua_State *L)
       luaL_error(L, "loop or previous error loading module " LUA_QS, name);
     return 1;  /* package is already loaded */
   }
-  /* else must load it; iterate over available loaders */
-  lua_getfield(L, LUA_ENVIRONINDEX, "loaders");
-  if (!lua_istable(L, -1))
-    luaL_error(L, LUA_QL("package.loaders") " must be a table");
-  lua_pushliteral(L, "");  /* error message accumulator */
-  for (i = 1; ; i++) {
-    lua_rawgeti(L, -2, i);  /* get a loader */
-    if (lua_isnil(L, -1))
-      luaL_error(L, "module " LUA_QS " not found:%s",
-		 name, lua_tostring(L, -2));
-    lua_pushstring(L, name);
-    lua_call(L, 1, 1);  /* call it */
-    if (lua_isfunction(L, -1))  /* did it find module? */
-      break;  /* module loaded successfully */
-    else if (lua_isstring(L, -1))  /* loader returned error message? */
-      lua_concat(L, 2);  /* accumulate it */
-    else
-      lua_pop(L, 1);
-  }
-  (L->top++)->u64 = KEY_SENTINEL;
+  lua_pop(L, 1);  /* remove 'getfield' result */
+  findloader(L, name);  /* pushes loader function and loader data */
+  (L->top++)->u64 = KEY_SENTINEL;  /* mark as loading, to catch loops */
   lua_setfield(L, 2, name);  /* _LOADED[name] = sentinel */
-  lua_pushstring(L, name);  /* pass name as argument to module */
-  lua_call(L, 1, 1);  /* run loaded module */
+  lua_rotate(L, -2, 1);  /* function <-> loader data */
+  lua_pushvalue(L, 1);  /* name is 1st argument to module loader */
+  lua_pushvalue(L, -3);  /* loader data is 2nd argument */
+  /* stack: ...; loader data; loader function; mod. name; loader data */
+  lua_call(L, 2, 1);  /* run loader to load module */
+  /* stack: ...; loader data; result from loader */
   if (!lua_isnil(L, -1))  /* non-nil return? */
     lua_setfield(L, 2, name);  /* _LOADED[name] = returned value */
+  else
+    lua_pop(L, 1);  /* pop nil */
   lua_getfield(L, 2, name);
-  if ((L->top-1)->u64 == KEY_SENTINEL) {   /* module did not set a value? */
-    lua_pushboolean(L, 1);  /* use true as result */
-    lua_pushvalue(L, -1);  /* extra copy to be returned */
+  if (lua_isnil(L, -1) || (L->top-1)->u64 == KEY_SENTINEL) {
+    /* module set no value (or left our sentinel): use true as result */
+    lua_pop(L, 1);  /* remove loaded value */
+    lua_pushboolean(L, 1);
+    lua_pushvalue(L, -1);  /* extra copy to store */
     lua_setfield(L, 2, name);  /* _LOADED[name] = true */
-  }
+  }  /* else LOADED[name] stays on the stack as the module result */
+  lua_rotate(L, -2, 1);  /* loader data <-> module result */
   lj_lib_checkfpu(L);
-  return 1;
+  return 2;  /* return module result and loader data */
 }
 
 /* ------------------------------------------------------------------------ */
@@ -604,10 +639,9 @@ LUALIB_API int luaopen_package(lua_State *L)
     lj_lib_pushcf(L, package_loaders[i], 1);
     lua_rawseti(L, -2, i+1);
   }
-#if LJ_52
+  /* package.searchers always exists (5.4); package.loaders is the 5.1 alias */
   lua_pushvalue(L, -1);
   lua_setfield(L, -3, "searchers");
-#endif
   lua_setfield(L, -2, "loaders");
   lua_getfield(L, LUA_REGISTRYINDEX, "LUA_NOENV");
   noenv = lua_toboolean(L, -1);

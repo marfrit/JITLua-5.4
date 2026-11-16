@@ -1916,19 +1916,7 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov RDd, 1+2
   |  jmp ->fff_res
   |
-  |.ffunc_n math_modf
-  |  mov RB, BASE
-  |.if X64WIN
-  |  lea CARG2, [BASE-16]	// Caveat: CARG2 == BASE
-  |.else
-  |  lea CARG1, [BASE-16]
-  |.endif
-  |  call extern modf
-  |  mov BASE, RB
-  |  mov PC, [BASE-8]
-  |  movsd qword [BASE-8], xmm0
-  |  mov RDd, 1+2
-  |  jmp ->fff_res
+  |// 5.4: math.modf is a C function (lib_math.c), its integral part may be an integer.
   |
   |.macro math_minmax, name, cmovop, sseop
   |  .ffunc_1 name

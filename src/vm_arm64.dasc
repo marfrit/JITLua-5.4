@@ -1595,13 +1595,7 @@ static void build_subroutines(BuildCtx *ctx)
   |   str CARG2, [BASE, #-8]
   |  b ->fff_res
   |
-  |.ffunc_n math_modf
-  |  sub CARG1, BASE, #16
-  |   ldr PC, [BASE, FRAME_PC]
-  |  bl extern modf
-  |   mov RC, #(2+1)*8
-  |  str d0, [BASE, #-8]
-  |  b ->fff_res
+  |// 5.4: math.modf is a C function (lib_math.c), its integral part may be an integer.
   |
   |.macro math_minmax, name, cond, fcond
   |  .ffunc_1 name

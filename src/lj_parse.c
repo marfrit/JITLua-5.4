@@ -2821,6 +2821,7 @@ static void parse_local(LexState *ls, int vinfo)
     var_add(ls, nvars);
     {  /* 5.4 <close>: register the slot at runtime (BC_TBC) and make every
        ** exit of the scope (block end, break/goto, return) emit a UCLO. */
+      FuncState *fs = ls->fs;
       BCReg i, ntbc = 0;
       for (i = fs->nactvar - nvars; i < fs->nactvar; i++) {
 	if ((var_get(ls, fs, i).info & VSTACK_CLOSE)) {

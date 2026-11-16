@@ -717,7 +717,7 @@ void LJ_FASTCALL lj_meta_tbcmark(lua_State *L, TValue *o)
     const char *name = NULL;
     if (curr_funcisL(L))
       lj_debug_slotname(curr_proto(L), pc, (BCReg)(o - L->base), &name);
-    lj_err_callerv(L, LJ_ERR_TBCVAL, name ? name : "?");
+    lj_err_msgv(L, LJ_ERR_TBCVAL, name ? name : "?");
   }
   tbc_push(L, o);
 }

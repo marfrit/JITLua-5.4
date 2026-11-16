@@ -858,3 +858,18 @@ fuzz 160/160. Bench JIT arms unchanged (arm64 B1 16.6, B2 1496.6, B2b
 148.9, B3 23.0 / 215.2 ms; x64 B1 30.5, B2 3211.6, B2b 677.8, B3 47.7 /
 955.5 ms); -joff arms faster/leaner from the GC drive (arm64 B1 12036 ->
 3996 ms, B2 522 -> 190 MB).
+
+## Session 31 (branch bits-mm) — 5.4 bitwise metamethods
+
+__band/__bor/__bxor/__shl/__shr/__bnot: MMDEF gains the six ids (appended
+after close, arith ids stay). lj_meta_bitop returns a metamethod call base
+like lj_meta_arith: two numbers take the integer path (which raises
+"number has no integer representation" itself), otherwise the metamethod
+of the first, then the second operand is called (__bnot with the operand
+twice), else the 5.4 "attempt to perform bitwise operation on a <type>
+value" error; both VMs branch to vmeta_binop on a non-NULL result. The
+recorder dispatches BC_BNOT/BAND/BOR/BXOR/BSHL/BSHR with a non-number
+operand through rec_mm_arith (BSAR is LuaJIT-only). bits_02_metamethods
+passes in A and B (removed from known-bad); a hot loop over metamethod bit
+operators compiles.
+GATESLINE

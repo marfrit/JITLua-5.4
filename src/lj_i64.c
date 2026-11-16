@@ -97,6 +97,7 @@ static void i64_resize(lua_State *L, MSize size)
   }
   g->i64.tab = newtab;
   g->i64.mask = size-1;
+  g->i64.used = g->i64.num;  /* Rehashing drops the tombstones. */
 }
 
 void LJ_FASTCALL lj_i64_remove(global_State *g, GCudata *ud)
@@ -131,13 +132,24 @@ GCudata *lj_i64_box(lua_State *L, int64_t v)
     GCudata *ud = lj_udata_new(L, sizeof(int64_t), tabref(L->env));
     ud->udtype = UDTYPE_I64BOX;
     *(int64_t *)uddata(ud) = v;
-    /* Insert (rehash if the table is getting full). */
-    if (!g->i64.tab || g->i64.num >= (g->i64.mask+1) * 3 / 4)
-      i64_resize(L, g->i64.tab ? (g->i64.mask+1) * 2 : I64_HSIZE_MIN);
+    /* Insert. The load that matters for the probe chains is live entries
+    ** plus tombstones (a lookup stops only at an empty anchor): rehash when
+    ** that reaches 3/4, growing only if the live entries need it. Counting
+    ** live entries alone let a GC-churned table fill up with tombstones and
+    ** the lookup loop above never found an empty anchor (measured: the JIT's
+    ** -O0 trace tail boxing hung). */
+    if (!g->i64.tab) {
+      i64_resize(L, I64_HSIZE_MIN);
+    } else if (g->i64.used + 1 > (g->i64.mask+1) * 3 / 4) {
+      MSize size = g->i64.mask+1;
+      if (g->i64.num + 1 > size / 2) size *= 2;
+      i64_resize(L, size);
+    }
     {
       MSize mask = g->i64.mask, h = i64_hash(v) & mask;
       while (gcrefu(g->i64.tab[h]) != 0 && gcrefu(g->i64.tab[h]) != I64_TOMB)
 	h = (h + 1) & mask;
+      if (gcrefu(g->i64.tab[h]) == 0) g->i64.used++;  /* Reusing a tombstone keeps the load. */
       setgcref(g->i64.tab[h], obj2gco(ud));
       g->i64.num++;
     }
@@ -152,6 +164,7 @@ void LJ_FASTCALL lj_i64_freetab(global_State *g)
     g->i64.tab = NULL;
     g->i64.mask = 0;
     g->i64.num = 0;
+    g->i64.used = 0;
   }
 }
 

@@ -2622,7 +2622,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  beq >8				// Tag TISNUM but not int32: widened.
     |  cmn ITYPE, #-LJ_TUDATA
     |  beq >8				// Box (or userdata vs. number).
-    |  cmn ITYPE, #-LJ_TISNUM		// Restore flags: lo = double.
+    |  cmp TISNUMhi, CARG1, lsr #32	// Restore flags: lo = not a number.
     |.if FFI
     |  blo >7
     |.else

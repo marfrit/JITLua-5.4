@@ -114,6 +114,15 @@ LUALIB_API int luaL_loadfilex(lua_State *L, const char *filename,
     ctx.fp = stdin;
     chunkname = "=stdin";
   }
+  /* PUC 5.4 luaL_loadfilex: skip a first line starting with '#'. */
+  {
+    int c = fgetc(ctx.fp);
+    if (c == '#') {
+      while ((c = fgetc(ctx.fp)) != EOF && c != '\n') ;
+    } else if (c != EOF) {
+      ungetc(c, ctx.fp);
+    }
+  }
   status = lua_loadx(L, reader_file, &ctx, chunkname, mode);
   if (ferror(ctx.fp)) err = errno;
   if (filename) {

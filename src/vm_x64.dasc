@@ -3045,13 +3045,21 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  ja ->vmeta_comp
     |  // RA is a number.
     |  cmp RBd, LJ_TISNUM; jb >1; jne ->vmeta_comp
-    |  // RA is a number, RD is an integer.
+    |  // RA is a number, RD is an integer (5.4: or a widened int -> meta).
+    |  mov TMPR, RD
+    |  shr TMPR, 32
+    |  test TMPRd, 0x7fff
+    |  jnz ->vmeta_comp
     |  cvtsi2sd xmm0, RDd
     |  jmp >2
     |
     |8:  // RA is an integer, RD is not an integer.
     |  ja ->vmeta_comp
-    |  // RA is an integer, RD is a number.
+    |  // RA is an integer (5.4: or a widened int -> meta), RD is a number.
+    |  mov TMPR, RA
+    |  shr TMPR, 32
+    |  test TMPRd, 0x7fff
+    |  jnz ->vmeta_comp
     |  cvtsi2sd xmm1, RAd
     |  movq xmm0, RD
     |  jmp >3

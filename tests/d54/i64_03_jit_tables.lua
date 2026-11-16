@@ -84,6 +84,17 @@ for i = 1, 1000 do
   if w < nan or w > nan or w == nan then nn = nn + 1 end
 end
 p("cmpnum", lt, ge, le, gt, eq, ne, nn)
+-- Widened vs small float, both orders: the low 32 bits of 2^40 are 0, so a
+-- compare that only looks at the low word gets every one of these wrong.
+local lo1, lo2, lo3, lo4 = 0, 0, 0, 0
+local neg = -(1 << 40)
+for i = 1, 1000 do
+  if w > 5.5 then lo1 = lo1 + 1 end
+  if 5.5 < w then lo2 = lo2 + 1 end
+  if neg < -0.5 then lo3 = lo3 + 1 end
+  if -0.5 >= neg then lo4 = lo4 + 1 end
+end
+p("cmpnum-lo", lo1, lo2, lo3, lo4)
 
 -- Floor division on int32, int64 and float operands.
 local d1, d2, d3, d4, d5 = 0, 0, 0, 0, 0

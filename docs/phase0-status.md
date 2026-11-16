@@ -789,3 +789,12 @@ C API (reviewed by a read-only reviewer; blockers fixed):
 - Not done: lua_resume's 5.4 signature (lua.h + one definition + external call
   sites; in-tree has only the definition), lua_setwarnf/lua_WarnFunction,
   userdata arrays >1. Tests: tests/capi/test_capi.c now 75 checks.
+
+## Session 27b — luaconf default paths = PUC 5.4.7
+
+luaconf.h now targets /lua/5.4 (/usr/local/share/lua/5.4, /usr/local/lib/
+lua/5.4) and the LUA_PATH_DEFAULT/LUA_CPATH_DEFAULT ordering matches PUC build
+defaults exactly (share, lib/lua, ./, ./?/init.lua; cpath lib/lua/5.4 plus
+./?.so), dropping the luajit-2.1 share dir. Bare `luajit -e 'print(package.path,
+package.cpath)'` diffs empty against the PUC build. jit.* module lookup now has
+no luajit-2.1 default (they were unavailable anyway; MISSION extension note).

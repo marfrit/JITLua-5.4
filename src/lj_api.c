@@ -1450,6 +1450,11 @@ LUA_API int lua_gc(lua_State *L, int what, int data)
   case LUA_GCISRUNNING:
     res = (g->gc.threshold != LJ_MAX_MEM);
     break;
+  case LUA_GCGEN: case LUA_GCINC:
+    /* Lua 5.4 GC-mode switches. LuaJIT has a single incremental two-generation
+    ** collector; accept the mode names and keep the current one (documented). */
+    res = 0;
+    break;
   default:
     res = -1;  /* Invalid option. */
   }

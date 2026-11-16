@@ -169,6 +169,8 @@ typedef struct FuncState {
   VarIndex uvtmp[LJ_MAX_UPVAL];	/* Temporary upvalue map. */
 } FuncState;
 
+static void fs_markenv(FuncState *fs);  /* 5.4 _ENV upvalue position. */
+
 /* Binary and unary operators. ORDER OPR */
 typedef enum BinOpr {
   OPR_ADD, OPR_SUB, OPR_MUL, OPR_DIV, OPR_MOD, OPR_POW,  /* ORDER ARITH */

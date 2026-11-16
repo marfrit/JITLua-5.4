@@ -252,8 +252,11 @@ SBuf *lj_buf_puttab(SBuf *sb, GCtab *t, GCstr *sep, int32_t i, int32_t e)
       } else if (tvisstr(o)) {
 	MSize len = strV(o)->len;
 	w = lj_buf_wmem(lj_buf_more(sb, len + seplen), strVdata(o), len);
-      } else if (tvisint(o)) {
+      } else if (tvisint(o) && !tvisi47w(o)) {
 	w = lj_strfmt_wint(lj_buf_more(sb, STRFMT_MAXBUF_INT+seplen), intV(o));
+      } else if (tvisint(o) || tvisi64(o)) {  /* 5.4 integer outside int32. */
+	uint64_t v = tvisi64(o) ? (uint64_t)i64V(o) : (uint64_t)intV47(o);
+	w = lj_buf_more(lj_strfmt_putfxint(sb, STRFMT_D, v), seplen);
       } else if (tvisnum(o)) {
 	w = lj_buf_more(lj_strfmt_putfnumstr(sb, numV(o)), seplen);
       } else {

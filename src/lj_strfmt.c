@@ -388,7 +388,9 @@ SBuf *lj_strfmt_putfnum_int(SBuf *sb, SFormat sf, lua_Number n)
 static void strfmt_checkint(lua_State *L, int arg, lua_Number n)
 {
   int64_t k = lj_num2i64(n);
-  if ((lua_Number)k != n)
+  /* The conversion saturates on some targets: check the range explicitly. */
+  if (!(n >= -9223372036854775808.0 && n < 9223372036854775808.0) ||
+      (lua_Number)k != n)
     lj_err_arg(L, arg, LJ_ERR_NUMNOINT);
 }
 
@@ -486,8 +488,13 @@ int lj_strfmt_putarg(lua_State *L, SBuf *sb, int arg, int retry)
 	cTValue *mo;
 	if ((sf & STRFMT_T_QUOTED) && !tvisstr(o) && !tvisbuf(o)) {
 	  /* 5.4: %q renders numbers, nil and booleans as readable literals. */
-	  if (tvisi47w(o)) {
-	    sb = lj_strfmt_putfxint(sb, STRFMT_D, (uint64_t)intV47(o));
+	  if (tvisi47w(o) || tvisi64(o)) {  /* 5.4 integer outside int32. */
+	    int64_t v = tvisi64(o) ? i64V(o) : intV47(o);
+	    if (v == (int64_t)(-0x7fffffffffffffffLL - 1))  /* lstrlib: mininteger as hex. */
+	      sb = lj_buf_putmem(sb, "0x8000000000000000", 18);
+	    else
+	      sb = lj_strfmt_putfxint(sb, STRFMT_D, (uint64_t)v);
+	    break;
 	  } else if (tvisint(o)) {
 	    sb = lj_strfmt_putint(sb, intV(o));
 	    break;

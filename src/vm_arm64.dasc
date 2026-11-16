@@ -940,6 +940,7 @@ static void build_subroutines(BuildCtx *ctx)
   |    str PC, SAVE_PC
   |  bl extern lj_meta_arith  // (lua_State *L, TValue *ra,*rb,*rc, BCReg op)
   |  // Returns NULL (finished) or TValue * (metamethod).
+  |  ldr BASE, L->base		// 5.4: the int64 helper may run a GC step.
   |  cbz CRET1, ->cont_nop
   |
   |  // Call metamethod for binary op.
@@ -987,6 +988,7 @@ static void build_subroutines(BuildCtx *ctx)
   |   mov CARG1, L
   |    str PC, SAVE_PC
   |  bl extern lj_meta_bitop  // (lua_State *L, TValue *ra,*rb,*rc, BCReg op)
+  |  ldr BASE, L->base		// 5.4: the int64 helper may run a GC step.
   |  b ->cont_nop
   |
   |//-- Call metamethod ----------------------------------------------------

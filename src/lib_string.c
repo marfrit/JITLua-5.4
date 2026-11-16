@@ -69,7 +69,7 @@ LJLIB_ASM(string_char)		LJLIB_REC(.)
   for (i = 1; i <= nargs; i++) {
     int32_t k = lj_lib_checkint(L, i);
     if (!checku8(k))
-      lj_err_arg(L, i, LJ_ERR_BADVAL);
+      lj_err_arg(L, i, LJ_ERR_VALRNG);  /* 5.4 lstrlib wording. */
     buf[i-1] = (char)k;
   }
   setstrV(L, L->base-1-LJ_FR2, lj_str_new(L, buf, (size_t)nargs));
@@ -90,6 +90,11 @@ LJLIB_CF(string_rep)		LJLIB_REC(.)
   int32_t rep = lj_lib_checkint(L, 2);
   GCstr *sep = lj_lib_optstr(L, 3);
   SBuf *sb = lj_buf_tmp_(L);
+  /* 5.4: the size check comes first (a count saturated from a 5.4 integer
+  ** outside int32 lands here too). */
+  if (rep > 0 &&
+      ((uint64_t)s->len + (sep ? sep->len : 0)) * (uint64_t)rep >= LJ_MAX_STR)
+    lj_err_caller(L, LJ_ERR_STRREP);
   if (sep && rep > 1) {
     GCstr *s2 = lj_buf_cat2str(L, sep, s);
     lj_buf_reset(sb);

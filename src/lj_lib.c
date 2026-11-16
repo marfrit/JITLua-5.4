@@ -25,6 +25,7 @@
 #include "lj_lex.h"
 #include "lj_bcdump.h"
 #include "lj_lib.h"
+#include "lj_i64.h"
 
 /* -- Library initialization ---------------------------------------------- */
 
@@ -219,7 +220,7 @@ GCstr *lj_lib_optstr(lua_State *L, int narg)
 void lj_lib_checknumber(lua_State *L, int narg)
 {
   TValue *o = L->base + narg-1;
-  if (!(o < L->top && lj_strscan_numberobj(o)))
+  if (!(o < L->top && lj_strscan_numberobj64(L, o)))
     lj_err_argt(L, narg, LUA_TNUMBER);
 }
 #endif
@@ -227,11 +228,13 @@ void lj_lib_checknumber(lua_State *L, int narg)
 lua_Number lj_lib_checknum(lua_State *L, int narg)
 {
   TValue *o = L->base + narg-1;
+  int64_t v;
   if (!(o < L->top &&
-	(tvisnumber(o) || (tvisstr(o) && lj_strscan_num(strV(o), o)))))
+	(tvisnumber(o) || tvisi64(o) ||
+	 (tvisstr(o) && lj_strscan_num(strV(o), o)))))
     lj_err_argt(L, narg, LUA_TNUMBER);
-  if (LJ_UNLIKELY(tvisint(o))) {
-    lua_Number n = (lua_Number)intV(o);
+  if (LJ_UNLIKELY(lj_i64_getint(o, &v))) {  /* int32, widened or boxed. */
+    lua_Number n = (lua_Number)v;
     setnumV(o, n);
     return n;
   } else {
@@ -242,10 +245,19 @@ lua_Number lj_lib_checknum(lua_State *L, int narg)
 int32_t lj_lib_checkint(lua_State *L, int narg)
 {
   TValue *o = L->base + narg-1;
-  if (!(o < L->top && lj_strscan_numberobj(o)))
+  int64_t v;
+  if (!(o < L->top && lj_strscan_numberobj64(L, o)))
     lj_err_argt(L, narg, LUA_TNUMBER);
-  if (LJ_LIKELY(tvisint(o))) {
+  if (LJ_LIKELY(tvisint(o) && !tvisi47w(o))) {
     return intV(o);
+  } else if (lj_i64_getint(o, &v)) {
+    /* A 5.4 integer outside int32: saturate. The library functions clamp
+    ** positions (string.sub), or reject the size anyway (string.rep,
+    ** string.char, table.insert), the same way PUC does for such values. */
+    int32_t i = v > 0x7fffffffLL ? 0x7fffffff :
+		v < -0x7fffffffLL-1 ? (int32_t)(-0x7fffffffLL-1) : (int32_t)v;
+    setintV(o, i);
+    return i;
   } else {
     int32_t i = lj_num2int(numV(o));
     if (LJ_DUALNUM) setintV(o, i);

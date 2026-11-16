@@ -206,7 +206,7 @@ TValue *lj_meta_tset(lua_State *L, cTValue *o, cTValue *k)
   return NULL;  /* unreachable */
 }
 
-static cTValue *str2num(cTValue *o, TValue *n)
+static cTValue *str2num(lua_State *L, cTValue *o, TValue *n)
 {
   if (tvisnum(o) || tvisint(o) || tvisi64(o))
     return o;  /* Floats and 5.4 integers (inline, widened, boxed) stay as-is. */
@@ -219,7 +219,7 @@ static cTValue *str2num(cTValue *o, TValue *n)
 #if LJ_DUALNUM
     /* 5.4: integer-syntax strings stay integers, decimal/exponent strings
     ** are floats ("1e2" * 2 is 200.0, "10" + 5 is 15). */
-    if (floaty ? lj_strscan_num(strV(o), n) : lj_strscan_number(strV(o), n))
+    if (floaty ? lj_strscan_num(strV(o), n) : lj_strscan_number64(L, strV(o), n))
 #else
     if (lj_strscan_num(strV(o), n))
 #endif
@@ -228,6 +228,19 @@ static cTValue *str2num(cTValue *o, TValue *n)
   }
   else
     return NULL;
+}
+
+/* ADR-001b: an arithmetic or bitwise result that had to be boxed is the only
+** allocation a loop of pure int64 arithmetic makes, and the VM's arithmetic
+** fallbacks have no GC check of their own -- so drive the collector here,
+** like lj_meta_cat() does. Only the VM calls these helpers (L->top is not
+** set up; the VM reloads BASE after the call, the stack may move). */
+static LJ_AINLINE void meta_i64_gccheck(lua_State *L, cTValue *ra)
+{
+  if (tvisi64(ra) && LJ_UNLIKELY(G(L)->gc.total >= G(L)->gc.threshold)) {
+    L->top = curr_topL(L);
+    lj_gc_step(L);
+  }
 }
 
 /* Helper for arithmetic instructions. Coercion, metamethod. */
@@ -240,25 +253,31 @@ TValue *lj_meta_arith(lua_State *L, TValue *ra, cTValue *rb, cTValue *rc,
   /* Lua 5.4 exact 64-bit semantics (ADR-001b): a boxed integer operand, or an
   ** int32 overflow that landed here, is handled by the C helper. */
   if (mm == MM_unm) {  /* Unary minus: wraps, -mininteger == mininteger. */
-    if (lj_i64_unop(L, ra, rb, I64_UNM))
+    if (lj_i64_unop(L, ra, rb, I64_UNM)) {
+      meta_i64_gccheck(L, ra);
       return NULL;  /* Handled. */
+    }
   } else if (mm < MM__MAX) {
     I64Op iop = lj_i64_op_from_mm(mm);
     if (iop != I64__MAX &&
 	(tvisi64(rb) || tvisi64(rc) || tvisint(rb) || tvisint(rc) ||
 	 tvisnum(rb) || tvisnum(rc))) {
-      if (lj_i64_arith(L, ra, rb, rc, iop))
+      if (lj_i64_arith(L, ra, rb, rc, iop)) {
+	meta_i64_gccheck(L, ra);
 	return NULL;  /* Handled. */
+      }
     }
   }
-  if ((b = str2num(rb, &tempb)) != NULL &&
-      (c = str2num(rc, &tempc)) != NULL) {
+  if ((b = str2num(L, rb, &tempb)) != NULL &&
+      (c = str2num(L, rc, &tempc)) != NULL) {
     /* Lua 5.4: a coerced string keeps its integer form when both operands
     ** are integers, so "3" + 3 is 3, not 3.0. */
     if (mm < MM__MAX && lj_i64_op_from_mm(mm) != I64__MAX &&
 	(tvisint(b) || tvisi64(b)) && (tvisint(c) || tvisi64(c)) &&
-	lj_i64_arith(L, ra, b, c, lj_i64_op_from_mm(mm)))
+	lj_i64_arith(L, ra, b, c, lj_i64_op_from_mm(mm))) {
+      meta_i64_gccheck(L, ra);
       return NULL;
+    }
     if (mm == MM_idiv) {  /* no IR op for idiv: floor, as 5.4 does */
       setnumV(ra, lj_vm_floor(numberVnum(b) / numberVnum(c)));
       return NULL;
@@ -290,7 +309,7 @@ TValue *lj_meta_arith(lua_State *L, TValue *ra, cTValue *rb, cTValue *rc,
 	  lj_err_msgv(L, LJ_ERR_OPBIN54, verbs[mm-MM_add], lj_typename(rb),
 		      lj_typename(rc));
 	}
-	if (str2num(rb, &tempb) == NULL) rc = rb;
+	if (str2num(L, rb, &tempb) == NULL) rc = rb;
 	lj_err_optype(L, rc, LJ_ERR_OPARITH);
 	return NULL;  /* unreachable */
       }
@@ -306,7 +325,10 @@ void lj_meta_bitop(lua_State *L, TValue *ra, cTValue *rb, cTValue *rc, BCReg op)
 {
 #if LJ_HASFFI
   if (!(tviscdata(rb) || tviscdata(rc))) {
-    if (lj_i64_bitop(L, ra, rb, rc, op)) return;
+    if (lj_i64_bitop(L, ra, rb, rc, op)) {
+      meta_i64_gccheck(L, ra);
+      return;
+    }
     {
       cTValue *o = (tvisint(rb) || tvisi64(rb) || tvisnum(rb)) ? rc : rb;
       const char *tname = lj_typename(o);
@@ -393,13 +415,14 @@ TValue *lj_meta_cat(lua_State *L, TValue *top, int left)
   int fromc = 0;
   if (left < 0) { left = -left; fromc = 1; }
   do {
-    if (!(tvisstr(top) || tvisnumber(top) || tvisbuf(top)) ||
-	!(tvisstr(top-1) || tvisnumber(top-1) || tvisbuf(top-1))) {
+    if (!(tvisstr(top) || tvisnumber(top) || tvisi64(top) || tvisbuf(top)) ||
+	!(tvisstr(top-1) || tvisnumber(top-1) || tvisi64(top-1) ||
+	  tvisbuf(top-1))) {
       cTValue *mo = lj_meta_lookup(L, top-1, MM_concat);
       if (tvisnil(mo)) {
 	mo = lj_meta_lookup(L, top, MM_concat);
 	if (tvisnil(mo)) {
-	  if (tvisstr(top-1) || tvisnumber(top-1)) top++;
+	  if (tvisstr(top-1) || tvisnumber(top-1) || tvisi64(top-1)) top++;
 	  lj_err_optype(L, top-1, LJ_ERR_OPCAT);
 	  return NULL;  /* unreachable */
 	}
@@ -436,7 +459,7 @@ TValue *lj_meta_cat(lua_State *L, TValue *top, int left)
       do {
 	o--; tlen += tvisstr(o) ? strV(o)->len :
 		     tvisbuf(o) ? sbufxlen(bufV(o)) : STRFMT_MAXBUF_NUM;
-      } while (--left > 0 && (tvisstr(o-1) || tvisnumber(o-1)));
+      } while (--left > 0 && (tvisstr(o-1) || tvisnumber(o-1) || tvisi64(o-1)));
       if (tlen >= LJ_MAX_STR) lj_err_msg(L, LJ_ERR_STROV);
       sb = lj_buf_tmp_(L);
       lj_buf_more(sb, (MSize)tlen);
@@ -451,6 +474,8 @@ TValue *lj_meta_cat(lua_State *L, TValue *top, int left)
 	} else if (tvisint(o)) {
 	  if (tvisi47w(o)) lj_strfmt_putfxint(sb, STRFMT_D, (uint64_t)intV47(o));
 	  else lj_strfmt_putint(sb, intV(o));
+	} else if (tvisi64(o)) {  /* Boxed 5.4 integer (ADR-001b). */
+	  lj_strfmt_putfxint(sb, STRFMT_D, (uint64_t)i64V(o));
 	} else {
 	  lj_strfmt_putfnumstr(sb, numV(o));
 	}

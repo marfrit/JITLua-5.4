@@ -86,8 +86,11 @@ LJLIB_CF(table_insert)		LJLIB_REC(.)
   if (nargs != 2*sizeof(TValue)) {
     if (nargs != 3*sizeof(TValue))
       lj_err_caller(L, LJ_ERR_TABINS);
+    n = lj_lib_checkint(L, 2);
+    if ((uint32_t)(n - 1) >= (uint32_t)i)  /* 5.4: 1 <= pos <= #t+1 */
+      lj_err_arg(L, 2, LJ_ERR_TABINSPOS);
     /* NOBARRIER: This just moves existing elements around. */
-    for (n = lj_lib_checkint(L, 2); i > n; i--) {
+    for (; i > n; i--) {
       /* The set may invalidate the get pointer, so need to do it first! */
       TValue *dst = lj_tab_setint(L, t, i);
       cTValue *src = lj_tab_getint(t, i-1);

@@ -38,6 +38,7 @@
 #include "lj_strscan.h"
 #include "lj_strfmt.h"
 #include "lj_lib.h"
+#include "lj_i64.h"
 
 /* -- Base library: checks ------------------------------------------------ */
 
@@ -283,7 +284,7 @@ LJLIB_ASM(tonumber)		LJLIB_REC(.)
   int32_t base = lj_lib_optint(L, 2, 10);
   if (base == 10) {
     TValue *o = lj_lib_checkany(L, 1);
-    if (lj_strscan_numberobj(o)) {
+    if (lj_strscan_numberobj64(L, o)) {  /* 5.4: integers of any size. */
       copyTV(L, L->base-1-LJ_FR2, o);
       return FFH_RES(1);
     }
@@ -326,14 +327,10 @@ LJLIB_ASM(tonumber)		LJLIB_REC(.)
       if (p != ep) {
 	while (lj_char_isspace((unsigned char)(*ep))) ep++;
 	if (*ep == '\0') {
-	  if (LJ_DUALNUM && LJ_LIKELY(ul < 0x80000000u+neg)) {
-	    if (neg) ul = ~ul+1u;
-	    setintV(L->base-1-LJ_FR2, (int32_t)ul);
-	  } else {
-	    lua_Number n = (lua_Number)ul;
-	    if (neg) n = -n;
-	    setnumV(L->base-1-LJ_FR2, n);
-	  }
+	  /* 5.4 (l_str2int with a base): the value wraps around modulo 2^64
+	  ** and is always an integer. */
+	  if (neg) ul = ~ul+1u;
+	  lj_i64_tvstore(L, L->base-1-LJ_FR2, (int64_t)ul);
 	  return FFH_RES(1);
 	}
       }

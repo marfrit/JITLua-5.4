@@ -214,20 +214,28 @@ class Job:
         ref = ctx["ref"]
         extra = self.args
         to = self.timeout
+        if ctx.get("gc_stress"):
+            # GC stress: the collector runs on every allocation (pause 0), in
+            # every arm, so a value that is kept alive only by luck (a box
+            # handed out while dead-white, a key stored without a barrier)
+            # gets collected under the test.
+            extra_pre = ["-e", 'collectgarbage("setpause", 0)']
+        else:
+            extra_pre = []
         if self.mode == "A":
-            a = run([ref, name] + extra, cwd, to)
-            b = run([jit, "-joff", name] + extra, cwd, to)
+            a = run([ref] + extra_pre + [name] + extra, cwd, to)
+            b = run([jit, "-joff"] + extra_pre + [name] + extra, cwd, to)
             mismatch, detail = compare(a, b, "puc54", "luajit-jitoff")
         elif self.mode.startswith("B"):
             on = [jit, "-jon"]
             if "@" in self.mode:
                 on += ["-O" + self.mode.split("@", 1)[1]]
-            a = run(on + [name] + extra, cwd, to)
-            b = run([jit, "-joff", name] + extra, cwd, to)
+            a = run(on + extra_pre + [name] + extra, cwd, to)
+            b = run([jit, "-joff"] + extra_pre + [name] + extra, cwd, to)
             mismatch, detail = compare(a, b, "luajit-jiton", "luajit-jitoff")
         elif self.mode == "R":
-            a = run([jit, "-joff", name] + extra, cwd, to)
-            b = run([jit, "-joff", str(DUMP_RELOAD), name] + extra, cwd, to)
+            a = run([jit, "-joff"] + extra_pre + [name] + extra, cwd, to)
+            b = run([jit, "-joff"] + extra_pre + [str(DUMP_RELOAD), name] + extra, cwd, to)
             mismatch, detail = compare(a, b, "direct", "dump-reload")
         else:
             raise ValueError(self.mode)
@@ -305,6 +313,8 @@ def main():
                     help="rewrite known-bad.tsv from the failures of this run")
     ap.add_argument("--strict", action="store_true", help="treat XPASS as failure")
     ap.add_argument("--verbose", action="store_true")
+    ap.add_argument("--gc-stress", action="store_true",
+                    help="run every arm with collectgarbage('setpause', 0)")
     ap.add_argument("--list", action="store_true")
     opts = ap.parse_args()
 
@@ -333,7 +343,8 @@ def main():
     luac = str(Path(opts.luac)) if Path(opts.luac).exists() else None
     if luac is None:
         print("warning: %s missing -- corpus syntax pre-flight disabled" % opts.luac)
-    ctx = {"luajit": str(luajit), "ref": str(ref), "kb": kb, "luac": luac}
+    ctx = {"luajit": str(luajit), "ref": str(ref), "kb": kb, "luac": luac,
+           "gc_stress": opts.gc_stress}
     jobs, skipped, bad = plan(tests, modes, ctx, opts)
 
     results = list(bad)

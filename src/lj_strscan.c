@@ -11,6 +11,7 @@
 #include "lj_obj.h"
 #include "lj_char.h"
 #include "lj_strscan.h"
+#include "lj_i64.h"
 
 /* -- Scanning numbers ---------------------------------------------------- */
 
@@ -108,6 +109,8 @@ static StrScanFmt strscan_hex(const uint8_t *p, TValue *o,
 {
   uint64_t x = 0;
   uint32_t i;
+  const uint8_t *p0 = p;
+  int32_t ex2in = ex2;  /* Before the excess-digit summary below adds to it. */
 
   /* Scan hex digits. */
   for (i = dig > 16 ? 16 : dig ; i; i--, p++) {
@@ -126,6 +129,19 @@ static StrScanFmt strscan_hex(const uint8_t *p, TValue *o,
 	!(x == 0 && neg)) {
       o->i = neg ? (int32_t)(~x+1u) : (int32_t)x;
       return STRSCAN_INT;  /* Fast path for 32 bit integers. */
+    }
+    if ((opt & STRSCAN_OPT_TOI64) && ex2in == 0) {
+      /* 5.4: a hexadecimal integer wraps around modulo 2^64, i.e. its value
+      ** is that of the last 16 digits (an integer has no '.' in it). */
+      if (dig > 16) {
+	const uint8_t *q = p0 + (dig - 16);
+	for (x = 0; q < p0 + dig; q++) {
+	  uint32_t d = *q; if (d > '9') d += 9;
+	  x = (x << 4) + (d & 15);
+	}
+      }
+      o->u64 = neg ? ~x+1u : x;
+      return STRSCAN_I64;
     }
     if (!(opt & STRSCAN_OPT_C)) { fmt = STRSCAN_NUM; break; }
     /* fallthrough */
@@ -231,6 +247,13 @@ static StrScanFmt strscan_dec(const uint8_t *p, TValue *o,
 	if (!(opt & STRSCAN_OPT_TONUM) && x < 0x80000000u+neg) {
 	  o->i = neg ? (int32_t)(~x+1u) : (int32_t)x;
 	  return STRSCAN_INT;  /* Fast path for 32 bit integers. */
+	}
+	if ((opt & STRSCAN_OPT_TOI64) &&
+	    x <= 0x8000000000000000ULL - 1u + neg) {
+	  /* 5.4: a decimal integer that fits int64 is an integer; a larger
+	  ** one falls through and becomes a float. */
+	  o->u64 = neg ? ~x+1u : x;
+	  return STRSCAN_I64;
 	}
 	if (!(opt & STRSCAN_OPT_C)) { fmt = STRSCAN_NUM; goto plainnumber; }
 	/* fallthrough */
@@ -535,6 +558,20 @@ int LJ_FASTCALL lj_strscan_num(GCstr *str, TValue *o)
 				   STRSCAN_OPT_TONUM);
   lj_assertX(fmt == STRSCAN_ERROR || fmt == STRSCAN_NUM, "bad scan format");
   return (fmt != STRSCAN_ERROR);
+}
+
+int lj_strscan_number64(lua_State *L, GCstr *str, TValue *o)
+{
+  StrScanFmt fmt = lj_strscan_scan((const uint8_t *)strdata(str), str->len, o,
+				   STRSCAN_OPT_TOINT|STRSCAN_OPT_TOI64);
+  if (fmt == STRSCAN_INT) {
+    setitype(o, LJ_TISNUM);
+  } else if (fmt == STRSCAN_I64) {
+    lj_i64_toTValue(L, o, (int64_t)o->u64);
+  } else if (fmt != STRSCAN_NUM) {
+    return 0;
+  }
+  return 1;
 }
 
 #if LJ_DUALNUM

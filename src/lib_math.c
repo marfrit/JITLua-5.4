@@ -51,13 +51,28 @@ static int math_round_result(lua_State *L, lua_Number r)
   return 1;
 }
 
+/* An integer (int32, widened, boxed) is its own floor and ceil: never round
+** it through a double (2^60+1 would lose the +1). */
+static int math_round_int(lua_State *L)
+{
+  TValue *o = L->base;
+  int64_t v;
+  if (L->top > o && (tvisint(o) || tvisi64(o)) && lj_i64_getint(o, &v)) {
+    copyTV(L, L->top-1, o);
+    return 1;
+  }
+  return 0;
+}
+
 LJLIB_CF(math_floor)
 {
+  if (math_round_int(L)) return 1;
   return math_round_result(L, floor(lj_lib_checknum(L, 1)));
 }
 
 LJLIB_CF(math_ceil)
 {
+  if (math_round_int(L)) return 1;
   return math_round_result(L, ceil(lj_lib_checknum(L, 1)));
 }
 
@@ -114,8 +129,9 @@ LJLIB_CF(math_fmod)
   if (L->top > b && (tvisint(a) || tvisi64(a)) && (tvisint(b) || tvisi64(b))) {
     int64_t x, y;
     if (lj_i64_getint(a, &x) && lj_i64_getint(b, &y)) {
-      if (y == 0) lj_err_msg(L, LJ_ERR_MODZ);
-      lj_i64_toTValue(L, L->top-1, (int64_t)(x % y));
+      if (y == 0) lj_err_arg(L, 2, LJ_ERR_ARGZERO);  /* 5.4 lmathlib wording. */
+      /* 5.4 (lmathlib): y == -1 gives 0 (avoids mininteger % -1). */
+      lj_i64_toTValue(L, L->top-1, y == -1 ? 0 : (int64_t)(x % y));
       return 1;
     }
   }
@@ -137,13 +153,46 @@ LJLIB_ASM(math_ldexp)		LJLIB_REC(.)
   return FFH_RETRY;
 }
 
+/* 5.4: math.min/max compare exactly across integers and floats and return
+** the winning argument as is. The asm fast path handles int32 and float
+** arguments; anything else (widened, boxed, strings) lands here and is
+** finished in C -- retrying the fast path would just come back. */
+/* Exact 5.4 comparison of two numbers (integers of any size, floats):
+** -1, 0, 1, or 2 for unordered (NaN). */
+static int math_cmp(cTValue *a, cTValue *b)
+{
+  int64_t x, y;
+  int ai = lj_i64_getint(a, &x), bi = lj_i64_getint(b, &y);
+  if (ai && bi) return x < y ? -1 : x > y ? 1 : 0;
+  if (ai) return lj_i64_cmpnum(x, numV(b));
+  if (bi) { int c = lj_i64_cmpnum(y, numV(a)); return c == 2 ? 2 : -c; }
+  return numV(a) < numV(b) ? -1 : numV(a) > numV(b) ? 1 : numV(a) == numV(b) ? 0 : 2;
+}
+
+static int math_minmax(lua_State *L, int ismax)
+{
+  int i, n = (int)(L->top - L->base);
+  cTValue *best;
+  for (i = 1; i <= n; i++) lj_lib_checknumber(L, i);
+  best = L->base;
+  for (i = 1; i < n; i++) {
+    cTValue *o = L->base + i;
+    /* PUC: min keeps best unless o < best; max keeps best unless best < o. */
+    if (ismax ? math_cmp(best, o) == -1 : math_cmp(o, best) == -1)
+      best = o;
+  }
+  copyTV(L, L->base-1-LJ_FR2, best);
+  return FFH_RES(1);
+}
+
 LJLIB_ASM(math_min)		LJLIB_REC(math_minmax IR_MIN)
 {
-  int i = 0;
-  do { lj_lib_checknumber(L, ++i); } while (L->base+i < L->top);
-  return FFH_RETRY;
+  return math_minmax(L, 0);
 }
-LJLIB_ASM_(math_max)		LJLIB_REC(math_minmax IR_MAX)
+LJLIB_ASM(math_max)		LJLIB_REC(math_minmax IR_MAX)
+{
+  return math_minmax(L, 1);
+}
 
 LJLIB_PUSH(3.14159265358979323846) LJLIB_SET(pi)
 LJLIB_PUSH(1e310) LJLIB_SET(huge)
@@ -209,15 +258,10 @@ static uint64_t rand_project(uint64_t ran, uint64_t n, RandState *rs)
   }
 }
 
-/* Push a 64-bit unsigned as an integer where the int32 value model allows.
-** Wider results are pushed as a float instead of silently truncating until
-** ADR-001 is decided. */
+/* Push a 64-bit result as a 5.4 integer (ADR-001b: int32, widened or box). */
 static void rand_pushuint(lua_State *L, uint64_t v)
 {
-  if (v <= 0x7fffffffu)
-    setintV(L->top++, (int32_t)v);
-  else
-    setnumV(L->top++, (lua_Number)v);
+  lj_i64_push(L, (int64_t)v);
 }
 
 LJLIB_PUSH(top-2)  /* Upvalue holds userdata with RandState. */

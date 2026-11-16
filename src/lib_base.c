@@ -530,10 +530,15 @@ LJLIB_CF(collectgarbage)
     setnumV(L->top, (lua_Number)G(L)->gc.total/1024.0);
   } else {
     int res = lua_gc(L, opt, data);
-    if (opt == LUA_GCSTEP || opt == LUA_GCISRUNNING)
+    if (opt == LUA_GCSTEP || opt == LUA_GCISRUNNING) {
       setboolV(L->top, res);
-    else
+    } else if (opt == LUA_GCGEN || opt == LUA_GCINC) {
+      /* 5.4 collectgarbage returns the previous mode as a string. */
+      setstrV(L, L->top, res == LUA_GCGEN ?
+	      lj_str_newlit(L, "generational") : lj_str_newlit(L, "incremental"));
+    } else {
       setintV(L->top, res);
+    }
   }
   L->top++;
   return 1;

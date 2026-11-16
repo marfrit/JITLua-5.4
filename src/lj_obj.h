@@ -327,7 +327,9 @@ typedef struct GCudata {
   GCRef env;		/* Should be at same offset in GCfunc. */
   MSize len;		/* Size of payload. */
   GCRef metatable;	/* Must be at same offset in GCtab. */
-  uint32_t align1;	/* To force 8 byte alignment of the payload. */
+  uint32_t nuvalue;	/* 5.4 user values: TValue[nuvalue] after the payload
+			** (payload rounded up to 8 bytes); 0 for internal
+			** userdata types. Doubles as the payload alignment pad. */
 } GCudata;
 
 /* Userdata types. */
@@ -351,7 +353,11 @@ enum {
 ** new tag: the VM's 17-bit form drops the tag's bit 0). */
 #define tvisi64(o)	(tvisudata(o) && udataV(o)->udtype == UDTYPE_I64BOX)
 #define i64V(o)		check_exp(tvisi64(o), *(int64_t *)uddata(udataV(o)))
-#define sizeudata(u)	(sizeof(struct GCudata)+(u)->len)
+/* 5.4 user values live behind the (8-byte aligned) payload. */
+#define uduvofs(len)	(((len)+7u)&~7u)
+#define uduvs(u)	((TValue *)((char *)uddata(u)+uduvofs((u)->len)))
+#define sizeudata(u)	(sizeof(struct GCudata)+((u)->nuvalue ? \
+			 uduvofs((u)->len)+(u)->nuvalue*sizeof(TValue) : (u)->len))
 
 /* -- C data object ------------------------------------------------------- */
 

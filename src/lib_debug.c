@@ -275,25 +275,33 @@ LJLIB_CF(debug_upvaluejoin)
 }
 
 #if LJ_52
+/* 5.4 debug.getuservalue(u, n): the n-th user value plus true, or fail. */
 LJLIB_CF(debug_getuservalue)
 {
-  if (!(L->base < L->top && tvisudata(L->base)))
-    lj_err_argt(L, 1, LUA_TUSERDATA);
+  int n = (int)luaL_optinteger(L, 2, 1);
+  if (!(L->base < L->top && tvisudata(L->base))) {
+    lua_pushnil(L);  /* luaL_pushfail: a non-userdata is not an error. */
+    return 1;
+  }
   L->top = L->base+1;
-  lua_getiuservalue(L, 1, 1);  /* 5.4: any user value, not just a table */
+  if (lua_getiuservalue(L, 1, n) != LUA_TNONE) {
+    lua_pushboolean(L, 1);
+    return 2;
+  }
   return 1;
 }
 
+/* 5.4 debug.setuservalue(u, value, n): returns u, or fail if n is out of range. */
 LJLIB_CF(debug_setuservalue)
 {
+  int n;
   if (!(L->base < L->top && tvisudata(L->base)))
     lj_err_argt(L, 1, LUA_TUSERDATA);
   luaL_checkany(L, 2);
+  n = (int)luaL_optinteger(L, 3, 1);
   L->top = L->base+2;
-  if (!lua_setiuservalue(L, 1, 1))  /* non-GC values cannot be stored here */
-    lua_pushboolean(L, 0);
-  else
-    lua_pushboolean(L, 1);
+  if (!lua_setiuservalue(L, 1, n))
+    lua_pushnil(L);  /* luaL_pushfail */
   return 1;
 }
 #endif

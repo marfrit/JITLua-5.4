@@ -11,6 +11,31 @@
 #include "lj_err.h"
 #include "lj_udata.h"
 
+/* 5.4: a userdata with nuvalue user values (nil at first) after its payload. */
+GCudata *lj_udata_newuv(lua_State *L, MSize sz, MSize nuvalue, GCtab *env)
+{
+  MSize total = nuvalue ? uduvofs(sz) + nuvalue*(MSize)sizeof(TValue) : sz;
+  GCudata *ud = lj_mem_newt(L, sizeof(GCudata) + total, GCudata);
+  global_State *g = G(L);
+  newwhite(g, ud);  /* Not finalized. */
+  ud->gct = ~LJ_TUDATA;
+  ud->udtype = UDTYPE_USERDATA;
+  ud->len = sz;
+  ud->nuvalue = nuvalue;
+  if (nuvalue) {
+    TValue *uv = uduvs(ud);
+    MSize i;
+    for (i = 0; i < nuvalue; i++) setnilV(&uv[i]);
+  }
+  /* NOBARRIER: The GCudata is new (marked white). */
+  setgcrefnull(ud->metatable);
+  setgcref(ud->env, obj2gco(env));
+  /* Chain to userdata list (after main thread). */
+  setgcrefr(ud->nextgc, mainthread(g)->nextgc);
+  setgcref(mainthread(g)->nextgc, obj2gco(ud));
+  return ud;
+}
+
 GCudata *lj_udata_new(lua_State *L, MSize sz, GCtab *env)
 {
   GCudata *ud = lj_mem_newt(L, sizeof(GCudata) + sz, GCudata);
@@ -19,6 +44,7 @@ GCudata *lj_udata_new(lua_State *L, MSize sz, GCtab *env)
   ud->gct = ~LJ_TUDATA;
   ud->udtype = UDTYPE_USERDATA;
   ud->len = sz;
+  ud->nuvalue = 0;
   /* NOBARRIER: The GCudata is new (marked white). */
   setgcrefnull(ud->metatable);
   setgcref(ud->env, obj2gco(env));

@@ -141,7 +141,7 @@ static void test_isinteger(void)
 
 static int throw_bad_uv(lua_State *L)
 {
-  lua_newuserdatauv(L, 4, 2);
+  lua_newuserdatauv(L, 4, 65535);  /* PUC: nuvalue < USHRT_MAX */
   return 0;
 }
 
@@ -166,13 +166,50 @@ static void test_newuserdatauv(void)
   ok(p != NULL && lua_getiuservalue(L, -1, 1) == LUA_TNIL && lua_isnil(L, -1),
      "lua_newuserdata = nuvalue 1 (nil)");
   lua_pop(L, 2);
-  /* nuvalue > 1 is unsupported and aborts with a clear error. */
+  /* nuvalue >= USHRT_MAX is an error, not undefined behaviour. */
   lua_pushcfunction(L, throw_bad_uv);
   ok(lua_pcall(L, 0, 0, 0) != LUA_OK &&
      lua_tostring(L, -1) != NULL &&
-     strstr(lua_tostring(L, -1), "more than one user value") != NULL,
-     "newuserdatauv(_,2) errors clearly");
+     strstr(lua_tostring(L, -1), "invalid user value count") != NULL,
+     "newuserdatauv(_,65535) errors clearly");
   lua_pop(L, 1);
+  /* 5.4: several user values, any value type, independent slots. */
+  { int uidx, i;
+    p = lua_newuserdatauv(L, 3, 4);  /* odd payload size: user values are aligned behind it */
+    uidx = lua_gettop(L);
+    memset(p, 0x5a, 3);
+    ok(lua_getiuservalue(L, uidx, 4) == LUA_TNIL && lua_isnil(L, -1),
+       "newuserdatauv(3,4): user value 4 starts nil");
+    lua_pop(L, 1);
+    ok(lua_getiuservalue(L, uidx, 5) == LUA_TNONE && lua_isnil(L, -1),
+       "newuserdatauv(3,4): user value 5 is none");
+    lua_pop(L, 1);
+    lua_pushinteger(L, 42); ok(lua_setiuservalue(L, uidx, 1) == 1, "set uv1 integer");
+    lua_pushboolean(L, 1); ok(lua_setiuservalue(L, uidx, 2) == 1, "set uv2 boolean");
+    lua_pushnumber(L, 2.5); ok(lua_setiuservalue(L, uidx, 3) == 1, "set uv3 float");
+    lua_pushstring(L, "four"); ok(lua_setiuservalue(L, uidx, 4) == 1, "set uv4 string");
+    ok(lua_getiuservalue(L, uidx, 1) == LUA_TNUMBER && lua_tointeger(L, -1) == 42,
+       "get uv1 integer 42");
+    ok(lua_getiuservalue(L, uidx, 2) == LUA_TBOOLEAN && lua_toboolean(L, -1),
+       "get uv2 true");
+    ok(lua_getiuservalue(L, uidx, 3) == LUA_TNUMBER && lua_tonumber(L, -1) == 2.5,
+       "get uv3 2.5");
+    ok(lua_getiuservalue(L, uidx, 4) == LUA_TSTRING &&
+       strcmp(lua_tostring(L, -1), "four") == 0, "get uv4 'four'");
+    lua_pop(L, 4);
+    ok(((unsigned char *)p)[0] == 0x5a && ((unsigned char *)p)[2] == 0x5a,
+       "payload untouched by user values");
+    ok(lua_rawlen(L, uidx) == 3, "rawlen is the payload size");
+    /* The user values keep their objects alive across a full GC. */
+    lua_newtable(L); lua_pushinteger(L, 7); lua_rawseti(L, -2, 1);
+    ok(lua_setiuservalue(L, uidx, 2) == 1, "set uv2 table");
+    for (i = 0; i < 3; i++) lua_gc(L, LUA_GCCOLLECT, 0);
+    lua_getiuservalue(L, uidx, 2);
+    lua_rawgeti(L, -1, 1);
+    ok(lua_tointeger(L, -1) == 7, "uv2 table survives collectgarbage (marked)");
+    lua_pop(L, 2);
+    lua_pop(L, 1);
+  }
   lua_close(L);
 }
 
@@ -213,10 +250,13 @@ static void test_iuservalue(void)
   ok(lua_getiuservalue(L, 1, 1) == LUA_TNIL && lua_isnil(L, -1),
      "getiuservalue(1) nil roundtrip");
   lua_pop(L, 1);
-  /* non-GC values cannot be stored in the single GCRef slot. */
+  /* 5.4: non-GC values are user values too. */
   lua_pushinteger(L, 42);
-  ok(lua_setiuservalue(L, 1, 1) == 0 && lua_gettop(L) == 1,
-     "setiuservalue(1) number unsupported (documented)");
+  ok(lua_setiuservalue(L, 1, 1) == 1 && lua_gettop(L) == 1,
+     "setiuservalue(1) number");
+  ok(lua_getiuservalue(L, 1, 1) == LUA_TNUMBER && lua_tointeger(L, -1) == 42,
+     "getiuservalue(1) number roundtrip");
+  lua_pop(L, 1);
   /* out-of-range set returns 0 and still pops its value (PUC behaviour). */
   lua_pushinteger(L, 7);
   ok(lua_setiuservalue(L, 1, 2) == 0 && lua_gettop(L) == 1,

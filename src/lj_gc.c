@@ -67,6 +67,11 @@ static void gc_mark(global_State *g, GCobj *o)
     gray2black(o);  /* Userdata are never gray. */
     if (mt) gc_markobj(g, mt);
     gc_markobj(g, tabref(gco2ud(o)->env));
+    if (gco2ud(o)->nuvalue) {  /* 5.4 user values. */
+      TValue *uv = uduvs(gco2ud(o));
+      MSize i;
+      for (i = 0; i < gco2ud(o)->nuvalue; i++) gc_marktv(g, &uv[i]);
+    }
     if (LJ_HASBUFFER && gco2ud(o)->udtype == UDTYPE_BUFFER) {
       SBufExt *sbx = (SBufExt *)uddata(gco2ud(o));
       if (sbufiscow(sbx) && gcref(sbx->cowref))

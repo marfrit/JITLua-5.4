@@ -96,24 +96,6 @@ static GCtab *getcurrenv(lua_State *L)
   return fn->c.gct == ~LJ_TFUNC ? tabref(fn->c.env) : tabref(L->env);
 }
 
-/* Lua 5.4 user values. The GCudata layout has one GCRef (env) available for
-** user values. The existing unused2 padding byte records the shape:
-** bit 0 = nuvalue (0 or 1), bit 1 = a value is present (otherwise nil).
-** Objects of UDTYPE_USERDATA are only created by lua_newuserdatauv; internal
-** userdata types have no user values. env always holds a valid GC object
-** (the current environment when the value is nil), so GC marking stays safe.
-*/
-#define lj_uvcount(ud) \
-  ((ud)->udtype == UDTYPE_USERDATA ? ((ud)->unused2 & 1) : 0)
-#define lj_uvhas(ud) \
-  ((ud)->udtype == UDTYPE_USERDATA ? ((ud)->unused2 & 2) : 0)
-
-static void lj_api_set_uv(TValue *o, GCudata *ud)
-{
-  GCobj *e = gcref(ud->env);
-  if (e != NULL) setgcVraw(o, e, ~e->gch.gct); else setnilV(o);
-}
-
 /* -- Miscellaneous API functions ----------------------------------------- */
 
 LUA_API int lua_status(lua_State *L)
@@ -927,15 +909,13 @@ LUA_API lua_State *lua_newthread(lua_State *L)
 LUA_API void *lua_newuserdatauv(lua_State *L, size_t size, int nuvalue)
 {
   GCudata *ud;
-  if (nuvalue < 0)
+  /* PUC: 0 <= nuvalue < USHRT_MAX (api_check); an error here, not UB. */
+  if (nuvalue < 0 || nuvalue >= 65535)
     lj_err_callermsg(L, "lua_newuserdatauv: invalid user value count");
-  if (nuvalue > 1)
-    lj_err_callermsg(L, "lua_newuserdatauv: more than one user value not supported");
   lj_gc_check(L);
   if (size > LJ_MAX_UDATA)
     lj_err_msg(L, LJ_ERR_UDATAOV);
-  ud = lj_udata_new(L, (MSize)size, getcurrenv(L));
-  ud->unused2 = (uint8_t)(nuvalue ? 1 : 0);  /* nuvalue 1 starts as nil. */
+  ud = lj_udata_newuv(L, (MSize)size, (MSize)nuvalue, getcurrenv(L));
   setudataV(L, L->top, ud);
   incr_top(L);
   return uddata(ud);
@@ -1154,9 +1134,7 @@ LUA_API void lua_getfenv(lua_State *L, int idx)
   } else if (tvisudata(o)) {
     GCudata *ud = udataV(o);
     if (ud->udtype == UDTYPE_USERDATA) {
-      if (lj_uvcount(ud) == 1 && lj_uvhas(ud))
-	lj_api_set_uv(L->top, ud);  /* first user value, any GC type */
-      else {  /* no user value: the 5.1 fenv view, a table env if any */
+      {  /* The 5.1 fenv view: a table env if any (user values are 5.4's). */
 	GCobj *e = gcref(ud->env);
 	if (e != NULL && e->gch.gct == ~LJ_TTAB)
 	  settabV(L, L->top, gco2tab(e));
@@ -1365,8 +1343,6 @@ LUA_API int lua_setfenv(lua_State *L, int idx)
   } else if (tvisudata(o)) {
     GCudata *ud = udataV(o);
     setgcref(ud->env, obj2gco(t));
-    if (ud->udtype == UDTYPE_USERDATA && (ud->unused2 & 1))
-      ud->unused2 = 3;  /* declared one user value: present now */
   } else if (tvisthread(o)) {
     setgcref(threadV(o)->env, obj2gco(t));
   } else {
@@ -1385,15 +1361,12 @@ LUA_API int lua_getiuservalue(lua_State *L, int idx, int n)
   GCudata *ud;
   lj_checkapi(tvisudata(o), "stack slot %d is not a userdata", idx);
   ud = udataV(o);
-  if (n <= 0 || n > lj_uvcount(ud)) {
+  if (n <= 0 || (MSize)n > ud->nuvalue) {
     setnilV(L->top);
     incr_top(L);
     return LUA_TNONE;
   }
-  if (lj_uvhas(ud))
-    lj_api_set_uv(L->top, ud);
-  else
-    setnilV(L->top);
+  copyTV(L, L->top, &uduvs(ud)[n-1]);
   incr_top(L);
   return lua_type(L, -1);
 }
@@ -1406,22 +1379,13 @@ LUA_API int lua_setiuservalue(lua_State *L, int idx, int n)
   lj_checkapi_slot(1);
   lj_checkapi(tvisudata(o), "stack slot %d is not a userdata", idx);
   ud = udataV(o);
-  if (n == 1 && lj_uvcount(ud) == 1) {
+  if (n > 0 && (MSize)n <= ud->nuvalue) {
+    TValue *uv = &uduvs(ud)[n-1];
     cTValue *v = L->top-1;
-    if (tvisnil(v)) {
-      GCobj *e = obj2gco(getcurrenv(L));
-      setgcref(ud->env, e);  /* Keep a GC anchor for the absent value. */
-      ud->unused2 = 1;
-      lj_gc_objbarrier(L, ud, e);
-      res = 1;
-    } else if (tvisgcv(v)) {
-      GCobj *e = gcV(v);
-      setgcref(ud->env, e);
-      ud->unused2 = 3;
-      lj_gc_objbarrier(L, ud, e);
-      res = 1;
-    }
-    /* Non-GC values cannot be stored in the single GCRef slot: res stays 0. */
+    copyTV(L, uv, v);  /* Any value (5.4), also non-GC ones. */
+    /* Userdata are marked black at once: forward barrier for a white value. */
+    if (tvisgcv(v)) lj_gc_objbarrier(L, ud, gcV(v));
+    res = 1;
   }
   L->top--;  /* PUC always pops the value, also for an out-of-range n. */
   return res;

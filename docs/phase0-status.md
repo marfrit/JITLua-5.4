@@ -1121,3 +1121,14 @@ and the real-program corpus, in a loop; one summary line per round,
 failure details only; a round takes ~5 s on the arm box (the suites are
 small), so 8 h is several thousand rounds with thousands of fuzz seeds.
 
+Known issue (filed 2026-11-16, owner: VM, after udata-uv): the x64 assert
+build segfaults at start-up on main. `make CCDEBUG=-g
+XCFLAGS=-DLUA_USE_ASSERT` at 5316a836 on the x64 box (Debian 13 gcc), then
+`src/luajit -e 'print(1)'` -> SIGSEGV; the plain `-g` build runs, the arm64
+assert build runs the whole suite. An ASan+assert build crashes in
+lj_alloc (tmalloc_small via lj_tab_resize during parsing) with a bogus
+frame pointer, i.e. memory corruption before the first chunk runs, not an
+assertion. First suspects: an assert-only code path in the x64 VM/C glue
+(LJ_GC64 + LUAJIT_NUMMODE=2) or a struct whose size changes with
+LUA_USE_ASSERT between buildvm and the C side.
+

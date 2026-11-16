@@ -17,7 +17,10 @@ local co3 = coroutine.create(function() return 7 end)
 print("resume3", coroutine.resume(co3))
 print("close3", coroutine.close(co3), coroutine.status(co3))
 
-print("close-running", pcall(coroutine.close, coroutine.running()))
+-- LuaJIT C-function errors carry no caller location (PUC has one here only
+-- when the immediate caller is Lua); normalize the prefix for the comparison.
+local ok0, e0 = pcall(coroutine.close, coroutine.running())
+print("close-running", ok0, ok0 or e0:gsub("^.-:%d+: ", ""))
 
 local co4 = coroutine.create(function()
   local inner, ii = coroutine.running()

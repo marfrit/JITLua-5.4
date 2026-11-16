@@ -21,18 +21,16 @@ rm -rf "$OUT"; mkdir -p "$OUT"
 fail=0; ndiff=0; nsame=0
 say() { printf '%s\n' "$*"; }
 
-# Normalise output: addresses, timings, scratch paths, and the cosmetic
-# differences between the two interpreters (program name in error messages,
-# "[C]: in ?" vs "[C]: at 0x...", the "no file ''" line our package.path
-# expansion adds -- reported separately, not a library finding).
+# Normalise output: addresses, timings, scratch paths, and the program-name
+# prefix in error messages. Traceback C frames ("[C]: in ?") and the package
+# "no file" list are NOT normalized: both now match PUC (5.4 traceback wording
+# and the PUC setpath ";;" expansion).
 norm() {
   sed -e 's/0x[0-9a-fA-F]\{6,\}/0xADDR/g' \
       -e 's/[0-9]\+\.[0-9]\+ *\(s\|ms\|sec\|seconds\)\b/T/g' \
       -e 's/[0-9]\+\.[0-9]\+\(e[-+]\?[0-9]\+\)\?s\b/T/g' \
       -e "s#$OUT#OUT#g" -e "s#$ROOT#ROOT#g" \
-      -e 's#^ROOT/tests/ref/bin/lua54ref: #LUA: #' -e 's#^ROOT/src/luajit: #LUA: #' \
-      -e 's#\[C\]: at 0xADDR#[C]: in ?#' \
-      -e "/^	no file ''\$/d" "$@"
+      -e 's#^ROOT/tests/ref/bin/lua54ref: #LUA: #' -e 's#^ROOT/src/luajit: #LUA: #' "$@"
 }
 
 # extract NAME: verify the archive and unpack it into $OUT/NAME/<topdir>.
@@ -109,8 +107,9 @@ if want serpent; then
   d=$(extract serpent) && run_suite serpent "$d" './src/?.lua;;' t/test.lua
 fi
 if want luaunit; then
-  # luaunit keys number/-0 semantics off jit.version ("LuaJIT" => 5.1 rules);
-  # make it take its Lua 5.4 branch, which is what we implement.
+  # luaunit keys its branches off jit.version when LuaJIT is present
+  # (_LUAVERSION = jit and jit.version or _VERSION), so report our _VERSION
+  # ("Lua 5.4") there and let it take its PUC 5.4 code paths.
   d=$(extract luaunit) && PRELUDE='jit.version=_VERSION' \
     run_suite luaunit "$d" './?.lua;;' run_unit_tests.lua
 fi

@@ -345,7 +345,7 @@ LUA_API int lua_equal(lua_State *L, int idx1, int idx2)
 {
   cTValue *o1 = index2adr(L, idx1);
   cTValue *o2 = index2adr(L, idx2);
-  if (tvisint(o1) && tvisint(o2)) {
+  if (tvisint(o1) && !tvisi47w(o1) && tvisint(o2) && !tvisi47w(o2)) {
     return intV(o1) == intV(o2);
   } else if (tvisnumber(o1) && tvisnumber(o2)) {
     return numberVnum(o1) == numberVnum(o2);
@@ -490,7 +490,7 @@ LUA_API int lua_compare(lua_State *L, int idx1, int idx2, int op)
     return lua_equal(L, idx1, idx2);
   if (o1 == niltv(L) || o2 == niltv(L))
     return 0;
-  if (tvisint(o1) && tvisint(o2))
+  if (tvisint(o1) && !tvisi47w(o1) && tvisint(o2) && !tvisi47w(o2))
     return (op == LUA_OPLT) ? (intV(o1) < intV(o2)) : (intV(o1) <= intV(o2));
   if (tvisnumber(o1) && tvisnumber(o2)) {
     lua_Number a = numberVnum(o1), b = numberVnum(o2);

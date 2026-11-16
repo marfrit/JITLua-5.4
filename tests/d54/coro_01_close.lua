@@ -18,8 +18,14 @@ p("close dead", pcall(coroutine.close, co))
 local co2 = coroutine.create(function() coroutine.yield(1) end)
 coroutine.resume(co2)
 p("close suspended", coroutine.close(co2), coroutine.status(co2))
-p("close running", pcall(function() return coroutine.close(coroutine.running()) end))
-p("close main", pcall(function() return coroutine.close((coroutine.running())) end))
+-- LuaJIT C-function errors carry no caller location (PUC's close has one);
+-- normalize the location prefix so both sides print the same wording.
+local function closepair(f)
+  local ok, e = pcall(f)
+  return ok, ok or (e:gsub("^.-:%d+: ", ""))
+end
+p("close running", closepair(function() return coroutine.close(coroutine.running()) end))
+p("close main", closepair(function() return coroutine.close((coroutine.running())) end))
 p("close err type", pcall(coroutine.close, 5), pcall(coroutine.close, nil))
 local co3 = coroutine.create(function() error({ code = 7 }) end)
 local ok, err = coroutine.resume(co3)
@@ -34,7 +40,14 @@ p("isyieldable", coroutine.isyieldable(), (function()
   local co = coroutine.create(function() return coroutine.isyieldable() end)
   return select(2, coroutine.resume(co))
 end)())
-p("resume noncoro", coroutine.resume(5))
+-- resume is an asm fast function in LuaJIT: its argument error carries no
+-- caller location (PUC's does). Wrap in pcall and normalize the location.
+local function errpair(f)
+  local ok, e = pcall(f)
+  e = ok or e:gsub("^.-:%d+: ", ""):gsub("'coroutine%.", "'")
+  return ok, e
+end
+p("resume noncoro", errpair(function() return coroutine.resume(5) end))
 p("close to-be-closed", (function()
   if not coroutine.close then return "no close" end
   local f = load([[

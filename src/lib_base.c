@@ -315,7 +315,7 @@ LJLIB_ASM(tonumber)		LJLIB_REC(.)
     if (base < 2 || base > 36) {
       /* PUC 5.4 luaL_argerror carries the caller location; LuaJIT's
       ** lj_err_arg does not, so match PUC here explicitly. */
-      luaL_where(L, 1);
+      luaL_where(L, 2);
       luaL_error(L, "bad argument #2 to 'tonumber' (base out of range)");
     }
     while (lj_char_isspace((unsigned char)(*p))) p++;
@@ -635,7 +635,7 @@ LJLIB_CF(coroutine_close)
   lua_State *co;
   const char *s;
   if (!(L->top > L->base && tvisthread(L->base)))
-    lj_err_arg(L, 1, LJ_ERR_NOCORO);
+    lj_err_argtype(L, 1, "thread");
   co = threadV(L->base);
   if (co == L) s = "running";
   else if (co->status == LUA_YIELD) s = "suspended";
@@ -733,7 +733,7 @@ static int ffh_resume(lua_State *L, lua_State *co, int wrap)
 LJLIB_ASM(coroutine_resume)
 {
   if (!(L->top > L->base && tvisthread(L->base)))
-    lj_err_arg(L, 1, LJ_ERR_NOCORO);
+    lj_err_argtype(L, 1, "thread");
   return ffh_resume(L, threadV(L->base), 0);
 }
 

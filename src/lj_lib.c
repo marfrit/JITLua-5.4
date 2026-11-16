@@ -353,9 +353,15 @@ int32_t lj_lib_checkintrange(lua_State *L, int narg, int32_t a, int32_t b)
   TValue *o = L->base + narg-1;
   lj_assertL(b >= 0, "expected range must be non-negative");
   if (o < L->top) {
-    if (LJ_LIKELY(tvisint(o))) {
+    if (LJ_LIKELY(tvisint(o) && !tvisi47w(o))) {
       int32_t i = intV(o);
       if (i >= a && i <= b) return i;
+    } else if (tvisi47w(o) || tvisi64(o)) {  /* widened/boxed int64 */
+      int64_t v;
+      if (lj_i64_getint(o, &v) && v >= a && v <= b) {
+	setintV(o, (int32_t)v);
+	return (int32_t)v;
+      }
     } else if (LJ_LIKELY(tvisnum(o))) {
       /* For performance reasons, this doesn't check for integerness or
       ** integer overflow. Overflow detection still works, since all FPUs

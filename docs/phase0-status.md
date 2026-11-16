@@ -951,3 +951,17 @@ the Lua caller's frame alive when a C function is tail-called, so
 lua_getinfo finds 'rep' from the TAILCALL; LuaJIT's CALLT replaces the
 frame -- matching it means non-tail calls to C functions in the VM, not a
 cheap change).
+
+## Session 34 (branch b2-sort) — B2 gap: inline int64 compares, exact lua_lessthan
+
+ISLT/ISGE/ISLE/ISGT compare two 5.4 integers of any encoding (int32,
+widened, box) inline in both VMs; lua_lessthan (table.sort default) is
+exact (it compared widened values by their low word); interning reuses the
+lookup probe for the insert. B2 split arm64 ms (PUC / before / after): fill
+24 / 137 / 122, sort with comparator 526 / 790 / 708, default sort 151 /
+564 / 402; the rest is the boxing itself (two scattered dereferences per
+comparison) -- see the ADR note. Also: exact float->int64 conversion with
+a range check (2^63 passed as an integer on arm64 in bitops, floor/ceil,
+constant folding, io); boxes are "number" in compare error messages.
+Test: sort_02_int64.
+GATESLINE4

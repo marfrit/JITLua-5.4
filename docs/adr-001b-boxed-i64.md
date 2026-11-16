@@ -763,3 +763,32 @@ Checksums on both arches, JIT == -joff == PUC: B1 343592796160, B2
 4047905256, B2b 299440, B3 1196193376. JIT arms unchanged against part 3;
 the interpreter arms got faster and leaner (arm64 B1 -joff 12036 -> 3996
 ms, B2 -joff 522 -> 190 MB) because the GC now runs during box arithmetic.
+
+## B2 after step 4 (2026-11-16, branch `b2-sort`): where the gap is
+
+B2 split on arm64 (ms, PUC / ours -jon before / after this branch):
+fill 1e6 xorshift values into a table 24 / 137 / 122; sum 4 / 2 / 2;
+`table.sort(t, function(a, b) return a < b end)` 526 / 790 / 708;
+`table.sort(t)` 151 / 564 / 402.
+
+- The fill is one box allocation plus one intern probe per store (PUC
+  stores the int64 inline). The insert now reuses the lookup probe's slot
+  (one pass instead of two); the allocation and the GC sweep of 1e6 boxes
+  remain.
+- Both sorts are memory bound: every comparison dereferences two boxes
+  that are scattered over 1e6 allocations, where PUC compares inline
+  TValues. The VM now compares two integers of any encoding inline in
+  ISLT/ISGE/ISLE/ISGT (no C call); `lua_lessthan` (the default comparator)
+  compares exactly instead of via `lj_meta_comp` -- and compared widened
+  values by their low word before, a correctness bug.
+- What is left (1.35x PUC on the comparator sort, 2.7x on the default
+  sort, 5x on the fill) is the boxing itself: a value above 2^47 is an
+  object. Closing it means the 16-byte TValue alternative from the ADR, not
+  an incremental change; B1/B3 (values inside 47 bits, JIT) are at the FFI
+  yardstick.
+
+Also found by the new test: `(lua_Number)(int64_t)n == n` accepts `2^63`
+on arm64 (the conversion saturates), so `2^63 & 1`, `math.floor(2^63)` and
+the parser's constant folding treated it as an integer; `lj_i64_numtoint`
+checks the range explicitly. Compare errors said "userdata" for a boxed
+integer; `lj_typename` says "number".

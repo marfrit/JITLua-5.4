@@ -507,7 +507,6 @@ LUA_API void lua_seti(lua_State *L, int idx, lua_Integer n)
     return;
   }
   {
-    int valueidx = lua_gettop(L);  /* the value is on top and gets consumed */
     lj_checkapi_slot(2);
     copyTV(L, L->top, t);
     incr_top(L);

@@ -132,7 +132,8 @@ static void lex_number(LexState *ls, TValue *tv)
 	if (!lj_char_isxdigit(c)) { ok = 0; break; }
 	d = (uint64_t)(lj_char_isdigit(c) ? c - '0' : (c | 0x20) - 'a' + 10);
 	/* 5.4: hex integer literals wrap modulo 2^64, however many digits. */
-	if (++ndig > 0) u = (u << 4) | d;  /* keep ndig++ only as a digit count */
+	ndig++;
+	u = (u << 4) | d;
       } else {
 	if (!lj_char_isdigit(c)) { ok = 0; break; }
 	d = (uint64_t)(c - '0');

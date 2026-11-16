@@ -262,7 +262,7 @@ static void lex_string(LexState *ls, TValue *tv, LexChar delim)
 	  char eb[8]; int nb = 0;
 	  eb[nb++] = '\\'; eb[nb++] = 'x';
 	  c = (lex_next(ls) & 15u) << 4;
-	  eb[nb++] = (char)ls->c;
+	  if (ls->c != LEX_EOF) eb[nb++] = (char)ls->c;
 	  if (!lj_char_isdigit(ls->c)) {
 	    if (!lj_char_isxdigit(ls->c)) {
 	      lj_buf_putmem(&ls->sb, eb, nb);
@@ -271,7 +271,7 @@ static void lex_string(LexState *ls, TValue *tv, LexChar delim)
 	    c += 9 << 4;
 	  }
 	  c += (lex_next(ls) & 15u);
-	  eb[nb++] = (char)ls->c;
+	  if (ls->c != LEX_EOF) eb[nb++] = (char)ls->c;
 	  if (!lj_char_isdigit(ls->c)) {
 	    if (!lj_char_isxdigit(ls->c)) {
 	      lj_buf_putmem(&ls->sb, eb, nb);
@@ -288,14 +288,14 @@ static void lex_string(LexState *ls, TValue *tv, LexChar delim)
 	char eb[40]; int nb = 0;
 	eb[nb++] = '\\'; eb[nb++] = 'u';
 	if (lex_next(ls) != '{') {
-	  eb[nb++] = (char)ls->c;
+	  if (ls->c != LEX_EOF) eb[nb++] = (char)ls->c;
 	  lj_buf_putmem(&ls->sb, eb, nb);
 	  goto err_xesc;
 	}
 	eb[nb++] = '{';
 	lex_next(ls);
 	for (;;) {
-	  if (nb < (int)sizeof(eb)) eb[nb++] = (char)ls->c;
+	  if (nb < (int)sizeof(eb) && ls->c != LEX_EOF) eb[nb++] = (char)ls->c;
 	  if (!lj_char_isxdigit(ls->c)) {
 	    lj_buf_putmem(&ls->sb, eb, nb);
 	    goto err_xesc;
@@ -333,8 +333,13 @@ static void lex_string(LexState *ls, TValue *tv, LexChar delim)
       case '\\': case '\"': case '\'': break;
       case LEX_EOF: continue;
       default:
-	if (!lj_char_isdigit(c))
+	if (!lj_char_isdigit(c)) {
+	  if (c != LEX_EOF) {  /* PUC error token: include the escape source. */
+	    char eb[2] = {'\\', (char)c};
+	    lj_buf_putmem(&ls->sb, eb, 2);
+	  }
 	  goto err_xesc;
+	}
 	c -= '0';  /* Decimal escape '\ddd'. */
 	if (lj_char_isdigit(lex_next(ls))) {
 	  c = c*10 + (ls->c - '0');

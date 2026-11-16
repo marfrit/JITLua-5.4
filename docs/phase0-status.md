@@ -843,3 +843,11 @@ token (PUC lexerror cases); the text is collected in a side buffer and appended
 to ls->sb only on the error path, so valid literals stay intact. literals.lua
 advances from line32 to its lexerror block (line83, second case still differs);
 known-bad.
+
+## Session 27f — generic/decimal lexer escape tokens
+
+Generic invalid escapes (`\g`, `\.`) now reject like PUC and carry the escape
+source in the error token; EOF cases no longer append the EOF byte (matches
+`lexerror([["abc\x]], [[\x]])` etc.). corpus literals.lua advances to line100
+(decimal escape overflow `\999"` needs the trailing source char in the token;
+the lexer's sb only holds bytes up to the failure - a look-ahead scan is needed).

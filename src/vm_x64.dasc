@@ -3025,6 +3025,13 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |.if DUALNUM
     |  cmp ITYPEd, LJ_TISNUM; jne >7
     |  cmp RBd, LJ_TISNUM; jne >8
+    |  // 5.4 (ADR-001b): a widened 47-bit int (payload bits 32..46) is not
+    |  // an int32; the exact compare lives in lj_meta_comp.
+    |  mov TMPR, RA
+    |  or TMPR, RD
+    |  shr TMPR, 32
+    |  test TMPRd, 0x7fff
+    |  jnz ->vmeta_comp
     |  add PC, 4
     |  cmp RAd, RDd
     |  jmp_comp jge, jl, jg, jle, >9

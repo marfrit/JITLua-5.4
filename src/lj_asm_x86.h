@@ -494,8 +494,9 @@ static Reg asm_fuseload(ASMState *as, IRRef ref, RegSet allow)
 	return RID_MRM;
       }
     } else if (ir->o == IR_ALOAD || ir->o == IR_HLOAD || ir->o == IR_ULOAD) {
+      /* An int64 load (5.4, ADR-001b) is decoded, not the raw TValue word. */
       if (noconflict(as, ref, ir->o + IRDELTA_L2S, 2+(ir->o != IR_ULOAD)) &&
-	  !(LJ_GC64 && irt_isaddr(ir->t))) {
+	  !(LJ_GC64 && irt_isaddr(ir->t)) && !irt_isi64(ir->t)) {
 	asm_fuseahuref(as, ir->op1, xallow);
 	return RID_MRM;
       }
@@ -509,7 +510,7 @@ static Reg asm_fuseload(ASMState *as, IRRef ref, RegSet allow)
 	return RID_MRM;
       }
     } else if (ir->o == IR_VLOAD && IR(ir->op1)->o == IR_AREF &&
-	       !(LJ_GC64 && irt_isaddr(ir->t))) {
+	       !(LJ_GC64 && irt_isaddr(ir->t)) && !irt_isi64(ir->t)) {
       asm_fuseahuref(as, ir->op1, xallow);
       as->mrm.ofs += 8 * ir->op2;
       return RID_MRM;

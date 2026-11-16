@@ -495,3 +495,76 @@ PUC. Against the step-3 gates: B1 within 1.5x of the FFI yardstick on both
 arches; B3 faster than stock; B2/B2b unchanged (their loops store int64 values
 into tables, which is still a NYI abort -- the next step: `ALOAD/HLOAD` with
 the unified int64 guard and a `lj_i64_tvstore` + TBAR store path).
+
+## Step 3, part 2 (2026-11-16, branch `i64-part2`): int64 through tables, upvalues, varargs
+
+Same representation rule as step 3 (IRT_INT ref == int32 inline, IRT_I64 ref
+== widened or boxed), extended from stack slots to memory:
+
+- **Loads.** `ALOAD/HLOAD/ULOAD/VLOAD` of a widened or boxed value are typed
+  `IRT_I64` and decoded by the unified guard (`asm_i64decode`: widened payload
+  or `UDTYPE_I64BOX` payload, exit otherwise) in both backends. The slot type
+  comes from the value seen at record time (`itype2irt_i64`); a slot that
+  alternates int32/widened/boxed just exits and re-records like any other
+  polymorphic slot. `pairs()`/`next()` value types and vararg slots follow.
+- **Stores.** An int64 ref is stored with an ordinary `ASTORE/HSTORE/USTORE`
+  whose backend path calls `lj_i64_tvstore(L, slot, v)` (canonical
+  int32/widened/box encoding, interning included) with the usual `TBAR`/`OBAR`,
+  so FWD/DSE/sink see a normal store. Two consequences that cost a morning:
+  - `gcstep_barrier()` in lj_opt_fold.c must treat an int64 store as an
+    allocation (it may intern a box), otherwise the loop copy of the barrier is
+    CSEd across the GC step at `LOOP`: a propagate step blackens the table and
+    the loop then stores white boxes without a barrier (boxes freed under a
+    live table; the B2 checksum varied per run).
+  - x64 `asm_fuseload` must not fuse an `IRT_I64` load as a memory operand
+    (same class as the `IRSLOAD_I64` fuse in step 3): the consumer would see
+    the raw TValue word instead of the decoded int64.
+- **Compares.** int64 vs float ordered compares and equality go through
+  `lj_i64_cmpnum` (exact, long double; NaN = unordered) plus an int compare on
+  its result. The x64 interpreter's `ISLT` family compared only the low 32 bits
+  of two widened ints; it now routes widened operands to `vmeta_comp`.
+- **`//`** (BC_IDIV) is recorded: integer floor division via `lj_i64_idiv`
+  under a divisor guard, float operands via `floor(a/b)`.
+- **Fast functions** that only copy/compare/type-dispatch (`type`, `select`,
+  `assert`, `pcall`, `xpcall`, `rawequal`) accept int64 arguments; all others
+  still abort recording on an int64 argument.
+- **Still NYI: int64 table keys** (`t[1<<40]`): the recorder aborts; the
+  interpreter path is exact.
+
+Test: `tests/d54/i64_03_jit_tables.lua` (array/hash parts, alternating slot
+representations, upvalues, varargs, pairs, int64 vs float compares incl. NaN,
+`//`, fast functions with int64 args) in mode A (vs PUC) and B (JIT vs
+interpreter).
+
+### Gates (commit 8742442c, 2026-11-16)
+
+`tests/ci-box.sh` on both boxes, identical: modes A+B 75 PASS / 0 FAIL / 13
+XFAIL / 0 XPASS, mode B at opt 0-3 172 PASS / 0 FAIL / 4 XFAIL (math_os_01 B
+from main), mode R 44 PASS, C API 34 + i64 14/14, fuzz 160/160.
+
+Benchmark gate `tests/bench/run.sh`, median of 3, same box, same moment
+(escher shares its CPU with model serving; its -joff arm was ~2x slower than
+in the step-3 run, the JIT arms are what the gate is about):
+
+| bench (arm64, escher) | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
+|---|---|---|---|---|
+| B1 FNV-1a-64, 10 MiB | **14.9 ms** (0.98x FFI) | 13347.7 ms | 15.2 ms | 311.6 ms |
+| B2 1e6 64-bit values | **1358.6 ms, 79 MB** (was 2279.7 ms, 522 MB) | 4548.8 ms, 522 MB | 719.0 ms, 31.6 MB | 598.0 ms, 16.4 MB |
+| B2b 1e6 ~2^41 values | **148.1 ms, 8.2 MB** (was 270.0 ms, 79 MB) | 394.1 ms, 79 MB | 139.7 ms (float) | 176.8 ms |
+| B3 int32 control (fnv / table) | **22.2 / 226.4 ms** | 8304.0 / 1118.6 ms | 38.0 / 203.2 ms | 320.9 / 284.4 ms |
+
+| bench (x64, pve2 NUC) | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
+|---|---|---|---|---|
+| B1 | **30.4 ms** (1.04x FFI) | 21658.2 ms | 29.2 ms | 1331.3 ms |
+| B2 | **3405.9 ms, 79 MB** (was 7327.7 ms, 522 MB; 3095.3 in the run before) | 7522.6 ms, 522 MB | 2589.7 ms, 31.6 MB | 2151.5 ms, 16.4 MB |
+| B2b | **675.4 ms, 8.2 MB** (was 1135.4 ms, 79 MB) | 1147.7 ms, 79 MB | 612.6 ms (float) | 729.7 ms |
+| B3 | **47.7 / 967.3 ms** | 10710.3 / 1875.4 ms | 96.9 / 856.9 ms | 1305.6 / 989.8 ms |
+
+Checksums on both arches, JIT == -joff == PUC: B1 343592796160, B2 4047905256
+(the step-3 report had no stable B2 checksum under the JIT; see the barrier bug
+above), B2b 299440, B3 1196193376. Against the part-2 target "B2/B2b toward
+the FFI/PUC arms": B2b is at the FFI arm (arm64 1.06x, x64 1.09x) and below
+PUC on both; B2 went from 3.2x/2.8x FFI to 1.9x/1.3x FFI (arm64/x64) and from
+522 MB to 79 MB -- the remaining gap is the sort with a Lua comparator (boxed
+compares through a call frame) plus one intern lookup per store; a widened
+value stores without any allocation now.

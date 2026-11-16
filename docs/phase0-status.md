@@ -699,3 +699,27 @@ A+B 71 PASS / 0 FAIL / 13 XFAIL / 0 XPASS, opt 0-3 164 PASS (+4 XFAIL
 math_os_01 B from main), R 42, C API + i64 14/14, fuzz 160/160.
 Bench unchanged: arm64 B1 13.7 ms (FFI 8.9 this run, 15.2 the run before),
 B3 22.9 / 214 ms; x64 B1 30.2 (FFI 29.3), B3 52.3 / 1564 ms; checksums equal.
+
+## Session 28 (branch i64-part2) — int64 in the JIT, part 2: tables, upvalues, varargs, //
+
+On top of close-tbc f7362562. Loads of widened/boxed values from tables,
+upvalues and varargs are typed IRT_I64 and decoded by the step-3 unified
+guard; stores go through `lj_i64_tvstore` behind ordinary ASTORE/HSTORE/
+USTORE with TBAR/OBAR; int64 vs float compares via `lj_i64_cmpnum`; `//`
+recorded; type/select/assert/pcall/xpcall/rawequal accept int64 arguments.
+Two bugs found by the new test and the B2 checksum: (1) the write-barrier
+CSE across LOOP (`gcstep_barrier`) did not count an int64 store as an
+allocation, so a GC step at the loop head blackened the table and the loop
+stored white boxes unbarriered (boxes freed under a live table); (2) x64
+`asm_fuseload` fused an IRT_I64 ALOAD as a raw memory operand. Also the x64
+interpreter's ISLT family compared only the low words of two widened ints.
+Still NYI: int64 table keys. Details and bench tables in
+docs/adr-001b-boxed-i64.md "Step 3, part 2".
+Gates at 8742442c, both arches identical: A+B 75 PASS / 0 FAIL / 13 XFAIL /
+0 XPASS, opt 0-3 172 PASS (+4 XFAIL math_os_01 B), R 44, C API + i64 14/14,
+fuzz 160/160.
+Bench (JIT arm, median of 3): arm64 B1 14.9 ms (FFI 15.2), B2 1358.6 ms /
+79 MB (was 2279.7 / 522 MB; FFI 719, PUC 598), B2b 148.1 ms (was 270; FFI
+139.7, PUC 176.8), B3 22.2 / 226.4 ms; x64 B1 30.4 (FFI 29.2), B2 3405.9 (was
+7327.7; FFI 2589.7, PUC 2151.5), B2b 675.4 (was 1135.4; FFI 612.6, PUC
+729.7), B3 47.7 / 967.3 ms. Checksums equal (B2 4047905256 now stable).

@@ -82,7 +82,7 @@ double lj_vm_foldarith(double x, double y, int op)
 double lj_vm_modnum(double a, double b)
 {
   double m = fmod(a, b);
-  if ((m > 0) ? b < 0 : (m < 0 && b != m)) m += b;
+  if ((m > 0 && b < 0) || (m < 0 && b > 0)) m += b;  /* Sign of the divisor. */
   return m;
 }
 

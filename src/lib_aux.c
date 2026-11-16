@@ -186,19 +186,29 @@ LUALIB_API void luaL_setfuncs(lua_State *L, const luaL_Reg *l, int nup)
   lua_pop(L, nup);  /* Remove upvalues. */
 }
 
+LUALIB_API void luaL_addgsub(luaL_Buffer *b, const char *s,
+			     const char *p, const char *r)
+{
+  size_t l = strlen(p);
+  const char *wild;
+  if (l == 0) {  /* Avoid PUC's infinite loop on an empty pattern. */
+    luaL_addstring(b, s);
+    return;
+  }
+  while ((wild = strstr(s, p)) != NULL) {
+    luaL_addlstring(b, s, (size_t)(wild - s));  /* push prefix */
+    luaL_addstring(b, r);  /* push replacement in place of pattern */
+    s = wild + l;  /* continue after `p' */
+  }
+  luaL_addstring(b, s);  /* push last suffix */
+}
+
 LUALIB_API const char *luaL_gsub(lua_State *L, const char *s,
 				 const char *p, const char *r)
 {
-  const char *wild;
-  size_t l = strlen(p);
   luaL_Buffer b;
   luaL_buffinit(L, &b);
-  while ((wild = strstr(s, p)) != NULL) {
-    luaL_addlstring(&b, s, (size_t)(wild - s));  /* push prefix */
-    luaL_addstring(&b, r);  /* push replacement in place of pattern */
-    s = wild + l;  /* continue after `p' */
-  }
-  luaL_addstring(&b, s);  /* push last suffix */
+  luaL_addgsub(&b, s, p, r);
   luaL_pushresult(&b);
   return lua_tostring(L, -1);
 }

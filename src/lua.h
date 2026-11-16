@@ -371,6 +371,13 @@ LUA_API lua_Integer lua_tointegerx (lua_State *L, int idx, int *isnum);
 /* From Lua 5.3. */
 LUA_API int lua_isyieldable (lua_State *L);
 
+/* From Lua 5.4. */
+LUA_API void *lua_newuserdatauv (lua_State *L, size_t sz, int nuvalue);
+LUA_API int lua_getiuservalue (lua_State *L, int idx, int n);
+LUA_API int lua_setiuservalue (lua_State *L, int idx, int n);
+LUA_API void lua_warning (lua_State *L, const char *msg, int tocont);
+LUA_API int lua_setcstacklimit (lua_State *L, unsigned int limit);
+
 
 struct lua_Debug {
   int event;

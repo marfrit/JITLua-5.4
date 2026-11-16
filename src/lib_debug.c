@@ -262,24 +262,23 @@ LJLIB_CF(debug_upvaluejoin)
 #if LJ_52
 LJLIB_CF(debug_getuservalue)
 {
-  TValue *o = L->base;
-  if (o < L->top && tvisudata(o))
-    settabV(L, o, tabref(udataV(o)->env));
-  else
-    setnilV(o);
-  L->top = o+1;
+  if (!(L->base < L->top && tvisudata(L->base)))
+    lj_err_argt(L, 1, LUA_TUSERDATA);
+  L->top = L->base+1;
+  lua_getiuservalue(L, 1, 1);  /* 5.4: any user value, not just a table */
   return 1;
 }
 
 LJLIB_CF(debug_setuservalue)
 {
-  TValue *o = L->base;
-  if (!(o < L->top && tvisudata(o)))
+  if (!(L->base < L->top && tvisudata(L->base)))
     lj_err_argt(L, 1, LUA_TUSERDATA);
-  if (!(o+1 < L->top && tvistab(o+1)))
-    lj_err_argt(L, 2, LUA_TTABLE);
-  L->top = o+2;
-  lua_setfenv(L, 1);
+  luaL_checkany(L, 2);
+  L->top = L->base+2;
+  if (!lua_setiuservalue(L, 1, 1))  /* non-GC values cannot be stored here */
+    lua_pushboolean(L, 0);
+  else
+    lua_pushboolean(L, 1);
   return 1;
 }
 #endif

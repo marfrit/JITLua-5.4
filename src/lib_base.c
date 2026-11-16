@@ -7,6 +7,7 @@
 */
 
 #include <stdio.h>
+#include <string.h>
 
 #define lib_base_c
 #define LUA_LIB
@@ -587,6 +588,24 @@ LJLIB_CF(print)
 LJLIB_PUSH(top-3)
 LJLIB_SET(_VERSION)
 
+/* -- Base library: warnings ---------------------------------------------- */
+
+/* Lua 5.4 warn(): all arguments must be strings (at least one); the parts are
+** emitted with tocont=1 except the last, via the default emitter (a Lua
+** replacement of `warn` is not involved in the C API path). */
+LJLIB_CF(warn)
+{
+  int n = (int)(L->top - L->base);
+  int i;
+  luaL_checkstring(L, 1);
+  for (i = 2; i <= n; i++)
+    luaL_checkstring(L, i);
+  for (i = 1; i < n; i++)
+    lua_warning(L, lua_tostring(L, i), 1);
+  lua_warning(L, lua_tostring(L, n), 0);
+  return 0;
+}
+
 #include "lj_libdef.h"
 
 /* -- Coroutine library --------------------------------------------------- */
@@ -793,6 +812,19 @@ LUALIB_API int luaopen_base(lua_State *L)
   newproxy_weaktable(L);  /* top-2. */
   LJ_LIB_REG(L, "_G", base);
   LJ_LIB_REG(L, LUA_COLIBNAME, coroutine);
+  /* 5.4 warnings: the auxlib default is OFF (luaL_newstate); only set the
+  ** registry state if it was not configured yet. The standalone interpreter
+  ** leaves this off, like PUC without -W. */
+  lua_pushliteral(L, "_LJ_WARN_STATE");
+  lua_rawget(L, LUA_REGISTRYINDEX);
+  if (lua_isnil(L, -1)) {
+    lua_pop(L, 1);
+    lua_pushliteral(L, "_LJ_WARN_STATE");
+    lua_pushinteger(L, 0);
+    lua_rawset(L, LUA_REGISTRYINDEX);
+  } else {
+    lua_pop(L, 1);
+  }
   return 2;
 }
 

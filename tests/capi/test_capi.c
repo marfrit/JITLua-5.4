@@ -139,6 +139,185 @@ static void test_isinteger(void)
   lua_close(L);
 }
 
+static int throw_bad_uv(lua_State *L)
+{
+  lua_newuserdatauv(L, 4, 2);
+  return 0;
+}
+
+static void test_newuserdatauv(void)
+{
+  lua_State *L = newL();
+  void *p;
+  /* nuvalue 0: no user values at all. */
+  p = lua_newuserdatauv(L, 8, 0);
+  ok(p != NULL && lua_isuserdata(L, -1), "newuserdatauv(8,0)");
+  ok(lua_getiuservalue(L, -1, 1) == LUA_TNONE && lua_isnil(L, -1),
+     "newuserdatauv(0): get 1 is none/nil");
+  lua_pop(L, 2);
+  /* nuvalue 1 starts with a nil user value. */
+  p = lua_newuserdatauv(L, 16, 1);
+  ok(p != NULL && lua_isuserdata(L, -1), "newuserdatauv(16,1)");
+  ok(lua_getiuservalue(L, -1, 1) == LUA_TNIL && lua_isnil(L, -1),
+     "newuserdatauv(1): initial user value nil");
+  lua_pop(L, 2);
+  /* lua_newuserdata remains nuvalue=1. */
+  p = lua_newuserdata(L, 4);
+  ok(p != NULL && lua_getiuservalue(L, -1, 1) == LUA_TNIL && lua_isnil(L, -1),
+     "lua_newuserdata = nuvalue 1 (nil)");
+  lua_pop(L, 2);
+  /* nuvalue > 1 is unsupported and aborts with a clear error. */
+  lua_pushcfunction(L, throw_bad_uv);
+  ok(lua_pcall(L, 0, 0, 0) != LUA_OK &&
+     lua_tostring(L, -1) != NULL &&
+     strstr(lua_tostring(L, -1), "more than one user value") != NULL,
+     "newuserdatauv(_,2) errors clearly");
+  lua_pop(L, 1);
+  lua_close(L);
+}
+
+static void test_iuservalue(void)
+{
+  lua_State *L = newL();
+  lua_newuserdatauv(L, 4, 1);  /* userdata at index 1 */
+  ok(lua_getiuservalue(L, 1, 1) == LUA_TNIL, "getiuservalue(1) initial nil type");
+  lua_pop(L, 1);
+  ok(lua_getiuservalue(L, 1, 0) == LUA_TNONE && lua_isnil(L, -1),
+     "getiuservalue(0) is none/nil");
+  lua_pop(L, 1);
+  ok(lua_getiuservalue(L, 1, 2) == LUA_TNONE && lua_isnil(L, -1),
+     "getiuservalue(2) is none/nil");
+  lua_pop(L, 1);
+  /* string roundtrip */
+  lua_pushstring(L, "user-value");
+  ok(lua_setiuservalue(L, 1, 1) == 1 && lua_gettop(L) == 1,
+     "setiuservalue(1) string");
+  ok(lua_getiuservalue(L, 1, 1) == LUA_TSTRING &&
+     strcmp(lua_tostring(L, -1), "user-value") == 0,
+     "getiuservalue(1) string roundtrip");
+  lua_pop(L, 1);
+  /* table roundtrip */
+  lua_newtable(L);
+  ok(lua_setiuservalue(L, 1, 1) == 1, "setiuservalue(1) table");
+  ok(lua_getiuservalue(L, 1, 1) == LUA_TTABLE && lua_istable(L, -1),
+     "getiuservalue(1) table roundtrip");
+  lua_pop(L, 1);
+  /* userdata roundtrip */
+  lua_newuserdatauv(L, 4, 0);
+  ok(lua_setiuservalue(L, 1, 1) == 1, "setiuservalue(1) userdata");
+  ok(lua_getiuservalue(L, 1, 1) == LUA_TUSERDATA, "getiuservalue(1) userdata");
+  lua_pop(L, 1);
+  /* nil roundtrip */
+  lua_pushnil(L);
+  ok(lua_setiuservalue(L, 1, 1) == 1, "setiuservalue(1) nil");
+  ok(lua_getiuservalue(L, 1, 1) == LUA_TNIL && lua_isnil(L, -1),
+     "getiuservalue(1) nil roundtrip");
+  lua_pop(L, 1);
+  /* non-GC values cannot be stored in the single GCRef slot. */
+  lua_pushinteger(L, 42);
+  ok(lua_setiuservalue(L, 1, 1) == 0 && lua_gettop(L) == 1,
+     "setiuservalue(1) number unsupported (documented)");
+  /* out-of-range set returns 0 and still pops its value (PUC behaviour). */
+  lua_pushinteger(L, 7);
+  ok(lua_setiuservalue(L, 1, 2) == 0 && lua_gettop(L) == 1,
+     "setiuservalue(2) -> 0, value popped");
+  lua_pop(L, 1);
+  /* nuvalue 0 + lua_setfenv must not grow the user-value count (PUC). */
+  { int uidx = lua_gettop(L)+1;
+    lua_newuserdatauv(L, 4, 0);
+    lua_newtable(L);
+    ok(lua_setfenv(L, uidx) == 1, "setfenv on nuvalue=0 userdata");
+    ok(lua_getiuservalue(L, uidx, 1) == LUA_TNONE,
+       "nuvalue=0 stays T_NONE after setfenv");
+    lua_pop(L, 1);
+  }
+  /* 5.1 fenv view: a plain table env must never be a mistagged object. */
+  { int uidx = lua_gettop(L)+1;
+    lua_newuserdata(L, 4);
+    lua_newtable(L);
+    lua_setfenv(L, uidx);
+    lua_getfenv(L, uidx);
+    ok(lua_type(L, -1) == LUA_TTABLE || lua_isnil(L, -1),
+       "getfenv(userdata) yields table or nil, never a mistagged object");
+    lua_pop(L, 2);
+  }
+  lua_close(L);
+}
+
+static int warn_state(lua_State *L)
+{
+  int st;
+  lua_pushliteral(L, "_LJ_WARN_STATE");
+  lua_rawget(L, LUA_REGISTRYINDEX);
+  st = lua_isnumber(L, -1) ? (int)lua_tointeger(L, -1) : -1;
+  lua_pop(L, 1);
+  return st;
+}
+
+static void test_warning(void)
+{
+  lua_State *L = newL();
+  /* PUC 5.4: luaL_newstate defaults to warnings OFF; warn('@on') enables. */
+  ok(warn_state(L) == 0, "warn state defaults off (PUC luaL_newstate)");
+  lua_getglobal(L, "warn");
+  ok(lua_type(L, -1) == LUA_TFUNCTION, "base warn builtin exists");
+  lua_pop(L, 1);
+  ok(luaL_dostring(L, "warn()") != LUA_OK, "warn() with no args errors");
+  lua_pop(L, 1);
+  ok(luaL_dostring(L, "warn(true)") != LUA_OK, "warn(true) errors (no boolean tocont)");
+  lua_pop(L, 1);
+  ok(luaL_dostring(L, "warn('@on')") == LUA_OK, "warn('@on') ok");
+  ok(warn_state(L) == 1, "warn('@on') enables");
+  ok(luaL_dostring(L, "warn('@off')") == LUA_OK, "warn('@off') ok");
+  ok(warn_state(L) == 0, "warn('@off') disables");
+  ok(luaL_dostring(L, "warn('@bogus')") == LUA_OK, "unknown '@...' ignored");
+  ok(warn_state(L) == 0, "unknown control leaves state off");
+  /* lua_warning does NOT dispatch to a Lua replacement of warn (PUC hook). */
+  luaL_dostring(L,
+    "warnlog = {}\n"
+    "function warn(m, c) warnlog[#warnlog+1] = m end");
+  {
+    int top = lua_gettop(L);
+    lua_warning(L, "hello", 0);
+    ok(lua_gettop(L) == top, "lua_warning leaves stack unchanged");
+  }
+  lua_getglobal(L, "warnlog");
+  ok(luaL_len(L, -1) == 0, "lua_warning ignores a Lua warn replacement");
+  lua_pop(L, 1);
+  /* The emitter keeps its continuation state; direct calls work. */
+  lua_warning(L, "@on", 0);
+  ok(warn_state(L) == 1, "lua_warning('@on') enables");
+  lua_warning(L, "part1", 1);
+  ok(warn_state(L) == 2, "tocont=1 marks continuation");
+  lua_warning(L, "part2", 0);
+  ok(warn_state(L) == 1, "tocont=0 finishes the message");
+  lua_close(L);
+}
+
+static void test_lauxlib54(void)
+{
+  lua_State *L = newL();
+  luaL_Buffer b;
+  luaL_buffinit(L, &b);
+  luaL_addgsub(&b, "a-b-b", "b", "X");
+  luaL_pushresult(&b);
+  ok(lua_isstring(L, -1) && strcmp(lua_tostring(L, -1), "a-X-X") == 0,
+     "luaL_addgsub replaces all occurrences");
+  lua_pop(L, 1);
+  luaL_buffinit(L, &b);
+  luaL_addstring(&b, "abcdef");
+  luaL_buffsub(&b, 2);
+  luaL_pushresult(&b);
+  ok(lua_isstring(L, -1) && strcmp(lua_tostring(L, -1), "abcd") == 0,
+     "luaL_buffsub removes the tail");
+  lua_pop(L, 1);
+  luaL_pushfail(L);
+  ok(lua_isnil(L, -1), "luaL_pushfail pushes nil");
+  lua_pop(L, 1);
+  ok(lua_setcstacklimit(L, 200) == 200, "lua_setcstacklimit returns the previous limit (PUC 200)");
+  lua_close(L);
+}
+
 static void test_rotate(void)
 {
   lua_State *L = newL();
@@ -174,6 +353,7 @@ int main(void)
 {
   test_absindex(); test_getseti(); test_len(); test_compare();
   test_stringtonumber(); test_getsubtable(); test_isinteger(); test_rotate();
+  test_newuserdatauv(); test_iuservalue(); test_warning(); test_lauxlib54();
   printf("== capi: %d checks, %d failures ==\n", checks, failures);
   return failures ? 1 : 0;
 }

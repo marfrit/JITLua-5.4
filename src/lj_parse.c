@@ -2711,6 +2711,9 @@ static void parse_assignment(LexState *ls, LHSVarList *lh, BCReg nvars)
     parse_assignment(ls, &vl, nvars+1);
   } else {  /* Parse RHS. */
     BCReg nexps;
+    /* Lua 5.4: an attributive after an assignment target is not a missing
+    ** '='; PUC reports a plain syntax error near the '<'. */
+    if (ls->tok == '<') err_syntax(ls, LJ_ERR_XSYNTAX);
     lex_check(ls, '=');
     nexps = expr_list(ls, &e);
     if (nexps == nvars) {

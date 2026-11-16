@@ -2390,7 +2390,9 @@ static void rec_varg(jit_State *J, BCReg dst, ptrdiff_t nresults)
 	TRef aref, vbase = emitir(IRT(IR_SUB, IRT_IGC), REF_BASE, fr);
 	vbase = emitir(IRT(IR_ADD, IRT_PGC), vbase,
 		       lj_ir_kintpgc(J, frofs-(8<<LJ_FR2)));
-	t = itype2irt(&J->L->base[idx-2-LJ_FR2-nvararg]);
+	/* A boxed/widened int64 vararg loads as IRT_I64 like every other slot
+	** (the assert build caught the raw UDATA type here). */
+	t = itype2irt_i64(&J->L->base[idx-2-LJ_FR2-nvararg]);
 	aref = emitir(IRT(IR_AREF, IRT_PGC), vbase, tridx);
 	tr = lj_record_vload(J, aref, 0, t);
       }

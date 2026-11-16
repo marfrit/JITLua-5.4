@@ -68,7 +68,7 @@ while [ "$(now)" -lt "$deadline" ]; do
   fi
   # 3. Real-program corpus (PUC vs -joff / -jon / -jon+GC-stress).
   cout=$(nice -n "$NICE" sh tests/corpus-ext/run.sh 2>&1)
-  c=$(printf '%s\n' "$cout" | awk '/arms same/ {print "corpus:" $3 "/" $6}')
+  c=$(printf '%s\n' "$cout" | awk '/arms same/ {gsub(",", "", $3); print "corpus:" $3 "/" $6}')
   if printf '%s\n' "$cout" | grep -q 'unexpected diffs [1-9]'; then
     rfail=1
     { say "--- round $round corpus-ext"; printf '%s\n' "$cout" | grep -a -v '^      ' | grep -a 'DIFF\|unexpected' | grep -a -v 'known:'; } >>"$LOG"

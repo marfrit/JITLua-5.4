@@ -1309,6 +1309,9 @@ static void var_remove(LexState *ls, BCReg tolevel)
 /* Forward declaration. */
 static void fscope_uvmark(FuncState *fs, BCReg level);
 
+static int env_lookup;  /* guard against recursive _ENV resolution */
+static void expr_index(FuncState *fs, ExpDesc *t, ExpDesc *e);
+
 /* Lookup variable name. */
 static MSize var_lookup(LexState *ls, ExpDesc *e, GCstr *name)
 {
@@ -1359,6 +1362,27 @@ static MSize var_lookup(LexState *ls, ExpDesc *e, GCstr *name)
       return vidx;
     }
     vidx = v->prev;
+  }
+  {
+    GCstr *envstr = strref(G(ls->L)->gcroot[GCROOT_ENVSTR]);
+    if (!env_lookup && name != envstr) {
+    /* 5.4 lexical _ENV: a local or upvalue named _ENV routes free names
+    ** through that table instead of the function env. */
+    FuncState *fs = ls->fs;
+    ExpDesc env, key;
+    MSize evidx;
+    env_lookup = 1;
+    evidx = var_lookup(ls, &env, envstr);
+    env_lookup = 0;
+    if (evidx != VINDEX_NONE && (env.k == VLOCAL || env.k == VUPVAL)) {
+      expr_toanyreg(fs, &env);
+      expr_init(&key, VKSTR, 0);
+      key.u.sval = name;
+      expr_index(fs, &env, &key);
+      *e = env;
+      return evidx;
+    }
+    }
   }
   expr_init(e, VGLOBAL, 0);
   e->u.sval = name;

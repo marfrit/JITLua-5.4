@@ -2609,6 +2609,11 @@ void lj_record_ins(jit_State *J)
   /* -- Table ops --------------------------------------------------------- */
 
   case BC_GGET: case BC_GSET:
+    {  /* 5.4 implicit _ENV: never cache FUNC_ENV in a trace (env can retarget). */
+      GCstr *k = gco2str(proto_kgc(J->pt, ~(ptrdiff_t)bc_d(*pc)));
+      if (k == strref(G(J->L)->gcroot[GCROOT_ENVSTR]))
+	lj_trace_err(J, LJ_TRERR_NYIBC);
+    }
     settabV(J->L, &ix.tabv, tabref(J->fn->l.env));
     ix.tab = emitir(IRT(IR_FLOAD, IRT_TAB), getcurrf(J), IRFL_FUNC_ENV);
     ix.idxchain = LJ_MAX_IDXCHAIN;

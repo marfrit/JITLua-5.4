@@ -13,6 +13,9 @@ LJ_FUNC void LJ_FASTCALL lj_func_freeproto(global_State *g, GCproto *pt);
 
 /* Upvalues. */
 LJ_FUNCA void LJ_FASTCALL lj_func_closeuv(lua_State *L, TValue *level);
+/* 5.4: retarget the current function's environment (implicit _ENV write). */
+LJ_FUNC void LJ_FASTCALL lj_func_setenv(lua_State *L, TValue *v);
+LJ_FUNC void LJ_FASTCALL lj_func_getenv(lua_State *L, TValue *dst);
 LJ_FUNC void LJ_FASTCALL lj_func_freeuv(global_State *g, GCupval *uv);
 
 /* Functions (closures). */

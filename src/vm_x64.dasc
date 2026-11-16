@@ -3948,7 +3948,18 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  cleartp LFUNC:RB
     |  mov TAB:RB, LFUNC:RB->env
     |  mov STR:RC, [KBASE+RD*8]
+    |  mov TMPR, [DISPATCH+DISPATCH_GL(gcroot)+8*GCROOT_ENVSTR]
+    |  cmp STR:RC, TMPR
+    |  je >1
     |  jmp ->BC_TGETS_Z
+    |1:			// implicit 5.4 _ENV read: the function env table
+    |  mov L:RB, SAVE_L
+    |  mov L:RB->base, BASE
+    |  lea CARG2, [BASE+RA*8]
+    |  mov L:CARG1, L:RB
+    |  call extern lj_func_getenv	// (L, TValue *dst)
+    |  mov BASE, L:RB->base
+    |  ins_next
     break;
   case BC_GSET:
     |  ins_AND	// RA = src, RD = str const (~)
@@ -3956,7 +3967,18 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  cleartp LFUNC:RB
     |  mov TAB:RB, LFUNC:RB->env
     |  mov STR:RC, [KBASE+RD*8]
+    |  mov TMPR, [DISPATCH+DISPATCH_GL(gcroot)+8*GCROOT_ENVSTR]
+    |  cmp STR:RC, TMPR
+    |  je >1
     |  jmp ->BC_TSETS_Z
+    |1:			// implicit 5.4 _ENV write: retarget the function env
+    |  mov L:RB, SAVE_L
+    |  mov L:RB->base, BASE
+    |  lea CARG2, [BASE+RA*8]
+    |  mov L:CARG1, L:RB
+    |  call extern lj_func_setenv	// (L, TValue *src)
+    |  mov BASE, L:RB->base
+    |  ins_next
     break;
 
   case BC_TGETV:

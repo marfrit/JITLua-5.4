@@ -189,3 +189,30 @@ void LJ_FASTCALL lj_func_free(global_State *g, GCfunc *fn)
   lj_mem_free(g, fn, size);
 }
 
+
+/* Lua 5.4 implicit _ENV write: retarget the current function's environment.
+** Only a table can become the environment (LuaJIT's env is a GCtab field);
+** other values keep LuaJIT's fenv model instead of failing later. */
+void LJ_FASTCALL lj_func_getenv(lua_State *L, TValue *dst)
+{
+  GCfunc *fn = curr_func(L);
+  GCtab *t = tabref(fn->l.env);
+  if (t) settabV(L, dst, t); else setnilV(dst);
+}
+
+void LJ_FASTCALL lj_func_setenv(lua_State *L, TValue *v)
+{
+  GCfunc *fn = curr_func(L);
+  if (tvistab(v)) {
+    GCtab *t = tabV(v);
+    setgcref(fn->l.env, obj2gco(t));
+    lj_gc_objbarrier(L, fn, t);
+#if LJ_HASJIT
+    {  /* Compiled traces cache FUNC_ENV (IRFL_FUNC_ENV): discard them. */
+      global_State *g = G(L);
+      if ((G2J(g)->flags & JIT_F_ON) && G2J(g)->state == LJ_TRACE_IDLE)
+	lj_trace_flushall(L);
+    }
+#endif
+  }
+}

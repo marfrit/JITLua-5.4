@@ -765,10 +765,13 @@ LUALIB_API int luaopen_base(lua_State *L)
   /* NOBARRIER: Table and value are the same. */
   GCtab *env = tabref(L->env);
   settabV(L, lj_tab_setstr(L, env, lj_str_newlit(L, "_G")), env);
-  /* Lua 5.4 exposes the chunk environment as _ENV. LuaJIT resolves globals
-  ** through the function env; the global _ENV alias is the practical subset
-  ** (assignment to _ENV does not retarget the function env yet). */
-  settabV(L, lj_tab_setstr(L, env, lj_str_newlit(L, "_ENV")), env);
+  /* Lua 5.4: the chunk environment is _ENV. LuaJIT resolves globals through
+  ** the function env; the VM special-cases the interned "_ENV" key so reads
+  ** yield the env and writes retarget it (function scope, see docs). */
+  { GCstr *envstr = lj_str_newlit(L, "_ENV");
+    setgcref(G(L)->gcroot[GCROOT_ENVSTR], obj2gco(envstr));
+    settabV(L, lj_tab_setstr(L, env, envstr), env);
+  }
   lua_pushliteral(L, LUA_VERSION);  /* top-3. */
   newproxy_weaktable(L);  /* top-2. */
   LJ_LIB_REG(L, "_G", base);

@@ -584,7 +584,7 @@ LUA_API lua_Integer lua_tointeger(lua_State *L, int idx)
   TValue tmp;
   lua_Number n;
   if (LJ_LIKELY(tvisint(o))) {
-    return intV(o);
+    return tvisi47w(o) ? (lua_Integer)intV47(o) : intV(o);
   } else if (LJ_LIKELY(tvisnum(o))) {
     n = numV(o);
   } else {
@@ -602,7 +602,7 @@ LUA_API lua_Integer lua_tointegerx(lua_State *L, int idx, int *ok)
   cTValue *o = index2adr(L, idx);
   TValue tmp;
   lua_Number n;
-  if (LJ_LIKELY(tvisint(o))) {
+  if (LJ_LIKELY(tvisint(o) && !tvisi47w(o))) {  /* int32 inline only */
     if (ok) *ok = 1;
     return intV(o);
 #if LJ_GC64

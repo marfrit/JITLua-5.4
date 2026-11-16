@@ -93,7 +93,29 @@ LJLIB_ASM_(math_sinh)		LJLIB_REC(math_call IRCALL_sinh)
 LJLIB_ASM_(math_cosh)		LJLIB_REC(math_call IRCALL_cosh)
 LJLIB_ASM_(math_tanh)		LJLIB_REC(math_call IRCALL_tanh)
 LJLIB_ASM_(math_frexp)
-LJLIB_ASM_(math_modf)
+
+/* 5.4 math.modf: an integer argument is its own integral part (fraction
+** 0.0); otherwise the integral part is pushed as an integer when it fits
+** (lmathlib pushnumint), the fraction as a float. C form: the asm fast
+** function returned two floats. */
+LJLIB_CF(math_modf)
+{
+  TValue *o = L->base;
+  int64_t v;
+  if (L->top > o && (tvisint(o) || tvisi64(o)) && lj_i64_getint(o, &v)) {
+    copyTV(L, L->top, o); L->top++;
+    setnumV(L->top++, 0.0);
+    return 2;
+  } else {
+    lua_Number n = lj_lib_checknum(L, 1);
+    lua_Number ip = (n < 0) ? ceil(n) : floor(n);
+    lua_Number fp = (n == ip) ? 0.0 : (n - ip);
+    if (n != n) { ip = n; fp = n; }  /* NaN: both parts NaN (lmathlib). */
+    math_round_result(L, ip);  /* pushes one value */
+    setnumV(L->top++, fp);
+    return 2;
+  }
+}
 
 LJLIB_ASM(math_log)		LJLIB_REC(math_log)
 {
@@ -262,6 +284,26 @@ static uint64_t rand_project(uint64_t ran, uint64_t n, RandState *rs)
 static void rand_pushuint(lua_State *L, uint64_t v)
 {
   lj_i64_push(L, (int64_t)v);
+}
+
+/* JIT entry points (recff_math_random): the trace advances the very same
+** xoshiro256** state the way the interpreter does, so a compiled loop yields
+** the interpreter's sequence. The recorder guards low <= up beforehand. */
+double lj_math_random_f(void *rs)
+{
+  return rand_2d(rand_next((RandState *)rs));
+}
+
+int64_t lj_math_random_0(void *rs)  /* math.random(0) */
+{
+  return (int64_t)TRIM64(rand_next((RandState *)rs));
+}
+
+int64_t lj_math_random_i(void *rs, int64_t low, int64_t up)
+{
+  uint64_t rv = rand_next((RandState *)rs);
+  uint64_t p = rand_project(TRIM64(rv), (uint64_t)up - (uint64_t)low, (RandState *)rs);
+  return (int64_t)(p + (uint64_t)low);
 }
 
 LJLIB_PUSH(top-2)  /* Upvalue holds userdata with RandState. */

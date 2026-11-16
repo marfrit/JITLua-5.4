@@ -1142,7 +1142,7 @@ static LJ_AINLINE int32_t numberVint(cTValue *o)
 static LJ_AINLINE lua_Number numberVnum(cTValue *o)
 {
   if (LJ_UNLIKELY(tvisint(o)))
-    return (lua_Number)intV(o);
+    return (lua_Number)(tvisi47w(o) ? intV47(o) : (int64_t)intV(o));
   else
     return numV(o);
 }

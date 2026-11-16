@@ -801,29 +801,46 @@ static void LJ_FASTCALL recff_math_minmax(jit_State *J, RecordFFData *rd)
 
 static void LJ_FASTCALL recff_math_random(jit_State *J, RecordFFData *rd)
 {
+  /* 5.4 math.random (ADR-001b): the interpreter runs xoshiro256** from the
+  ** RandState upvalue; the trace calls the same C steps on the same state.
+  ** Integer bounds only (int32 or int64 refs); floats stay in the
+  ** interpreter, as does a call that would raise 'interval is empty'. */
   GCudata *ud = udataV(&J->fn->c.upvalue[0]);
-  TRef tr, one;
+  TRef rs, tr, lo, up;
+  int64_t lov, upv;
   lj_ir_kgc(J, obj2gco(ud), IRT_UDATA);  /* Prevent collection. */
-  tr = lj_ir_call(J, IRCALL_lj_prng_u64d, lj_ir_kptr(J, uddata(ud)));
-  one = lj_ir_knum_one(J);
-  tr = emitir(IRTN(IR_SUB), tr, one);
-  if (J->base[0]) {
-    TRef tr1 = lj_ir_tonum(J, J->base[0]);
-    if (J->base[1]) {  /* d = floor(d*(r2-r1+1.0)) + r1 */
-      TRef tr2 = lj_ir_tonum(J, J->base[1]);
-      tr2 = emitir(IRTN(IR_SUB), tr2, tr1);
-      tr2 = emitir(IRTN(IR_ADD), tr2, one);
-      tr = emitir(IRTN(IR_MUL), tr, tr2);
-      tr = emitir(IRTN(IR_FPMATH), tr, IRFPM_FLOOR);
-      tr = emitir(IRTN(IR_ADD), tr, tr1);
-    } else {  /* d = floor(d*r1) + 1.0 */
-      tr = emitir(IRTN(IR_MUL), tr, tr1);
-      tr = emitir(IRTN(IR_FPMATH), tr, IRFPM_FLOOR);
-      tr = emitir(IRTN(IR_ADD), tr, one);
-    }
+  rs = lj_ir_kptr(J, uddata(ud));
+  if (!J->base[0]) {  /* math.random(): float in [0,1) */
+    J->base[0] = lj_ir_call(J, IRCALL_lj_math_random_f, rs);
+    return;
   }
+  if (J->base[1]) {
+    lo = J->base[0]; up = J->base[1];
+    if (!lj_i64_getint(&rd->argv[0], &lov) || !lj_i64_getint(&rd->argv[1], &upv)) {
+      recff_nyiu(J, rd); return;
+    }
+  } else {
+    lo = lj_ir_kint(J, 1); lov = 1; up = J->base[0];
+    if (!lj_i64_getint(&rd->argv[0], &upv)) { recff_nyiu(J, rd); return; }
+  }
+  if (!(tref_isinteger(lo) || tref_istype(lo, IRT_I64)) ||
+      !(tref_isinteger(up) || tref_istype(up, IRT_I64))) {
+    recff_nyiu(J, rd); return;
+  }
+  if (tref_isinteger(lo)) lo = emitir(IRT(IR_CONV, IRT_I64), lo, IRCONV_I64_INT|IRCONV_SEXT);
+  if (tref_isinteger(up)) up = emitir(IRT(IR_CONV, IRT_I64), up, IRCONV_I64_INT|IRCONV_SEXT);
+  if (!J->base[1] && upv == 0) {  /* math.random(0): a full 64-bit integer. */
+    emitir(IRTG(IR_EQ, IRT_I64), up, lj_ir_kint64(J, 0));
+    tr = lj_ir_call(J, IRCALL_lj_math_random_0, rs);
+    J->base[0] = tr;  /* Almost never fits int32: keep I64. */
+    return;
+  }
+  if (lov > upv) { recff_nyiu(J, rd); return; }  /* Interpreter raises. */
+  emitir(IRTG(IR_LE, IRT_I64), lo, up);  /* Guard the interval (also up != 0). */
+  tr = lj_ir_call(J, IRCALL_lj_math_random_i, rs, lo, up);
+  if ((int64_t)(int32_t)lov == lov && (int64_t)(int32_t)upv == upv)
+    tr = emitir(IRTGI(IR_CONV), tr, IRCONV_INT_I64|IRCONV_CHECK);
   J->base[0] = tr;
-  UNUSED(rd);
 }
 
 /* -- Bit library fast functions ------------------------------------------ */
@@ -1757,7 +1774,8 @@ void lj_ffrecord_func(jit_State *J)
 		  ffid == FF_math_sin || ffid == FF_math_cos || ffid == FF_math_tan ||
 		  ffid == FF_math_asin || ffid == FF_math_acos || ffid == FF_math_atan ||
 		  ffid == FF_math_sinh || ffid == FF_math_cosh || ffid == FF_math_tanh ||
-		  ffid == FF_math_log || ffid == FF_math_atan2 || ffid == FF_math_ldexp;
+		  ffid == FF_math_log || ffid == FF_math_atan2 || ffid == FF_math_ldexp ||
+		  ffid == FF_math_random;
     if (!generic)
       for (i = 0; i < J->maxslot; i++)
 	if (tref_istype(J->base[i], IRT_I64))

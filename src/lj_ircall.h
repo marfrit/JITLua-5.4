@@ -11,6 +11,11 @@
 #include "lj_jit.h"
 #include "lj_i64.h"
 
+/* lib_math.c: 5.4 math.random for the recorder (xoshiro256** state). */
+LJ_FUNC double lj_math_random_f(void *rs);
+LJ_FUNC int64_t lj_math_random_0(void *rs);
+LJ_FUNC int64_t lj_math_random_i(void *rs, int64_t low, int64_t up);
+
 /* C call info for CALL* instructions. */
 typedef struct CCallInfo {
   ASMFunction func;		/* Function pointer. */
@@ -197,6 +202,9 @@ typedef struct CCallInfo {
   _(ANY,	lj_gc_barrieruv,	2,  FS, NIL, 0) \
   _(ANY,	lj_mem_newgco,		2,  FA, PGC, CCI_L|CCI_T) \
   _(ANY,	lj_prng_u64d,		1,  FS, NUM, CCI_CASTU64) \
+  _(ANY,	lj_math_random_f,	1,   S, NUM, 0) \
+  _(ANY,	lj_math_random_0,	1,   S, I64, 0) \
+  _(ANY,	lj_math_random_i,	3,   S, I64, XA_64) \
   _(ANY,	lj_vm_modi,		2,  FN, INT, 0) \
   _(ANY,	lj_i64_tvstore,		3,   S, NIL, CCI_L) \
   _(ANY,	lj_i64_shl,		2,   N, I64, XA_64) \

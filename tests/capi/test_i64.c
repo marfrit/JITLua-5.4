@@ -37,11 +37,15 @@ int main(void)
   ok(d != e, "INT64_MIN and INT64_MAX are distinct");
   ok(d != a, "negative differs from the >2^53 value");
 
-  /* A box must survive a full GC while the intern table holds it. */
+  /* The intern table is weak: a box survives a full GC only while something
+  ** references it. Anchor the value on the stack (lua_pushinteger interns
+  ** the same box) and check that interning still hands out that object. */
+  lua_pushinteger(L, 9007199254740993LL);
   lua_gc(L, LUA_GCCOLLECT, 0);
   lua_gc(L, LUA_GCCOLLECT, 0);
   ok(lj_i64_box(L, 9007199254740993LL) == a,
      "interned box survives collection as the same object");
+  lua_pop(L, 1);
 
   {
     int i, bad = 0;

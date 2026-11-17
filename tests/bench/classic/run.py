@@ -19,6 +19,7 @@ REPS = int(os.environ.get("BENCH_REPS", "3"))
 STOCK_URL = ROOT / "tests" / "bench" / "dist" / "luajit-v2.1.tar.gz"
 
 # name: (script, argv, stdin, compare_stdout)
+_ONLY = os.environ.get("BENCH_ONLY", "").strip()
 BENCHES = {
     "nbody": ("n-body.lua", ["10000"], None, True),
     "spectral-norm": ("spectral-norm.lua", ["200"], None, True),
@@ -30,6 +31,8 @@ BENCHES = {
     "k-nucleotide": ("k-nucleotide.lua", [], "input.fasta", True),
     "regex-dna": ("regex-dna.lua", [], "input.fasta", True),
 }
+if _ONLY:
+    BENCHES = {k: v for k, v in BENCHES.items() if k in _ONLY.split(",")}
 
 def sha(path):
     h = hashlib.sha256(); h.update(path.read_bytes()); return h.hexdigest()

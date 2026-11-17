@@ -1541,3 +1541,16 @@ deltablue 0.62x, scimark 0.90x, k-nucleotide 0.88x; x64 — spectral-norm 0.71x,
 deltablue 0.69x, k-nucleotide 0.87x. No result-output differences in the
 deterministic workloads; scimark rates not compared. richards/havlak sources
 not available in the pinned set. Original table and method in the report file.
+
+## Session 53 — classic benchmark regression diagnosis (no fixes)
+
+`docs/perf-regression-2026-11-17.md`: deltablue's slowdown is trace loss from
+`missing metamethod` aborts at `d:output().mark` (NOMM, lj_record.c:1876);
+stock has none and forms a much larger loop trace. spectral-norm x64 is 5.4
+integer loop arithmetic: ADDOV/SUBOV/MULOV guards + five int->num CONVs vs
+stock's all-float loop. k-nucleotide x64 is slower in both `-jon` and `-joff`,
+hot traces nearly identical; the cost is the table string-key GET miss with a
+function `__index` (micro probe), not interning policy. arm k rerun at 6e4d is
+faster (1.27), so that earlier row was noise; arm deltablue rerun improves to
+0.76 but remains. x64 checkint still has the widened test but no bit/tobit
+calls are in these hot traces. Diagnosis only; Fable owns fixes.

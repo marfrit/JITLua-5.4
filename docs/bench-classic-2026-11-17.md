@@ -29,8 +29,11 @@ sources and are not included.
 | k-nucleotide | 15.0 | 17.1 | 45.5 | **0.88** | 2.7 |
 | regex-dna | 12.0 | 12.7 | 14.7 | 0.94 | 1.2 |
 
-Arm64 findings (>10% slower): **deltablue 0.62 (~38%)**, **scimark 0.90
-(~11%)**, **k-nucleotide 0.88 (~12%)**.
+Arm64 findings (>10% slower) at the time: **deltablue 0.62 (~38%)**, **scimark
+0.90 (~11%)**, **k-nucleotide 0.88 (~12%)**. After His' arm64 bit fix
+`6e4d7bb9`, deltablue rerun is 0.76 (3593 vs 4709 ms; still a finding) and
+k-nucleotide rerun is 1.27 (24.4 vs 19.2 ms; earlier 0.88 was load/noise).
+See `docs/perf-regression-2026-11-17.md`.
 
 ## x86_64 (x64-box)
 

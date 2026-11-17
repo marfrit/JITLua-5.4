@@ -46,7 +46,7 @@ tests/harness.sh --mode B --opt-levels 0,1,2,3 --corpus tests/d54 --timeout 120 
 say "harness: dump/reload (mode R)"
 tests/harness.sh --mode R --corpus tests/d54 --timeout 120 | tail -12
 echo "=== lib checks ==="
-for j in -joff -jon; do ./src/luajit $j tests/lib/bit-checkint.lua || exit 1; done
+for j in -joff -jon; do timeout 120 ./src/luajit $j tests/lib/bit-checkint.lua || exit 1; done
 
 say "harness: GC stress (pause 0 in every arm), int64 + close tests, modes A+B+R"
 tests/harness.sh --mode all --opt-levels 0,3 --gc-stress --corpus tests/d54 \

@@ -10,6 +10,7 @@
 #define WINVER 0x0501
 #endif
 #include <stddef.h>
+#include <stdint.h>
 
 /* Default path for loading Lua and C modules with require(). */
 #if defined(_WIN32)
@@ -117,6 +118,7 @@
 #define LUA_INTEGER_FMT		"%" LUA_INTEGER_FRMLEN "d"
 #define LUAI_UACINT		LUA_INTEGER
 #define LUA_UNSIGNED		unsigned long  /* LP64 ptrdiff_t; matches the "l" format */
+#define LUA_KCONTEXT		intptr_t  /* PUC luaconf.h LUA_KCONTEXT */
 #define LUA_MAXINTEGER		((LUA_INTEGER)((~(LUA_UNSIGNED)0) >> 1))
 #define LUA_MININTEGER		((LUA_INTEGER)(-LUA_MAXINTEGER - 1))
 #define LUA_MAXUNSIGNED		(~(LUA_UNSIGNED)0)

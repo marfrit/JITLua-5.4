@@ -463,6 +463,170 @@ static void test_resume54(void)
   lua_close(L);
 }
 
+static int cont_calls;
+static int cont_k(lua_State *L, int status, lua_KContext ctx)
+{
+  (void)L; (void)status; (void)ctx;
+  cont_calls++;
+  return 0;
+}
+static int add_c(lua_State *L)
+{
+  lua_Integer a = lua_tointeger(L, 1), b = lua_tointeger(L, 2);
+  lua_pushinteger(L, a + b);
+  return 1;
+}
+static int error_c(lua_State *L)
+{
+  lua_pushliteral(L, "boom");
+  return lua_error(L);
+}
+static int callk_error(lua_State *L)
+{
+  lua_pushcfunction(L, error_c);
+  lua_pushliteral(L, "boom");
+  lua_callk(L, 1, 0, 0, cont_k);
+  return 0;
+}
+static int handler_c(lua_State *L)
+{
+  lua_pushliteral(L, "handled");
+  return 1;
+}
+static int yield0_c(lua_State *L)
+{
+  lua_pushinteger(L, 7);
+  return lua_yieldk(L, 1, 0, NULL);
+}
+static int yieldk_c(lua_State *L)
+{
+  lua_pushinteger(L, 8);
+  return lua_yieldk(L, 1, 0, cont_k);
+}
+static int pcallk_yield_c(lua_State *L)
+{
+  int st;
+  lua_getglobal(L, "yielder");
+  st = lua_pcallk(L, 0, 1, 0, 0, cont_k);
+  if (st != LUA_OK) {
+    lua_pushinteger(L, st);
+    lua_insert(L, -2);  /* status, error object */
+    return 2;
+  }
+  return 1;
+}
+static void check_err(lua_State *L, const char *needle, const char *name)
+{
+  const char *m = lua_tostring(L, -1);
+  ok(m != NULL && strstr(m, needle) != NULL, name);
+}
+
+static void test_continuations(void)
+{
+  lua_State *L = newL();
+  int st;
+  cont_calls = 0;
+
+  /* callk success: k is never invoked. */
+  lua_pushcfunction(L, add_c);
+  lua_pushinteger(L, 2); lua_pushinteger(L, 3);
+  lua_callk(L, 2, 1, 0, cont_k);
+  ok(lua_tointeger(L, -1) == 5, "lua_callk success returns the result");
+  ok(cont_calls == 0, "lua_callk does not invoke k");
+  lua_pop(L, 1);
+
+  /* callk error: propagates like lua_call, caught by a Lua pcall. */
+  lua_pushcfunction(L, callk_error);
+  lua_setglobal(L, "callk_error");
+  luaL_dostring(L, "ok1, msg1 = pcall(function() return callk_error() end)");
+  lua_getglobal(L, "ok1");
+  ok(!lua_toboolean(L, -1), "lua_callk error propagates");
+  lua_pop(L, 1);
+  lua_getglobal(L, "msg1");
+  check_err(L, "boom", "lua_callk error object");
+  lua_pop(L, 1);
+
+  /* pcallk success. */
+  lua_pushcfunction(L, add_c);
+  lua_pushinteger(L, 4); lua_pushinteger(L, 5);
+  st = lua_pcallk(L, 2, 1, 0, 0, cont_k);
+  ok(st == LUA_OK && lua_tointeger(L, -1) == 9,
+     "lua_pcallk success returns the result");
+  ok(cont_calls == 0, "lua_pcallk does not invoke k");
+  lua_pop(L, 1);
+
+  /* pcallk error without a handler. */
+  lua_pushcfunction(L, error_c);
+  lua_pushliteral(L, "boom");
+  st = lua_pcallk(L, 1, 0, 0, 0, cont_k);
+  ok(st == LUA_ERRRUN, "lua_pcallk error status");
+  check_err(L, "boom", "lua_pcallk error object");
+  lua_pop(L, 1);
+
+  /* pcallk error with an error handler (index 1). */
+  lua_settop(L, 0);
+  lua_pushcfunction(L, handler_c);
+  lua_pushcfunction(L, error_c);
+  lua_pushliteral(L, "boom");
+  st = lua_pcallk(L, 1, 0, 1, 0, cont_k);
+  ok(st == LUA_ERRRUN && lua_isstring(L, -1) &&
+     strcmp(lua_tostring(L, -1), "handled") == 0,
+     "lua_pcallk uses the error handler");
+  lua_pop(L, 2);  /* handler and result */
+  ok(cont_calls == 0, "lua_pcallk never invokes k (all cases)");
+
+  /* lua_yieldk with k == NULL: a tail yield from a C function. */
+  lua_pushcfunction(L, yield0_c);
+  lua_setglobal(L, "yield0_c");
+  luaL_dostring(L, "co1 = coroutine.create(function() return yield0_c() end)");
+  lua_getglobal(L, "co1");
+  {
+    lua_State *co = lua_tothread(L, -1);
+    int nres = -1;
+    st = lua_resume(co, L, 0, &nres);
+    ok(st == LUA_YIELD && nres == 1 && lua_tointeger(co, -1) == 7,
+       "lua_yieldk(NULL) yields from a C tail call");
+  }
+  lua_pop(L, 1);
+
+  /* lua_yieldk with a continuation: refused, not silently skipped. */
+  lua_pushcfunction(L, yieldk_c);
+  lua_setglobal(L, "yieldk_c");
+  luaL_dostring(L, "co2 = coroutine.create(function() return yieldk_c() end)");
+  lua_getglobal(L, "co2");
+  {
+    lua_State *co = lua_tothread(L, -1);
+    int nres = -1;
+    st = lua_resume(co, L, 0, &nres);
+    ok(st == LUA_ERRRUN, "lua_yieldk(k != NULL) is refused");
+    check_err(co, "attempt to yield across a C-call boundary",
+             "lua_yieldk(k != NULL) error wording");
+  }
+  lua_pop(L, 1);
+
+  /* A yield over lua_pcallk is a clean, documented error. */
+  lua_pushcfunction(L, pcallk_yield_c);
+  lua_setglobal(L, "pcallk_yield_c");
+  luaL_dostring(L,
+    "yielder = function() return coroutine.yield(9) end\n"
+    "co3 = coroutine.create(function() return pcallk_yield_c() end)");
+  lua_getglobal(L, "co3");
+  {
+    lua_State *co = lua_tothread(L, -1);
+    int nres = -1;
+    st = lua_resume(co, L, 0, &nres);
+    ok(st == LUA_OK && nres == 2 && lua_tointeger(co, -2) == LUA_ERRRUN,
+       "yield over lua_pcallk returns LUA_ERRRUN");
+    lua_pushvalue(co, -1);
+    lua_xmove(co, L, 1);
+    check_err(L, "attempt to yield", "yield over lua_pcallk error wording");
+    lua_pop(L, 1);
+  }
+  lua_pop(L, 1);
+  ok(cont_calls == 0, "no continuation callback ran in any case");
+  lua_close(L);
+}
+
 static void test_lauxlib54(void)
 {
   lua_State *L = newL();
@@ -522,7 +686,8 @@ int main(void)
 {
   test_absindex(); test_getseti(); test_stream_abi(); test_api54_surface(); test_len(); test_compare();
   test_stringtonumber(); test_getsubtable(); test_isinteger(); test_rotate();
-  test_newuserdatauv(); test_iuservalue(); test_warning(); test_warnf(); test_resume54(); test_lauxlib54();
+  test_newuserdatauv(); test_iuservalue(); test_warning(); test_warnf(); test_resume54();
+  test_continuations(); test_lauxlib54();
   printf("== capi: %d checks, %d failures ==\n", checks, failures);
   return failures ? 1 : 0;
 }

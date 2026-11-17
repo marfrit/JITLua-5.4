@@ -60,6 +60,7 @@ ERRDEF(FORSTEP,	LUA_QL("for") " step must be a number")
 /* C API checks. */
 ERRDEF(NOENV,	"no calling environment")
 ERRDEF(CYIELD,	"attempt to yield from outside a coroutine")
+ERRDEF(CYIELDK,	"attempt to yield across a C-call boundary")
 ERRDEF(BADLU,	"bad light userdata pointer")
 ERRDEF(NOGCMM,	"bad action while in __gc metamethod")
 #if LJ_TARGET_WINDOWS

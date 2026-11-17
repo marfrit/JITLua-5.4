@@ -1190,6 +1190,7 @@ LUA_API int lua_rawget(lua_State *L, int idx)
   cTValue *t = index2adr(L, idx);
   lj_checkapi(tvistab(t), "stack slot %d is not a table", idx);
   copyTV(L, L->top-1, lj_tab_get(L, tabV(t), L->top-1));
+  return lua_type(L, -1);
 }
 
 LUA_API int lua_rawgeti(lua_State *L, int idx, lua_Integer n)

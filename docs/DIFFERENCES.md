@@ -91,6 +91,9 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
 - `EXTENSION` `jit.*`, `bit.*`, `ffi`/cdata, `bcsave`, `-j`/`-O`/`-b` options.
 - `EXTENSION` FFI int64/uint64 cdata and bit operations on cdata; intended
   semantics are in `docs/ffi-int-semantics.md` (tests `ffi_int_*`, modes B/R).
+- `EXTENSION` FFI source-literal suffixes `LL`, `ULL`/`LLU` and imaginary `i`
+  (`1LL`, `1ULL`, `0x10ULL`, `12.5i`) are accepted when FFI is compiled;
+  PUC 5.4 rejects them (`lex_03_ffi_suffix`).
 - `EXTENSION` LuaJIT's pattern-matching implementation and its string-buffer
   optimizations remain; 5.4 pattern behaviors are covered by `str_03_patterns`.
 - `EXTENSION` `string.dump` bytecode format and `-b`/`bcsave` are

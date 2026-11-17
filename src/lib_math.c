@@ -25,7 +25,7 @@
 #define LJLIB_MODULE_math
 
 /* Lua 5.4: math.abs keeps integer values exact (mininteger stays mininteger). */
-LJLIB_CF(math_abs)
+LJLIB_CF(math_abs)		LJLIB_REC(.)
 {
   TValue *o = L->base;
   int64_t v;
@@ -64,13 +64,13 @@ static int math_round_int(lua_State *L)
   return 0;
 }
 
-LJLIB_CF(math_floor)
+LJLIB_CF(math_floor)		LJLIB_REC(math_round IRFPM_FLOOR)
 {
   if (math_round_int(L)) return 1;
   return math_round_result(L, floor(lj_lib_checknum(L, 1)));
 }
 
-LJLIB_CF(math_ceil)
+LJLIB_CF(math_ceil)		LJLIB_REC(math_round IRFPM_CEIL)
 {
   if (math_round_int(L)) return 1;
   return math_round_result(L, ceil(lj_lib_checknum(L, 1)));

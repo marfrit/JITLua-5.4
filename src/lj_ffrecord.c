@@ -302,7 +302,7 @@ static void LJ_FASTCALL recff_rawequal(jit_State *J, RecordFFData *rd)
   }  /* else: Interpreter will throw. */
 }
 
-#if LJ_52
+/* Lua 5.4 rawlen (tables and strings; the interpreter throws otherwise). */
 static void LJ_FASTCALL recff_rawlen(jit_State *J, RecordFFData *rd)
 {
   TRef tr = J->base[0];
@@ -313,7 +313,6 @@ static void LJ_FASTCALL recff_rawlen(jit_State *J, RecordFFData *rd)
   /* else: Interpreter will throw. */
   UNUSED(rd);
 }
-#endif
 
 static void LJ_FASTCALL recff_unpack(jit_State *J, RecordFFData *rd)
 {
@@ -660,24 +659,41 @@ static void LJ_FASTCALL recff_math_abs(jit_State *J, RecordFFData *rd)
     J->base[0] = lj_ir_call(J, IRCALL_lj_i64_abs, tr);
     return;
   }
+  if (tref_isinteger(tr)) {
+    /* 5.4: an integer argument gives an integer. Specialize on the sign
+    ** seen at record time: a non-negative value is its own abs, a negative
+    ** one is negated with an overflow guard (-(-2^31) does not fit int32,
+    ** the exit re-runs the call in the interpreter, which widens). */
+    if (numberVint(&rd->argv[0]) >= 0) {
+      emitir(IRTGI(IR_GE), tr, lj_ir_kint(J, 0));
+    } else {
+      emitir(IRTGI(IR_LT), tr, lj_ir_kint(J, 0));
+      tr = emitir(IRTGI(IR_SUBOV), lj_ir_kint(J, 0), tr);
+    }
+    J->base[0] = tr;
+    return;
+  }
   tr = lj_ir_tonum(J, tr);
   J->base[0] = emitir(IRTN(IR_ABS), tr, lj_ir_ksimd(J, LJ_KSIMD_ABS));
-  UNUSED(rd);
 }
 
 /* Record rounding functions math.floor and math.ceil. */
 static void LJ_FASTCALL recff_math_round(jit_State *J, RecordFFData *rd)
 {
   TRef tr = J->base[0];
-  if (!tref_isinteger(tr)) {  /* Pass through integers unmodified. */
+  /* 5.4: an integer (int32 or int64 ref) is its own floor and ceil. */
+  if (!(tref_isinteger(tr) || tref_istype(tr, IRT_I64))) {
+    lua_Number n = lj_vm_foldfpm(numberVnum(&rd->argv[0]), rd->data);
+    /* 5.4 returns an integer when the rounded value has one. Record the
+    ** int32 case under a guard (the exit covers NaN, +-inf and values
+    ** outside int32, which the interpreter then handles: float or int64).
+    ** A result outside int32 would need an IRT_I64 ref under the
+    ** representation rule of lj_record.c; not recorded, the call is
+    ** stitched / left to the interpreter for that trace. */
+    if (!lj_num2int_ok(n))
+      recff_nyi(J, rd);  /* Does not return. */
     tr = emitir(IRTN(IR_FPMATH), lj_ir_tonum(J, tr), rd->data);
-    /* Result is integral (or NaN/Inf), but may not fit an int32_t. */
-    if (LJ_DUALNUM) {  /* Try to narrow using a guarded conversion to int. */
-      lua_Number n = lj_vm_foldfpm(numberVnum(&rd->argv[0]), rd->data);
-      if (lj_num2int_ok(n))
-	tr = emitir(IRTGI(IR_CONV), tr, IRCONV_INT_NUM|IRCONV_CHECK);
-    }
-    J->base[0] = tr;
+    J->base[0] = emitir(IRTGI(IR_CONV), tr, IRCONV_INT_NUM|IRCONV_CHECK);
   }
 }
 
@@ -1779,7 +1795,7 @@ void lj_ffrecord_func(jit_State *J)
     uint32_t ffid = J->fn->c.ffid;
     /* Handlers that only copy, compare or type-dispatch their arguments, or
     ** that understand an IRT_I64 argument (step 4: tostring/tonumber,
-    ** string.format, math.abs/min/max, and the FP functions, which take the
+    ** string.format, math.abs/min/max, math.floor/ceil, and the FP functions, which take the
     ** int64 as a double like lj_lib_checknum does; the bit library, which
     ** narrows it modulo 2^32 through lj_opt_narrow_bitop, hybrid rule). */
     int generic = (ffid >= FF_bit_tobit && ffid <= FF_bit_tohex) ||
@@ -1789,6 +1805,7 @@ void lj_ffrecord_func(jit_State *J)
 		  ffid == FF_tostring || ffid == FF_tonumber ||
 		  ffid == FF_string_format ||
 		  ffid == FF_math_abs || ffid == FF_math_min || ffid == FF_math_max ||
+		  ffid == FF_math_floor || ffid == FF_math_ceil ||
 		  ffid == FF_math_sqrt || ffid == FF_math_log10 || ffid == FF_math_exp ||
 		  ffid == FF_math_sin || ffid == FF_math_cos || ffid == FF_math_tan ||
 		  ffid == FF_math_asin || ffid == FF_math_acos || ffid == FF_math_atan ||

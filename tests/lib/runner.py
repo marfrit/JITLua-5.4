@@ -222,12 +222,20 @@ class Job:
         scratch = None
         if "/corpus/" in self.rel:
             # Upstream suite files create temp files in cwd; give each test a
-            # private scratch dir with symlinks to its siblings so the repo
-            # stays clean and dofile()/require() of neighbours still work.
+            # private scratch dir with symlinks to its sibling files so the
+            # repo stays clean and dofile()/require() of neighbours still work.
+            # Sibling directories are copied, not linked: tests such as
+            # attrib.lua create and delete files inside libs/, and the A, B
+            # and R jobs of one file run concurrently.
+            import shutil
             scratch = tempfile.mkdtemp(prefix="lj54-")
             for sib in self.path.parent.iterdir():
+                dst = os.path.join(scratch, sib.name)
                 try:
-                    os.symlink(sib, os.path.join(scratch, sib.name))
+                    if sib.is_dir() and not sib.is_symlink():
+                        shutil.copytree(sib, dst, symlinks=True)
+                    else:
+                        os.symlink(sib, dst)
                 except OSError:
                     pass
             cwd = Path(scratch)
@@ -270,10 +278,13 @@ class Job:
             # Never XFAIL: known-bad entries cover semantic gaps, not crashes.
             self.status, self.detail = "FAIL", hard
             return self
-        if detail.startswith("TIMEOUT"):
-            self.status, self.detail = "TIMEOUT", detail
-            return self
         reason = kb_reason(ctx["kb"], self.rel, self.mode)
+        if detail.startswith("TIMEOUT"):
+            # Both arms hit the limit. A known-bad entry covers it (XFAIL);
+            # otherwise it is a failure of the run.
+            self.status = "XFAIL" if reason is not None else "TIMEOUT"
+            self.detail, self.reason = detail, reason or ""
+            return self
         if mismatch:
             self.status = "XFAIL" if reason is not None else "FAIL"
             self.detail = detail

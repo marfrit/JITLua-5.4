@@ -35,7 +35,8 @@ LUAJIT=tests/ref/sanbuild/src/luajit tests/harness.sh --corpus tests/d54
 `PASS` / `FAIL` (unexpected, exit 1) / `XFAIL` (listed in `known-bad.tsv`) /
 `XPASS` (listed but now passing — remove the entry) / `SKIP` (directive, or PUC
 `T.*` internal test hooks) / `BAD` (corpus file is not valid Lua 5.4 — fix the
-test) / `TIMEOUT` (both sides exceeded the limit: inconclusive, not a failure).
+test) / `TIMEOUT` (both sides exceeded the limit; counts as a failure of the run unless a
+known-bad entry covers the file and mode, then it is reported as `XFAIL`).
 
 Every corpus file is pre-flighted with `luac54ref -p`; a file that fails to parse
 on the reference would otherwise "pass" mode A by failing on both sides.

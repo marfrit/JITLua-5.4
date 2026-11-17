@@ -12,12 +12,14 @@ LuaJIT 2.1 README is kept as [README.LuaJIT](README.LuaJIT).
 Honest status, not a compatibility claim:
 
 - Differential gates against PUC Lua 5.4.9 pass on the tested platforms.
-  Measured on the `tests/d54` edge-case corpus: A+B
-  **123 PASS / 0 FAIL / 5 XFAIL**, JIT optimization levels 0–3 **268**, R
-  (dump/reload round-trip) **67**; the sanitizer run is
-  **190 PASS / 0 FAIL / 5 XFAIL**.
-- Full PUC 5.4.9 corpus with `--strict`: **PENDING — numbers arrive with the
-  harness fix before release.**
+  Measured on Linux arm64 and x86_64, identical on both, on the `tests/d54`
+  edge-case corpus: A+B **129 PASS / 0 FAIL / 5 XFAIL**, JIT optimization
+  levels 0–3 **280**, R (dump/reload round-trip) **70**; the ASan/UBSan run
+  of A+B+R is **199 PASS / 0 FAIL / 5 XFAIL**; C API checks **128 + 14**.
+- Full corpus (PUC 5.4.9 test suite plus `tests/d54`) with `--strict`, the
+  exact command of the public CI: **254 PASS / 0 FAIL / 10 XFAIL / 12 SKIP /
+  0 TIMEOUT**. Every XFAIL is a known-bad entry with its reason in
+  `tests/known-bad.tsv`.
 - The remaining known gaps and deliberate divergences are recorded in
   [docs/DIFFERENCES.md](docs/DIFFERENCES.md) and
   [tests/known-bad.tsv](tests/known-bad.tsv). Open items include arbitrary
@@ -69,8 +71,9 @@ Harness modes: **A** (reference vs this fork, JIT off), **B** (JIT on vs off),
 **R** (direct vs `string.dump`→`load` round-trip). `--strict` treats an
 unexpected pass of a known-bad entry as a failure.
 
-ASan/UBSan are part of the public CI gate: the `linux-x64-sanitizers` job runs
-them and is green. Locally, `tests/ci-local.sh --sanitizers-only` builds the
+ASan/UBSan are part of the public CI gate (the `linux-x64-sanitizers` job);
+the local run of `tests/ci-local.sh --sanitizers-only` is green on both
+architectures. Locally, `tests/ci-local.sh --sanitizers-only` builds the
 instrumented VM and runs both the differential harness and the C API tests.
 
 ## Platforms

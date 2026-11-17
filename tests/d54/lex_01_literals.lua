@@ -1,5 +1,5 @@
 --! §4.1 literals + tonumber (5.4 grammar). NOTE: Lua 5.4 has NO underscore
---! separators and NO 0b binary literals (MISSION 4.1 was wrong; verified 5.4.7).
+--! separators and NO 0b binary literals (MISSION 4.1 was wrong; verified 5.4.9).
 local function p(...)
   local n, t = select("#", ...), {}
   for i = 1, n do t[i] = tostring((select(i, ...))) end

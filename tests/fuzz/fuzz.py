@@ -2,7 +2,7 @@
 """Differential fuzz driver (MISSION Phase 0 deliverable 3).
 
   tests/fuzz/fuzz.py --seed 1 --count 200 --mode B --opt-levels 0,1,2,3 --gc
-  tests/fuzz/fuzz.py --seed 1 --count 50 --mode A          # vs PUC 5.4.7
+  tests/fuzz/fuzz.py --seed 1 --count 50 --mode A          # vs PUC 5.4.9
   tests/fuzz/fuzz.py --seed 1 --count 50 --mode R          # dump -> reload -> rerun
 
 Reproducible: program N is generated from seed (base_seed + N).  Any mismatch is

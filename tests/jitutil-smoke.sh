@@ -6,6 +6,7 @@
 # literals; this keeps that path exercised on both arches.
 #
 #   sh tests/jitutil-smoke.sh
+TMPF=$(mktemp); trap 'rm -f "$TMPF"' EXIT
 set -u
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT"
@@ -17,9 +18,9 @@ for s in tests/d54/i64_02_jit.lua tests/d54/i64_03_jit_tables.lua \
          tests/d54/bits_02_metamethods.lua tests/d54/close_01_semantics.lua; do
   for o in -jbc -jv "-jdump=bimT" "-jdump=+rs" -jp; do
     n=$((n+1))
-    "$LUAJIT" $o "$s" >/tmp/jitutil-smoke.txt 2>&1; rc=$?
+    "$LUAJIT" $o "$s" >"$TMPF" 2>&1; rc=$?
     if [ $rc -ne 0 ]; then
-      fail=1; printf 'FAIL %s %s rc=%d\n' "$s" "$o" "$rc"; tail -3 /tmp/jitutil-smoke.txt
+      fail=1; printf 'FAIL %s %s rc=%d\n' "$s" "$o" "$rc"; tail -3 "$TMPF"
     fi
   done
 done

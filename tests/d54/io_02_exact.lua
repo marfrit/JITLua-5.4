@@ -1,6 +1,6 @@
 --! §5 io library 5.4 exactness, part 2: read formats, lines, seek, setvbuf,
 --! type/close/flush, input/output by name, write return values and closed or
---! wrong-mode handles. Differential: LuaJIT-5.4 vs PUC-Lua 5.4.7 -- the output
+--! wrong-mode handles. Differential: JITLua-5.4 vs PUC-Lua 5.4.9 -- the output
 --! must be byte-identical (harness modes A/B/R use the same script).
 --!
 --! Deliberately not covered here, because it needs the 64-bit integer value

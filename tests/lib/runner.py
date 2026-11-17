@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""LuaJIT-5.4 differential test runner (MISSION Phase 0).
+"""JITLua-5.4 differential test runner (MISSION Phase 0).
 
 Modes
   A  PUC-Lua 5.4.9 reference  vs  our LuaJIT with JIT off   (interpreter correctness)
@@ -393,9 +393,9 @@ def main():
         for f in concurrent.futures.as_completed(futs):
             r = f.result()
             results.append(r)
-            if opts.verbose or r.status in ("FAIL", "XPASS", "BAD"):
+            if opts.verbose or r.status in ("FAIL", "XPASS", "BAD", "TIMEOUT"):
                 print("%-5s %-3s %s" % (r.status, r.mode, r.rel), flush=True)
-                if r.status in ("FAIL", "BAD") and r.detail:
+                if r.status in ("FAIL", "BAD", "TIMEOUT") and r.detail:
                     print("      " + r.detail.replace("\n", "\n      ")[:2000], flush=True)
 
     results.sort(key=lambda r: (r.rel, r.mode))
@@ -432,7 +432,7 @@ def main():
             md += ["- %s: %s" % (r.rel, r.detail)]
     md += ["", "## unexpected failures", ""]
     for r in results:
-        if r.status == "FAIL":
+        if r.status in ("FAIL", "TIMEOUT"):
             md += ["### %s [%s]" % (r.rel, r.mode), "```", r.detail[:2000], "```", ""]
     md += ["", "## expected failures (known-bad)", ""]
     for r in results:

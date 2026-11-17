@@ -1,7 +1,7 @@
 -- int32-overflowing arithmetic inside a bit-op masked expression.
 -- Lua 5.4 semantics: * and + wrap modulo 2^64, then the mask applies to the
 -- 64-bit result. A JIT that narrows to int32/float must produce the same value
--- as the interpreter (mode B vs A) and as PUC 5.4.7.
+-- as the interpreter (mode B vs A) and as PUC 5.4.9.
 local st = 12345
 for i = 1, 100000 do
   st = (st * 1103515245 + 12345) & 0x7fffffff

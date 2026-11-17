@@ -584,14 +584,14 @@
 #else
 #define LJ_DUALNUM		0
 #endif
-/* LuaJIT-5.4: the 5.4 number model needs the dual-number VM everywhere. The
+/* JITLua-5.4: the 5.4 number model needs the dual-number VM everywhere. The
 ** Makefile forces LUAJIT_NUMMODE=2 for x64/x86, but `make XCFLAGS=...` on the
 ** command line replaces that line (GNU make: command-line variables override
 ** Makefile assignments) and silently produced single-number builds whose
 ** parser boxed every integer literal and corrupted the heap. Extra flags go
 ** in CFLAGS (`make CFLAGS=-DLUA_USE_ASSERT`), which the Makefile appends. */
 #if !LJ_DUALNUM
-#error "LuaJIT-5.4 requires dual-number mode: build with LUAJIT_NUMMODE=2 (do not override XCFLAGS; use CFLAGS for extra defines)"
+#error "JITLua-5.4 requires dual-number mode: build with LUAJIT_NUMMODE=2 (do not override XCFLAGS; use CFLAGS for extra defines)"
 #endif
 
 #if LJ_TARGET_IOS || LJ_TARGET_CONSOLE
@@ -625,10 +625,10 @@
 
 /* Disable or enable the FFI extension. */
 #if defined(LUAJIT_DISABLE_FFI) || defined(LJ_ARCH_NOFFI)
-/* LuaJIT-5.4: the 64-bit integer paths (shifts, bit ops, int64 constants in
+/* JITLua-5.4: the 64-bit integer paths (shifts, bit ops, int64 constants in
 ** traces) are implemented on the FFI's int64 support; a build without the
 ** FFI compiles but computes 1 << 40 as 256. Refuse it. */
-#error "LuaJIT-5.4 requires the FFI: do not define LUAJIT_DISABLE_FFI (and this target must have it)"
+#error "JITLua-5.4 requires the FFI: do not define LUAJIT_DISABLE_FFI (and this target must have it)"
 #define LJ_HASFFI		0
 #else
 #define LJ_HASFFI		1

@@ -1,6 +1,6 @@
---! §4.2 string patterns (Lua 5.4.7 exactness: %f, %b, classes, gmatch init,
+--! §4.2 string patterns (Lua 5.4.9 exactness: %f, %b, classes, gmatch init,
 --! gsub empty-match/lastmatch rules, %0 replacement and error wording)
--- Output is byte-identical under PUC 5.4.7 and LuaJIT-5.4.
+-- Output is byte-identical under PUC 5.4.9 and LuaJIT-5.4.
 
 local function hex(s)
   return (s:gsub(".", function(c) return string.format("%02x", c:byte()) end))

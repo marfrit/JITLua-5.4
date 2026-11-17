@@ -1489,3 +1489,16 @@ A `-jdump=+rsi` crash dump shows the live trace calling lj_tab_newkey, with
 the mcode post-call chain write; a core RIP maps to lj_tab_newkey:519
 (`while (noderef(collide->next) != n)`) after a JIT table store. Known-bad
 math B records this for Fable.
+## Session 49 — FFI int64/uint64 and bit semantics vs native 5.4 integers
+
+Queue item 2: three d54 tests (`ffi_int_01_arith`, `ffi_int_02_convert`,
+`ffi_int_03_bit`, modes B,R; PUC has no ffi/bit so A skips) and
+`docs/ffi-int-semantics.md`. The fork has no global `ffi` (use
+`require("ffi")`); 8-byte cdata tostrings with LL/ULL, `math.type(cdata)` and
+`math.tointeger(cdata)` are nil, `//` on cdata is unsupported, `bit.lshift/
+rshift` are the names, `%d` on uint64 is signed, and bit.lshift/rshift/arshift/rol/ror are broken on arm64 (0 for both cdata
+and native values, -joff and -jon alike; x64 correct; cause not yet located,
+not merely a JIT fast path; not asserted in the portable test). Assertions were corrected
+from measured behavior after the first pass was found vacuous (nil `ffi`
+crashed all arms identically). No library/VM code change was needed. Gate:
+ffi_int_* 6 PASS / 0 FAIL per box on arm64 and x86_64 (B,R).

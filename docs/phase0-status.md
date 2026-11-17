@@ -1688,3 +1688,12 @@ x64 per-process cost resolved: lua_close is ~13 ms in both (stock 93.6 -> 81.2
 ms with os.exit(0,false), ours 96.7 -> 83.2); on a k-nucleotide-shaped script
 ours is now +2-3 ms whole-process (-jon 75.3 vs 73.6 ms, os.exit 62.4 vs 63.0),
 the in-script -joff part +6.7 ms (the ~8% interpreter cost per phase).
+
+Final gate on the merge with main 2abfe5f5 (296202b0), both boxes identical:
+A+B 117/0/5 XFAIL (63 tests), opt 0..3 252/0, R 63/0, bit-checkint ok,
+math-random-jit OK, GC stress 59+1X, jitutil smoke 30 ok, corpus-ext 15
+SAME/0, capi 112/0, i64 14/0, fuzz 160/0. Bench on that tree (REPS=5):
+arm64 deltablue 3664.4 / 4399.9 ms (0.83x), k-nucleotide 17.8 / 19.4 ms
+(0.92x, within the bimodal-box band); x86_64 deltablue 20534.1 / 24142.8 ms
+(0.85x), k-nucleotide 66.3 / 73.1 ms (0.91x). deltablue -jv NOMM 0 on both
+(arm ours 180 traces / stock 174, x64 181 / 173).

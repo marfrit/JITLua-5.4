@@ -34,14 +34,15 @@ if [ ! -x "$SANBUILD/src/luajit" ] || [ "$SAN" = 1 ]; then
   # uninstrumented -- they are short-lived and leak by design, which would
   # otherwise abort the build under LSan.
   ( cd "$SANBUILD" && ASAN_OPTIONS=detect_leaks=0 make -j"$(nproc)" \
-      CC="gcc -fsanitize=address,undefined -fno-omit-frame-pointer -g" \
-      HOST_CC="gcc" \
-      LDFLAGS="-fsanitize=address,undefined" )
+      CC="gcc -fsanitize=address,undefined -fno-sanitize=alignment -fno-omit-frame-pointer -g" \
+      HOST_CC="gcc" CCDEBUG="-g" \
+      LDFLAGS="-fsanitize=address,undefined -fno-sanitize=alignment" )
 fi
 if ! ASAN_OPTIONS=detect_leaks=0 "$SANBUILD/src/luajit" -e 'os.exit(0)' >/dev/null 2>&1; then
   echo "ci-local: sanitizer binary cannot start (allocator/address-space issue)" >&2
   exit 2
 fi
-ASAN_OPTIONS=detect_leaks=0:abort_on_error=1 UBSAN_OPTIONS=print_stacktrace=1 \
+ASAN_OPTIONS=detect_leaks=0:abort_on_error=1 \
+  UBSAN_OPTIONS=print_stacktrace=0:halt_on_error=1 \
   LUAJIT="$SANBUILD/src/luajit" tests/harness.sh --mode all --corpus tests/d54 --timeout 120
 echo "ci-local: OK"

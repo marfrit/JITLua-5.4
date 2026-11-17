@@ -5,8 +5,10 @@
 # summary. Exit status 1 if any round failed.
 #
 #   SOAK_HOURS=8 sh tests/soak/gc-soak.sh               # here (aarch64)
-#   SOAK_HOURS=8 arm-box -t 32400 sh tests/soak/gc-soak.sh   # arm box
-#   SOAK_HOURS=8 x64-box -t 32400 sh tests/soak/gc-soak.sh   # x64 box (serialized queue!)
+# arm64-build/x64-build are private remote build wrappers (copy, run, return
+# stdout); they are not part of this repository.
+#   SOAK_HOURS=8 arm64-build -t 32400 sh tests/soak/gc-soak.sh   # arm box
+#   SOAK_HOURS=8 x64-build -t 32400 sh tests/soak/gc-soak.sh   # x64 box (serialized queue!)
 #
 # Knobs (environment): SOAK_HOURS (default 8), SOAK_NICE (nice level, default
 # 19: the boxes share their host with other work), SOAK_JOBS (harness jobs,

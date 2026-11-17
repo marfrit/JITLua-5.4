@@ -1,5 +1,7 @@
 #!/bin/sh
-# Benchmark gate for ADR-001b (His + Markus addendum): boxing versus 16-byte.
+# Benchmark gate for ADR-001b: boxing versus 16-byte.
+# arm64-build/x64-build are private remote build wrappers: they copy the tree,
+# run the command there and return stdout. They are not part of this repository.
 #
 # Four arms, all inside ONE box job (same machine, same moment):
 #   1  our build, JIT on
@@ -7,9 +9,9 @@
 #   3  stock LuaJIT v2.1 (from the vendored upstream snapshot) with FFI uint64_t
 #   4  PUC-Lua 5.4.7 (tests/ref/bin/lua54ref)
 # Each benchmark runs 3x per arm; the runner reports the MEDIAN wall time.
-# escher shares its CPU with model serving: differences under ~10 % are noise.
+# the arm64 build box shares its CPU with model serving: differences under ~10 % are noise.
 #
-#   arm-box -t 1800 sh tests/bench/run.sh
+#   arm64-build -t 1800 sh tests/bench/run.sh
 #   sh tests/bench/run.sh               # on a normal machine
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)

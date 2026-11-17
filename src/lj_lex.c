@@ -97,9 +97,6 @@ static void lex_number(LexState *ls, TValue *tv)
 {
   StrScanFmt fmt;
   LexChar c, xp = 'e';
-#if LJ_HASFFI
-  int ffi_suffix = 0;
-#endif
   lj_assertLS(lj_char_isdigit(ls->c), "bad usage");
   if ((c = ls->c) == '0') {
     lex_save(ls, c);
@@ -127,7 +124,7 @@ static void lex_number(LexState *ls, TValue *tv)
       break;
     }
   }
-  if (lj_char_isalpha(ls->c) || ls->c == '_') {  /* numeral touching a word */
+  if (lj_char_isident(ls->c)) {  /* numeral touching a word */
 #if LJ_HASFFI
     /* LuaJIT FFI suffixes (LL/ULL and the imaginary i) are deliberate
     ** extensions kept by this fork. Consume the whole suffix word so the
@@ -135,8 +132,7 @@ static void lex_number(LexState *ls, TValue *tv)
     ** in the PUC malformed-number error with the full token text. */
     if ((ls->c | 0x20) == 'l' || (ls->c | 0x20) == 'u' ||
 	(ls->c | 0x20) == 'i') {
-      ffi_suffix = 1;
-      while (lj_char_isident(ls->c) || ls->c == '_') {
+      while (lj_char_isident(ls->c)) {
 	lex_save(ls, ls->c);
 	lex_next(ls);
       }
@@ -198,15 +194,13 @@ static void lex_number(LexState *ls, TValue *tv)
   if (LJ_DUALNUM && fmt == STRSCAN_INT) {
     setitype(tv, LJ_TISNUM);
 #if LJ_HASFFI
-  } else if (ffi_suffix && (fmt == STRSCAN_I64 || fmt == STRSCAN_U64 ||
-			     fmt == STRSCAN_IMAG)) {
+  } else if (fmt == STRSCAN_I64 || fmt == STRSCAN_U64 ||
+	     fmt == STRSCAN_IMAG) {
     /* LuaJIT FFI suffix literal: LL/ULL/LLU is int64_t/uint64_t cdata and i is
-    ** complex double. This is the deliberate extension; a pure 5.4 integer
-    ** literal (no suffix) still takes the native-integer path below. */
+    ** complex double. Pure 5.4 integers (no suffix) already returned above;
+    ** an unsuffixed numeral cannot reach this branch. */
     lua_State *L = ls->L;
     GCcdata *cd;
-    lj_assertLS(fmt == STRSCAN_I64 || fmt == STRSCAN_U64 || fmt == STRSCAN_IMAG,
-		"unexpected number format %d", fmt);
     ctype_loadffi(L);
     if (fmt == STRSCAN_IMAG) {
       cd = lj_cdata_new_(L, CTID_COMPLEX_DOUBLE, 2*sizeof(double));
@@ -218,29 +212,8 @@ static void lex_number(LexState *ls, TValue *tv)
     }
     lj_parse_keepcdata(ls, tv, cd);
 #endif
-  } else if (fmt == STRSCAN_I64 || fmt == STRSCAN_U64) {
-    /* Lua 5.4: a pure integer literal that exceeds int32 is an integer (boxed
-    ** interned int64), not a float and not an FFI cdata. */
-    setudataV(ls->L, tv, lj_i64_box(ls->L, (int64_t)tv->u64));
   } else if (fmt == STRSCAN_NUM) {
-    /* Already in correct format (an int64 integer is already boxed above). */
-#if LJ_HASFFI
-  } else if (fmt != STRSCAN_ERROR) {
-    lua_State *L = ls->L;
-    GCcdata *cd;
-    lj_assertLS(fmt == STRSCAN_I64 || fmt == STRSCAN_U64 || fmt == STRSCAN_IMAG,
-		"unexpected number format %d", fmt);
-    ctype_loadffi(L);
-    if (fmt == STRSCAN_IMAG) {
-      cd = lj_cdata_new_(L, CTID_COMPLEX_DOUBLE, 2*sizeof(double));
-      ((double *)cdataptr(cd))[0] = 0;
-      ((double *)cdataptr(cd))[1] = numV(tv);
-    } else {
-      cd = lj_cdata_new_(L, fmt==STRSCAN_I64 ? CTID_INT64 : CTID_UINT64, 8);
-      *(uint64_t *)cdataptr(cd) = tv->u64;
-    }
-    lj_parse_keepcdata(ls, tv, cd);
-#endif
+    /* Already in correct format. */
   } else {
     lj_assertLS(fmt == STRSCAN_ERROR,
 		"unexpected number format %d", fmt);

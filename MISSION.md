@@ -1,6 +1,6 @@
 # MISSION: LuaJIT 5.4 — a maintained JIT compiler for the Lua 5.4 language
 
-Status: proposed
+Status: public release preparation. Lua 5.4 language and C API port implemented and differentially gated on Linux arm64/x86_64; current gates A+B 115 PASS / 0 FAIL / 5 XFAIL, optimization levels 248, R 62. Remaining divergences and known gaps are tracked in docs/DIFFERENCES.md and tests/known-bad.tsv.
 Date: 2026-11-14
 Base: LuaJIT 2.1 (official tree, `https://github.com/LuaJIT/LuaJIT`, tag v2.1)
 Target language/ABI: PUC-Rio Lua 5.4 (5.4.4/5.4.7 semantics)

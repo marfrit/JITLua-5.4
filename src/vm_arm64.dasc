@@ -937,26 +937,39 @@ static void build_subroutines(BuildCtx *ctx)
   |
   |//-- Arithmetic metamethods ---------------------------------------------
   |
+  |// INS (x16) and RB (x17) are the AAPCS64 intra-procedure-call scratch
+  |// registers: any 'bl extern' may clobber them (veneers, and instrumented
+  |// code uses them freely). The 5.4 arithmetic handlers call lj_i64_arith
+  |// before falling back here, so re-decode both from the current instruction
+  |// (PC already points past it) instead of trusting what the helper left.
+  |// RA and RC are callee-saved and survive.
   |->vmeta_arith_vn:
+  |  ldr INSw, [PC, #-4]
+  |  decode_RB RB, INS
   |  add CARG3, BASE, RB, lsl #3
   |   add CARG4, KBASE, RC, lsl #3
   |  b >1
   |
   |->vmeta_arith_nv:
+  |  ldr INSw, [PC, #-4]
+  |  decode_RB RB, INS
   |  add CARG4, BASE, RB, lsl #3
   |   add CARG3, KBASE, RC, lsl #3
   |  b >1
   |
   |->vmeta_unm:
+  |  ldr INSw, [PC, #-4]
   |  add CARG3, BASE, RC, lsl #3
   |  mov CARG4, CARG3
   |  b >1
   |
   |->vmeta_arith_vv:
+  |  ldr INSw, [PC, #-4]
+  |  decode_RB RB, INS
   |  add CARG3, BASE, RB, lsl #3
   |   add CARG4, BASE, RC, lsl #3
   |1:
-  |  ubfx RA, INS, #8, #8	// RA may have been clobbered by a C helper call
+  |  ubfx RA, INS, #8, #8
   |  uxtb CARG5w, INSw
   |   add CARG2, BASE, RA, lsl #3
   |    str BASE, L->base

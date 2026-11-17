@@ -16,6 +16,23 @@ OUT=${CI_BOX_OUT:-/tmp/ci-box}
 
 say() { printf '\n=== %s ===\n' "$*"; }
 
+# Every stage keeps its own exit status. Output is filtered for the compact
+# report, but a stage that fails marks the whole run as failed (a pipe into
+# tail would otherwise always succeed).
+FAILED=""
+stage() {  # stage <filter> <command...>
+  _flt=$1; shift
+  _log=$(mktemp)
+  _rc=0
+  "$@" >"$_log" 2>&1 || _rc=$?
+  sh -c "$_flt" <"$_log" || true
+  rm -f "$_log"
+  if [ "$_rc" -ne 0 ]; then
+    echo "!! stage failed (rc=$_rc): $*"
+    FAILED="$FAILED [$*]"
+  fi
+}
+
 say "machine"
 uname -m
 echo "nproc $NPROC"
@@ -38,13 +55,13 @@ fi
 tests/ref/bin/lua54ref -v | head -1
 
 say "harness: modes A+B (port corpus)"
-tests/harness.sh --mode both --corpus tests/d54 --timeout 120 | tail -12
+stage 'tail -12' tests/harness.sh --mode both --corpus tests/d54 --timeout 120
 
 say "harness: mode B at opt levels 0..3"
-tests/harness.sh --mode B --opt-levels 0,1,2,3 --corpus tests/d54 --timeout 120 | tail -12
+stage 'tail -12' tests/harness.sh --mode B --opt-levels 0,1,2,3 --corpus tests/d54 --timeout 120
 
 say "harness: dump/reload (mode R)"
-tests/harness.sh --mode R --corpus tests/d54 --timeout 120 | tail -12
+stage 'tail -12' tests/harness.sh --mode R --corpus tests/d54 --timeout 120
 echo "=== lib checks ==="
 for j in -joff -jon; do timeout 120 ./src/luajit $j tests/lib/bit-checkint.lua || exit 1; done
 for j in -joff -jon; do timeout 120 ./src/luajit $j tests/lib/ffrec-54.lua || exit 1; done
@@ -53,19 +70,24 @@ for j in -joff -jon; do timeout 120 ./src/luajit $j tests/lib/ffrec-54.lua || ex
 for j in -joff -O0 -O3; do timeout 120 ./src/luajit $j tests/lib/math-random-jit.lua || exit 1; done
 
 say "harness: GC stress (pause 0 in every arm), int64 + close tests, modes A+B+R"
-tests/harness.sh --mode all --opt-levels 0,3 --gc-stress --corpus tests/d54 \
-  --filter 'i64_' --filter 'close_' --filter 'coro_' --filter 'gc_' --filter 'bits_' --timeout 300 | tail -12
+stage 'tail -12' tests/harness.sh --mode all --opt-levels 0,3 --gc-stress --corpus tests/d54 \
+  --filter 'i64_' --filter 'close_' --filter 'coro_' --filter 'gc_' --filter 'bits_' --timeout 300
 
 say "JIT tooling smoke (-jv/-jdump/-jbc/-jp over the int64 tests)"
-sh tests/jitutil-smoke.sh | tail -4
+stage 'tail -4' sh tests/jitutil-smoke.sh
 
 say "real-program corpus (tests/corpus-ext: PUC vs -joff / -jon / -jon+GC-stress)"
-sh tests/corpus-ext/run.sh | grep -v "^      " | tail -44
+stage 'grep -v "^      " | tail -44' sh tests/corpus-ext/run.sh
 
 say "C API"
-tests/capi/run.sh | grep -E '^== (capi|i64):'
+stage "grep -E '^== (capi|i64):'" tests/capi/run.sh
 
 say "fuzz: mode B, 40 programs x opt levels 0-3, GC pressure"
-python3 tests/fuzz/fuzz.py --seed 1 --count 40 --mode B --opt-levels 0,1,2,3 --gc | tail -6
+stage 'tail -6' python3 tests/fuzz/fuzz.py --seed 1 --count 40 --mode B --opt-levels 0,1,2,3 --gc
 
 say "done"
+if [ -n "$FAILED" ]; then
+  echo "ci-box: FAILED stages:$FAILED"
+  exit 1
+fi
+echo "ci-box: all stages passed"

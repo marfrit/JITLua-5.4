@@ -191,4 +191,9 @@ fi
 
 say "== corpus-ext summary =="
 say "  arms same $nsame, unexpected diffs $ndiff"
+if [ "$nsame" -eq 0 ] && [ "$ndiff" -eq 0 ]; then
+  # Nothing compared is not a pass: usually the pinned sources are missing.
+  say "  no corpus program ran (missing .dlcache? run tests/corpus-ext/fetch.sh)"
+  fail=1
+fi
 exit $fail

@@ -1,0 +1,5 @@
+# Pinned classic Lua benchmark sources (offline boxes; tarballs live in
+# .dlcache/bench, populated by tests/bench/classic/fetch.sh on a networked host).
+lua-benchmarks-gl-e1b3f24.tar.gz	https://github.com/gligneul/Lua-Benchmarks/archive/e1b3f24c035799d92f3350a62bda557fba739d47.tar.gz	c2518c4967e3d16493644337e75bb10f9c540a2723aee17b840039aa14b72371	gligneul/Lua-Benchmarks	e1b3f24c035799d92f3350a62bda557fba739d47
+deltablue-73f4a24.tar.gz	https://github.com/mraleph/deltablue.lua/archive/73f4a24cf82a98ed74b1a5f29246acd55df5dae8.tar.gz	028bcb77144015b22bb76ad041129114f689acdf71830a9d14bdfcc54ea335ae	mraleph/deltablue.lua	73f4a24cf82a98ed74b1a5f29246acd55df5dae8
+input.fasta	generated: tests/ref/bin/lua54ref .dlcache/bench/src/fasta.lua 10000 > input.fasta	156a49710bb3e1ed4bc2bbb0af0f383b747b3d0281453cfff39c296124c598f8	local	-

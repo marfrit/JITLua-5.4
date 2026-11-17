@@ -1531,3 +1531,13 @@ correct, so `-jdump` shows no bad trace. `docs/bug-math-random-jit.md`: x64
 core RIP `lj_tab_newkey:519`, jdump trace included. Repros:
 `tests/lib/bit-shift-repro.lua`, `tests/lib/bit-shift-trace.lua`,
 `tests/lib/math-jit-repro.lua`.
+
+## Session 52 — classic benchmark stage (stock 2.1 vs fork vs PUC 5.4.9)
+
+Added `tests/bench/classic/` (pinned manifest, offline `.dlcache/bench`,
+stock/PUC/fork arms, median of 3, serial box jobs; no benchmark fixes) and
+`docs/bench-classic-2026-11-17.md`. Findings >10% slower than stock: arm64 —
+deltablue 0.62x, scimark 0.90x, k-nucleotide 0.88x; x64 — spectral-norm 0.71x,
+deltablue 0.69x, k-nucleotide 0.87x. No result-output differences in the
+deterministic workloads; scimark rates not compared. richards/havlak sources
+not available in the pinned set. Original table and method in the report file.

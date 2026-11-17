@@ -58,6 +58,11 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   passes (PERF triage).
 - `PENDING` `heavy.lua` needs near 8 GiB in the PUC reference and OOM-kills an
   8 GiB box; excluded from the default corpus, explicit `--include-heavy` stage.
+- `PENDING` Classic benchmarks slower than stock 2.1 (>10%): deltablue both
+  arches (missing-metamethod trace loss), spectral-norm x64 (integer-loop
+  guards/CONVs), k-nucleotide x64 (`__index`/string-key path); see
+  `docs/perf-regression-2026-11-17.md` and `docs/bench-classic-2026-11-17.md`.
+
 
 ## Against stock LuaJIT 2.1
 

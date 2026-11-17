@@ -1505,12 +1505,13 @@ ffi_int_* 6 PASS / 0 FAIL per box on arm64 and x86_64 (B,R).
 ## Session 50 — DIFFERENCES.md (docs-only)
 
 `docs/DIFFERENCES.md` lists recorded, user-facing divergences only. Against PUC
-Lua 5.4.9 there are 17 entries: FORK 2 (interning/%p identity, private dump
+Lua 5.4.9 there are 20 entries: FORK 2 (interning/%p identity, private dump
 format); PENDING 6 (arbitrary `_ENV`, pcall/`__call` VM work, tail error names,
 istailcall without hook, `lua_setcstacklimit`, >1 userdata values);
 IMPL-DEFINED 4 (sparse-table border, table `__gc`, `__close` debug/yield
-corners); EXTENSION 1 (`table.create`); plus four known JIT/PERF rows (math
-random, closure, heavy, arm64 bit shifts). Against stock LuaJIT 2.1 there are 10 entries: added 5.4
+corners); EXTENSION 1 (`table.create`); plus seven known JIT/PERF rows (math
+random, closure, heavy, arm64 bit shifts fixed, deltablue, spectral-norm,
+k-nucleotide). Against stock LuaJIT 2.1 there are 10 entries: added 5.4
 language/VM and stdlib/C-API surface, getfenv/setfenv kept, jit/bit/FFI/bcsave
 kept, strict ASCII identifiers, FFI cdata semantics reference. Implemented
 parity features are deliberately not listed. Sources: MISSION.md,

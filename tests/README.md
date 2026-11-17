@@ -1,12 +1,12 @@
-# tests/ — LuaJIT-5.4 verification harness
+# tests/ — JITLua-5.4 verification harness
 
-Mission rule: **the interpreter is the oracle, PUC-Lua 5.4.7 is the oracle's
+Mission rule: **the interpreter is the oracle, PUC-Lua 5.4.9 is the oracle's
 oracle.** No phase is done until `tests/harness.sh` is green in both modes.
 
 ## Quick start
 ```sh
 make -j8                      # build our LuaJIT (src/luajit)
-tests/ref/fetch-ref.sh        # build PUC-Lua 5.4.7 (tests/ref/bin/lua54ref)
+tests/ref/fetch-ref.sh        # build PUC-Lua 5.4.9 (tests/ref/bin/lua54ref)
 tests/harness.sh              # modes A + B over the whole corpus
 tests/harness.sh --mode all   # + mode R (string.dump -> load -> re-run)
 ```
@@ -44,7 +44,7 @@ on the reference would otherwise "pass" mode A by failing on both sides.
 ## Layout
 - `harness.sh`, `lib/runner.py` — runner; `lib/dump_reload.lua` — mode R wrapper.
 - `d54/` — our 5.4 edge-case corpus (see `docs/54port.md` for the §4 → test map).
-- `corpus/puc54/` — vendored upstream `testes/` (Lua 5.4.7), unmodified.
+- `corpus/puc54/` — vendored upstream `testes/` (Lua 5.4.9), unmodified.
 - `ref/` — pinned reference fetch/build (`manifest.txt`), binaries are artifacts.
 - `fuzz/` — `gen.py` (seeded valid-5.4 generator), `fuzz.py` (differential driver).
 - `known-bad.tsv` — `test<TAB>modes<TAB>reason`; the M0 baseline of unported 2.1.
@@ -66,7 +66,7 @@ on the reference would otherwise "pass" mode A by failing on both sides.
 ```sh
 python3 tests/fuzz/fuzz.py --seed 1 --count 500 --mode B --opt-levels 0,1,2,3 --gc
 python3 tests/fuzz/fuzz.py --seed 1 --count 200 --mode R --gc
-python3 tests/fuzz/fuzz.py --seed 9000 --count 100 --mode A     # vs PUC 5.4.7
+python3 tests/fuzz/fuzz.py --seed 9000 --count 100 --mode A     # vs PUC 5.4.9
 ```
 Programs are generated from `seed + n`, so any failure is reproducible; the
 driver saves program, both outputs, the diff and a repro command under

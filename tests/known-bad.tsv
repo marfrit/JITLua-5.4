@@ -1,5 +1,6 @@
+# JITLua-5.4 differential harness known-bad entries.
 # test<TAB>modes(A/B/R/*)<TAB>reason
-# M0 baseline: unported LuaJIT 2.1 (base 63c8f1a9) vs PUC-Lua 5.4.7, aarch64.
+# M0 baseline: unported LuaJIT 2.1 (base 63c8f1a9) vs PUC-Lua 5.4.9, aarch64.
 # Reasons are triaged by root cause and tagged with the phase that fixes them.
 # Refresh with: tests/harness.sh --mode all --update-known-bad (keeps reasons).
 tests/corpus/puc54/calls.lua	*	PENDING VM WORK: pcall/xpcall nesting bound and __call-chain argument prepending are on branch wip-calls-vm; mode A also stops at line 359 (arbitrary _ENV). The message-handler re-entry bound is in this commit.
@@ -10,4 +11,4 @@ tests/d54/dump_02_border.lua	A	IMPL-DEFINED: dump/reload border bug FIXED and ra
 tests/d54/err_02_tailname.lua	A	P1.8b: tail-call error names -- LuaJIT reuses the caller frame, so the loaded-module fallback reports 'string.rep' where 5.4 reports the short 'rep'. Non-tail and pcall paths match.
 tests/d54/gc_01_tbc_gc.lua	A	IMPL-DEFINED: LuaJIT runs __gc only for userdata, not tables (PUC 5.4 finalizes tables); gc options now match
 tests/d54/tbl_03_border_divergence.lua	A	IMPL-DEFINED: runtime-built sparse tables may report any legal border (5.4 manual 3.4.7); LuaJIT's array-growth policy differs from PUC's alimit hint
-tests/d54/dump_03_version.lua	A	FORK: private dump format (LuaJIT-5.4 fork); PUC 5.4.7 cannot round-trip it, mode R checks ours
+tests/d54/dump_03_version.lua	A	FORK: private dump format (JITLua-5.4 fork); PUC 5.4.9 cannot round-trip it, mode R checks ours

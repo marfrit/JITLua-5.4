@@ -1,4 +1,4 @@
-# Differences — LuaJIT-5.4 vs PUC Lua 5.4.9 and stock LuaJIT 2.1
+# Differences — JITLua-5.4 vs PUC Lua 5.4.9 and stock LuaJIT 2.1
 
 User-facing list of deliberate divergences and known pending differences.
 Every entry is recorded in this repository (MISSION.md, docs/phase0-status.md,
@@ -16,7 +16,7 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
 - `FORK` String interning: LuaJIT interns every string; PUC does not intern long
   strings, so `%p`/`lua_topointer` identity after concat/gsub differs (design
   decision, Markus 2026-11-16).
-- `FORK` `string.dump` uses LuaJIT-5.4's private format; PUC 5.4.9 cannot load
+- `FORK` `string.dump` uses JITLua-5.4's private format; PUC 5.4.9 cannot load
   it, and mode R checks our own dump/reload round-trip.
 - `PENDING` Arbitrary `_ENV` values: LuaJIT stores only a table as a function
   environment; `load("return _ENV", nil, nil, 123)()` does not return 123

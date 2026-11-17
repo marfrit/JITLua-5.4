@@ -11,9 +11,13 @@ LuaJIT 2.1 README is kept as [README.LuaJIT](README.LuaJIT).
 
 Honest status, not a compatibility claim:
 
-- Differential gates against PUC Lua 5.4.9 pass on the tested platforms:
-  A+B **115 PASS / 0 FAIL / 5 XFAIL**, JIT optimization levels **248**, R
-  (dump/reload round-trip) **62**.
+- Differential gates against PUC Lua 5.4.9 pass on the tested platforms.
+  Measured on the `tests/d54` edge-case corpus: A+B
+  **123 PASS / 0 FAIL / 5 XFAIL**, JIT optimization levels 0–3 **268**, R
+  (dump/reload round-trip) **67**; the sanitizer run is
+  **190 PASS / 0 FAIL / 5 XFAIL**.
+- Full PUC 5.4.9 corpus with `--strict`: **PENDING — numbers arrive with the
+  harness fix before release.**
 - The remaining known gaps and deliberate divergences are recorded in
   [docs/DIFFERENCES.md](docs/DIFFERENCES.md) and
   [tests/known-bad.tsv](tests/known-bad.tsv). Open items include arbitrary
@@ -36,10 +40,10 @@ Requires a C compiler and `make`:
 make -j"$(nproc)"
 ```
 
-The build uses dual-number mode (`-DLUAJIT_NUMMODE=2`). If you add your own
-preprocessor defines, put them in **`CFLAGS`**, not `XCFLAGS`: `XCFLAGS` is
-used by the host-side build tooling for LuaJIT's own feature flags, and adding
-foreign flags there can break the build or silently change the generated VM.
+The build enables dual-number mode with `XCFLAGS += -DLUAJIT_NUMMODE=2` in
+`src/Makefile` (line 117). A command-line `XCFLAGS=` **replaces** that variable,
+so the define disappears and `src/lj_arch.h` stops the build with a `#error`.
+Put your own preprocessor defines in **`CFLAGS`**, never in `XCFLAGS`.
 
 ## Tests
 
@@ -65,10 +69,9 @@ Harness modes: **A** (reference vs this fork, JIT off), **B** (JIT on vs off),
 **R** (direct vs `string.dump`→`load` round-trip). `--strict` treats an
 unexpected pass of a known-bad entry as a failure.
 
-ASan/UBSan are not part of the public CI gate yet: a local sanitizer run
-reports pre-existing undefined-behavior sites and the differential harness
-compares sanitizer stack traces across arms. `tests/ci-local.sh
---sanitizers-only` remains available for manual sanitizer runs.
+ASan/UBSan are part of the public CI gate: the `linux-x64-sanitizers` job runs
+them and is green. Locally, `tests/ci-local.sh --sanitizers-only` builds the
+instrumented VM and runs both the differential harness and the C API tests.
 
 ## Platforms
 
@@ -81,6 +84,8 @@ untested; Windows builds are not part of CI.
   its extensions (`jit.*`, `bit.*`, FFI, bytecode dump).
 - **Lua 5.4** by PUC-Rio, MIT license. The differential test corpus is derived
   from the [lua/lua](https://github.com/lua/lua) repository.
+- **Computer Language Benchmarks Game** (BSD-3-Clause):
+  `tests/lib/perf-knuc.lua` is derived from its k-nucleotide benchmark.
 - Development: Markus Fritsche with Claude (Anthropic: Fable and Opus),
   meseeks (a private DeepSeek-V4.1-Flash quant, run locally),
   Qwen4-Max-Preview, and a local Qwen3.6-Coder.

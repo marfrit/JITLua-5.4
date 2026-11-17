@@ -17,7 +17,7 @@
 
 
 #define LUA_VERSION	"Lua 5.4"
-#define LUA_RELEASE	"Lua 5.4.7"
+#define LUA_RELEASE	"Lua 5.4.9"
 #define LUA_VERSION_NUM	504
 #define LUA_COPYRIGHT	"Copyright (C) 1994-2008 Lua.org, PUC-Rio"
 #define LUA_AUTHORS	"R. Ierusalimschy, L. H. de Figueiredo & W. Celes"

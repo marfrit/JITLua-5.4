@@ -30,11 +30,11 @@
 
 #include "lua.h"
 
-#define LUAJIT_VERSION		"LuaJIT 2.1.ROLLING"
+#define LUAJIT_VERSION		"JITLua-5.4 ROLLING"
 #define LUAJIT_VERSION_NUM	20199  /* Deprecated. */
 #define LUAJIT_VERSION_SYM	luaJIT_version_2_1_ROLLING
-#define LUAJIT_COPYRIGHT	"Copyright (C) 2005-2026 Mike Pall"
-#define LUAJIT_URL		"https://luajit.org/"
+#define LUAJIT_COPYRIGHT	"a Lua 5.4 fork of LuaJIT 2.1, Copyright (C) 2005-2026 Mike Pall"
+#define LUAJIT_URL		"https://github.com/marfrit/JITLua-5.4"
 
 /* Modes for luaJIT_setmode. */
 #define LUAJIT_MODE_MASK	0x00ff

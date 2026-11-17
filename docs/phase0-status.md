@@ -1716,3 +1716,61 @@ SAME/0, capi 112/0, i64 14/0, fuzz 160/0; `ci-local.sh --sanitizers-only`
 187 PASS/0 FAIL/5 XFAIL (A,B,R), ci-local OK. Bench (REPS=5): arm64 deltablue
 3662.9 / 4492.6 ms (0.82x), k-nucleotide 18.0 / 19.9 ms (0.90x); x86_64
 deltablue 19885.6 / 24063.7 ms (0.83x), k-nucleotide 65.8 / 74.0 ms (0.89x).
+
+## Session 57 — release fixes from the pre-release review (branch `release-jit-fixes`)
+
+From `origin/release-candidate` 5a9ac048. Four items, four commits:
+- `f0b84fde` parse: unary `~` on constants folded through `lj_num2bit`
+  (modulo 2^32, no exactness): `~(2^40)` gave -1, `~(2^31)` 2147483647,
+  `~2.5` -3, `~(2^63)` -1 (PUC: -1099511627777, -2147483649, error, error).
+  Now folds only an exact integer operand whose `~` fits int32, like
+  `foldbitop`; everything else is a runtime BC_BNOT. `expr_bitV()` removed
+  (no other caller). `tests/d54/parse_fold_int.lua` extended; red in mode A
+  before.
+- `f78cc3b6` jit: the LJLIB_CF rewrites of type/rawlen/math.abs/floor/ceil
+  had lost their LJLIB_REC, so the recorders were dead code (-Wunused) and
+  every call stitched. Re-enabled with 5.4 result types: abs of an int32 is
+  sign-specialised (GE guard / LT guard + SUBOV so -(-2^31) exits), of an
+  IRT_I64 calls lj_i64_abs; floor/ceil pass integer refs through and convert
+  a rounded float to int32 under a guard (NaN/inf/outside-int32 exit to the
+  interpreter; a rounded value outside int32 at record time is not recorded).
+  floor/ceil joined lj_ffrecord_funcs list of handlers that accept IRT_I64
+
+## Session 57 — release fixes from the pre-release review (branch `release-jit-fixes`)
+
+From `origin/release-candidate` 5a9ac048. Four items, four commits:
+- `f0b84fde` parse: unary `~` on constants folded through `lj_num2bit`
+  (modulo 2^32, no exactness): `~(2^40)` gave -1, `~(2^31)` 2147483647,
+  `~2.5` -3, `~(2^63)` -1 (PUC: -1099511627777, -2147483649, error, error).
+  Now folds only an exact integer operand whose `~` fits int32, like
+  `foldbitop`; everything else is a runtime BC_BNOT. `expr_bitV()` removed
+  (no other caller). `tests/d54/parse_fold_int.lua` extended; red in mode A
+  before.
+- `f78cc3b6` jit: the LJLIB_CF rewrites of type/rawlen/math.abs/floor/ceil
+  had lost their LJLIB_REC, so the recorders were dead code (-Wunused) and
+  every call stitched. Re-enabled with 5.4 result types: abs of an int32 is
+  sign-specialised (GE guard / LT guard + SUBOV so -(-2^31) exits), of an
+  IRT_I64 calls lj_i64_abs; floor/ceil pass integer refs through and convert
+  a rounded float to int32 under a guard (NaN/inf/outside-int32 exit to the
+  interpreter; a rounded value outside int32 at record time is not recorded).
+  floor/ceil joined the lj_ffrecord_func list of handlers that accept IRT_I64
+  arguments (that list aborted them with "bad argument type" first).
+  `tests/lib/ffrec-54.lua` (ci-box lib check): root loop trace, no stitch
+  trace, interpreter-equal results and math.type per builtin;
+  `tests/d54/jit_04_ffrec_54.lua` for A/B/opt. Bench -jon (3e6 iterations,
+  arm64): type 0.073 -> 0.020 s, abs 0.030 -> 0.002, floor 0.037 -> 0.002,
+  rawlen 0.025 -> 0.001; `-jv` stitch traces 18 -> 0.
+- `7edd8057` build: `#error` for LUAJIT_DISABLE_FFI (built, but 1 << 40 was
+  256). The `#if LJ_HASFFI` blocks guard the FFI library itself, not dead.
+- `bdffb38f` os: dead `os_checkdatefmt()` removed.
+
+Gate on bdffb38f, both boxes identical: `-Wall` 0 warnings (GCC 13.3 arm64,
+GCC 14.2 x86_64; GCC 16.1.1 in the aarch64 build container: 0 warnings, exit
+0), ci-box A+B 125/0/5 XFAIL (68 tests), opt 0..3 272/0, R 68/0,
+bit-checkint ok, ffrec-54 ok, math-random-jit OK, GC stress 59+1X, jitutil
+smoke 30 ok, capi 112/0, i64 14/0, fuzz 160/0; `ci-local.sh
+--sanitizers-only` ci-local OK (198 jobs A,B,R). corpus-ext ran 0 arms in
+that pass (the fresh worktree had no .dlcache); rerun separately, result
+below.
+corpus-ext rerun with .dlcache present: 15 arms SAME / 0 unexpected on both boxes
+(the three known IMPL-DEFINED pairs()-order diffs only).

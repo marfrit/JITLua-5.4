@@ -938,7 +938,10 @@ static void snap_unsink(jit_State *J, GCtrace *T, ExitState *ex,
 	} else {
 	  irk = &T->ir[irk->op2];
 	  if (irk->o == IR_KSLOT) irk = &T->ir[irk->op1];
-	  lj_ir_kvalue(J->L, &tmp, irk);
+	  if (irk->o == IR_KINT64)  /* 5.4 integer key (ADR-001b), not FFI cdata. */
+	    lj_i64_toTValue(J->L, &tmp, (int64_t)ir_kint64(irk)->u64);
+	  else
+	    lj_ir_kvalue(J->L, &tmp, irk);
 	  val = lj_tab_set(J->L, t, &tmp);
 	  /* NOBARRIER: The table is new (marked white). */
 	  snap_restoreval(J, T, ex, snapno, rfilt, irs->op2, val);

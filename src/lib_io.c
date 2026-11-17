@@ -226,17 +226,55 @@ static int io_file_readnum(lua_State *L, FILE *fp)
   return 0;
 }
 
+/* 5.4 read_line keeps embedded zero bytes, so fgets() (which cannot report
+** how much it stored) is out. A locked getc() per byte made io.lines()
+** 2x slower than stock; POSIX getline() returns the byte count and scans
+** with memchr, so it keeps stock's speed. Other targets read byte-wise.
+*/
 static int io_file_readline(lua_State *L, FILE *fp, MSize chop)
 {
   MSize m = LUAL_BUFFERSIZE, n = 0;
   int c = EOF;
-  char *buf = lj_buf_tmp(L, m);
+  char *buf;
+#if LJ_TARGET_POSIX
+  {
+    char *lp = NULL;
+    size_t cap = 0;
+    GCstr *s;
+    ssize_t len;
+    errno = 0;  /* getline leaves errno alone on a plain EOF. */
+    len = getline(&lp, &cap, fp);
+    if (len < 0) {  /* EOF or error: getline may still have allocated. */
+      int err = errno;
+      free(lp); lp = NULL;
+      if (err == ENOMEM) lj_err_mem(L);
+      len = 0;
+    } else if ((size_t)len > LJ_MAX_STR) {
+      free(lp);  /* MSize cannot hold the line; refuse like a huge string. */
+      lj_err_mem(L);
+    }
+    n = (MSize)len;
+    if (n && lp[n-1] == '\n') { c = '\n'; n--; }
+    /* Build the string straight from the getline buffer ('L' keeps the
+    ** newline) and free that buffer right after, before the GC step (which
+    ** can run finalizers that throw). An OOM inside lj_str_new itself
+    ** leaks at most this one line buffer. */
+    s = lj_str_new(L, lp ? lp : "", (chop == 0 && c == '\n') ? n + 1 : n);
+    free(lp);
+    UNUSED(buf); UNUSED(m);
+    setstrV(L, L->top++, s);
+    lj_gc_check(L);
+    return (c == '\n' || n > 0);
+  }
+#else
+  buf = lj_buf_tmp(L, m);
   for (;;) {
     c = getc(fp);
     if (c == EOF || c == '\n') break;
     if (n >= m) { m += m; buf = lj_buf_tmp(L, m); }
     buf[n++] = (char)c;  /* keeps embedded zero bytes */
   }
+#endif
   if (chop == 0 && c == '\n') {  /* 'L' keeps the end-of-line */
     if (n >= m) { m += m; buf = lj_buf_tmp(L, m); }
     buf[n++] = '\n';

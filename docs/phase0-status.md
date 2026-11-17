@@ -1555,3 +1555,30 @@ function `__index` (micro probe), not interning policy. arm k rerun at 6e4d is
 faster (1.27), so that earlier row was noise; arm deltablue rerun improves to
 0.76 but remains. x64 checkint still has the widened test but no bit/tobit
 calls are in these hot traces. Diagnosis only; Fable owns fixes.
+
+## Session 54 — bit.* hybrid rule for native 5.4 integers (branch `bit-hybrid`)
+
+Review of `6e4d7bb9` (Fable) found that `lj_carith_check64` truncated widened
+and boxed 5.4 integers to 32 bits and wrote them back, so a native int64 lost
+its high bits even next to a 64-bit cdata (`bit.band(uint64 max, (1<<40)|0xff)`
+→ `255ULL`), undocumented and inconsistent with the cdata path and with `&`.
+Markus decided the hybrid rule (DIFFERENCES.md, ffi-int-semantics.md): pure-
+number calls wrap modulo 2^32 (stock); a 64-bit cdata value operand promotes
+native integers to their exact value; shifts/tohex decide by the value operand.
+Commits: `941260e1` interpreter (`lj_carith_check64` returns the exact value,
+`bit_narrow_args` narrows slots before `FFH_RETRY`, tohex masks, non-FFI
+`bit_checkbit` normalizes), `9eaa36c2` JIT (`lj_opt_narrow_bitop`: TOBIT for
+floats, `CONV int.i64` for widened/boxed; bit ffids admitted by the IRT_I64
+gate in `lj_ffrecord_func`; `lj_opt_narrow_tobit` comment corrected — it serves
+the 5.4 operators), `f4396401` tests (`bit-checkint.lua` pcall per row, hash
+`cb2f6da2`, mixed rows, widened/boxed/float/mixed hot loops; ci-box `timeout`).
+Measured on both boxes: `bit-checkint` green `-joff`/`-jon`; 24-input × 14-op
+differential interpreter vs hot loop identical; `-jv` shows compiled traces for
+widened, boxed, float and table-loaded operands (no `bad argument type`);
+mixed-call output `-joff == -jon`; d54 `ffi_int_*`/`bits_*` 6/6. Gate
+`tests/ci-box.sh` green on both boxes — arm64: A+B 114 PASS/5 XFAIL, B@0-3 244, R 61, GC-stress 59/1 XFAIL, jitutil 30 ok, corpus-ext 0 diffs, C API 112+14 checks 0 failures, fuzz 160/0; x86_64: the same numbers (114/5, 244, 61, 59/1, 30, 0 diffs, 112+14/0, 160/0).
+Open: mixed calls with a native int64 operand run in the interpreter
+(`crec_ct_tv` has no IRT_I64 source branch); a `-DLUAJIT_DISABLE_FFI` build
+is not a supported configuration (its 5.4 operators are 32-bit:
+`lj_meta_bitop` legacy path) although `bit.*` itself is correct there; the
+`ULL` literal regression (`98f99180`) is DeepSeek's on main.

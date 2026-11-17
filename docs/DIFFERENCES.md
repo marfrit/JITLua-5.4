@@ -88,6 +88,18 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
 - `EXTENSION` `jit.*`, `bit.*`, `ffi`/cdata, `bcsave`, `-j`/`-O`/`-b` options.
 - `EXTENSION` FFI int64/uint64 cdata and bit operations on cdata; intended
   semantics are in `docs/ffi-int-semantics.md` (tests `ffi_int_*`, modes B/R).
+- `FORK` Native 5.4 integers in `bit.*` follow a hybrid rule (Markus,
+  2026-11-17). A call whose arguments are all numbers (int32, widened/boxed
+  int64, floats, numeric strings) keeps stock semantics: every operand wraps
+  modulo 2^32 and the result is an int32 (`bit.band(2^32+1, 0xffffffff00000000)`
+  → 0; exact 64-bit work uses `& | ~ << >>`). A call with a 64-bit cdata value
+  operand converts native integers with their exact 64-bit value, the way
+  stock converts a Lua number in a mixed call (`bit.band(uint64 max,
+  (1<<40)|0xff)` → `1099511628031ULL`, as with an `int64_t` partner). Shifts
+  and `tohex` decide by the value operand; a cdata shift count or digit count
+  does not promote. `-joff` and `-jon` agree (pure calls compile, mixed calls
+  with native int64 operands run in the interpreter). Details and mechanism in
+  `docs/ffi-int-semantics.md`; test `tests/lib/bit-checkint.lua`.
 - `EXTENSION` LuaJIT's pattern-matching implementation and its string-buffer
   optimizations remain; 5.4 pattern behaviors are covered by `str_03_patterns`.
 - `EXTENSION` `string.dump` bytecode format and `-b`/`bcsave` are

@@ -1554,3 +1554,84 @@ function `__index` (micro probe), not interning policy. arm k rerun at 6e4d is
 faster (1.27), so that earlier row was noise; arm deltablue rerun improves to
 0.76 but remains. x64 checkint still has the widened test but no bit/tobit
 calls are in these hot traces. Diagnosis only; Fable owns fixes.
+
+## Session 54 — `__index` regression item: alias-analysis miscompilation, io.lines, x64 checkint
+
+Branch `jit-index-chain`. Verified DeepSeek's two findings from Session 53
+before changing code; both root causes turned out to be elsewhere than the
+hypotheses said. Full account in `docs/perf-regression-2026-11-17.md`.
+
+1. deltablue NOMM aborts (`lj_record.c:1876`): the recorder was right to abort
+   -- the receiver of `d:output()` really was a constant nil in the IR.
+   `removeFirst` does `local e = self.elms[#self.elms]`; `lj_opt_mem.c`
+   (unchanged from stock) asks `irt_isnum(key)` to mean "this key may be an
+   array index / change the length". With 5.4 integer hash keys as
+   IRT_INT/IRT_I64 the NEWREF push `elms[#elms+1] = c` looked like a string
+   key, so the ALOAD from the fresh TNEW was const-folded to nil (`-jdump=+a`
+   shows `TNEW; NEWREF +1; HSTORE; ALEN; ASTORE nil` and no load). Same hole
+   in `lj_opt_fwd_alen` (probe: `#t` after `t[4]=nil` with 4 in the hash
+   part wrong in 2943/3000 iterations with -jon), `lj_opt_fwd_href_nokey`
+   and the TDUP const-fold (an IR_KINT64 key went through lj_ir_kvalue as
+   FFI cdata). Fix `56f9eea4`: `irt_isnumkey()` at the four sites,
+   `aa_keytype()` (int64 box constant == IRT_I64 ref), KINT64 decoded as a
+   5.4 integer. Test `tests/d54/jit_02_tabkey_alias.lua`. NOMM aborts 74 -> 0
+   on arm, 0 on x64; deltablue x64 0.69x -> 0.83x.
+2. k-nucleotide x64: not `__index`. The table GET miss with a function
+   `__index` is at parity on both arches (micro + looped kernels). Two real
+   costs: (a) `io.lines()` read a locked getc() per byte (5.4 NUL-safe lines),
+   2x stock on 1 MB; `c62fa218` uses POSIX getline(), parity. (b) the x64
+   `checkint` macro had grown a second mask/branch stage for the widened
+   47-bit encoding. A one-compare form (`shr 32; cmp LJ_TISNUM<<15`, as
+   arm64 does it) gains 12% on pure int loops but loses 20-25% on the
+   string.sub/TGETV/TSETV paths k-nucleotide lives on (interleaved A/B, three
+   rounds: f1 4.41 ms new / 3.47 old / 3.24 stock; perf-strkey K3 8.4 / 7.2 /
+   6.4 ms) -- interpreter alignment, not instruction count. Reverted, not
+   committed. In-process phase timings of k-nucleotide are at parity with
+   -jon already; the whole-process
+   difference is a constant ~11 ms outside the script (see open items).
+3. deltablue residual (arm 0.73x after the fix): not `__index`, not code
+   quality. Micro-benchmarks of every deltablue primitive are identical; the
+   IR per recorded bytecode is identical (HLOAD .230/.237, HREFK .230/.238,
+   guards .96/.99); table shape, bytes allocated and GC steps are within 5%;
+   startup is +140 us. `-jp=v` says ours is 81% compiled vs stock's 61%, yet
+   slower: the trace graph differs (ours roots at the chainTest loop :830 with
+   the :720 loop unrolled inside, stock roots at :611/:720), and
+   `-Ohotexit=5,tryside=8` closes most of the gap for ours only (0.85 -> 0.94).
+   Linked side-trace entries bypass lj_trace_exit, so a trace-entry counter in
+   the exit stubs is the next instrument. Left open.
+
+Tools kept: `tests/lib/perf-*.py` from Session 53; the ad-hoc stats patch
+(`newtab`/exit counters by vmstate) and the IR histogram script are described
+in the regression doc, not committed.
+
+Gate (arm64, escher, `sh tests/ci-box.sh` on c62fa218): A+B 116 PASS/0 FAIL/5 XFAIL (62 tests), opt 0..3 248/0, R 62/0, GC
+stress 59+1X, jitutil smoke 30 ok, corpus-ext 15 arms SAME/0 unexpected, capi
+112/0, i64 14/0, fuzz 160/0. Bench (`BENCH_ONLY=deltablue,k-nucleotide
+BENCH_REPS=5`): deltablue stock 3561.5 / ours 4590.0 ms (0.78x; 0.76x before),
+k-nucleotide stock 24.5 / ours 19.9 ms (1.23x). deltablue -jv: NOMM aborts
+0 (74 before), traces 167 vs stock 163.
+Gate (x86_64, pve2, c62fa218 plus the later-reverted checkint macro; re-run on
+c62fa218 itself recorded below): R 62/0, GC stress 59+1X, jitutil smoke 30 ok,
+corpus-ext 15 arms SAME/0 unexpected, capi 112/0, i64 14/0, fuzz 160/0 (A+B
+and opt summaries in the follow-up job below). Bench: deltablue stock 20809.2 /
+ours 24455.9 ms (0.85x; 0.69x before), k-nucleotide stock 63.0 / ours 72.5 ms
+(0.87x; 0.86x before -- the remaining delta is the constant per-process cost
+outside the script, see the regression doc). deltablue -jv x64: NOMM 0,
+traces 167 vs stock 162.
+
+Interpreter findings outside this item (micro `tmp/arith-micro2.lua`, -joff,
+2e7 iterations): integer `%` is 6x slower than stock on both arches (arm
+0.816 vs 0.136 s, x64 2.12 vs 0.36 s: a C helper per modulo); on x64 only, a
+float add is 4.4x slower (0.614 vs 0.140 s) and an int64 accumulate 5x
+(0.245 vs 0.048 s) because `ins_arith` sends every non-int32 operand to
+vmeta_arith (arm64 has inline paths: 0.082 vs 0.079 / 0.033 vs 0.037 s).
+Parser: `2147483647 + 1` folds to the float 2147483648.0 (lj_parse.c:862
+foldarith stores an int-op-int result outside int32 as a float constant;
+PUC and our runtime add give the integer). Not fixed here.
+Final x64 gate on c62fa218 (checkint reverted): A+B 116/0/5 XFAIL, opt 0..3
+248/0, R 62/0, GC stress 59+1X, jitutil smoke 30 ok, corpus-ext 15 SAME/0,
+capi 112/0, i64 14/0, fuzz 160/0. Arm A+B 116/0/5, opt 248/0 likewise.
+x64 per-process cost resolved: lua_close is ~13 ms in both (stock 93.6 -> 81.2
+ms with os.exit(0,false), ours 96.7 -> 83.2); on a k-nucleotide-shaped script
+ours is now +2-3 ms whole-process (-jon 75.3 vs 73.6 ms, os.exit 62.4 vs 63.0),
+the in-script -joff part +6.7 ms (the ~8% interpreter cost per phase).

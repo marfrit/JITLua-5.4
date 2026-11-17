@@ -879,6 +879,10 @@ static int foldarith(BinOpr opr, ExpDesc *e1, ExpDesc *e2)
       setintV(&e1->u.nval, k);
       return 1;
     }
+    /* Outside int32: do NOT fold the double. The runtime integer operation
+    ** yields the exact boxed 5.4 integer; a folded double would be rounded
+    ** beyond 2^53 and would report math.type "float" (2147483647 + 1). */
+    return 0;
   }
   setnumV(&e1->u.nval, n);
   return 1;

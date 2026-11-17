@@ -1502,3 +1502,16 @@ not merely a JIT fast path; not asserted in the portable test). Assertions were 
 from measured behavior after the first pass was found vacuous (nil `ffi`
 crashed all arms identically). No library/VM code change was needed. Gate:
 ffi_int_* 6 PASS / 0 FAIL per box on arm64 and x86_64 (B,R).
+## Session 50 — DIFFERENCES.md (docs-only)
+
+`docs/DIFFERENCES.md` lists recorded, user-facing divergences only. Against PUC
+Lua 5.4.9 there are 16 entries: FORK 2 (interning/%p identity, private dump
+format); PENDING 6 (arbitrary `_ENV`, pcall/`__call` VM work, tail error names,
+istailcall without hook, `lua_setcstacklimit`, >1 userdata values);
+IMPL-DEFINED 4 (sparse-table border, table `__gc`, `__close` debug/yield
+corners); EXTENSION 1 (`table.create`); plus three known JIT/PERF rows (math,
+closure, heavy). Against stock LuaJIT 2.1 there are 10 entries: added 5.4
+language/VM and stdlib/C-API surface, getfenv/setfenv kept, jit/bit/FFI/bcsave
+kept, strict ASCII identifiers, FFI cdata semantics reference. Implemented
+parity features are deliberately not listed. Sources: MISSION.md,
+docs/phase0-status.md, tests/known-bad.tsv, docs/ffi-int-semantics.md.

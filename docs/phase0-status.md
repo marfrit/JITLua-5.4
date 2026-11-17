@@ -1556,7 +1556,32 @@ faster (1.27), so that earlier row was noise; arm deltablue rerun improves to
 0.76 but remains. x64 checkint still has the widened test but no bit/tobit
 calls are in these hot traces. Diagnosis only; Fable owns fixes.
 
-## Session 54 — bit.* hybrid rule for native 5.4 integers (branch `bit-hybrid`)
+## Session 54 — x64 math.random JIT crash (known-bad math B) fixed
+
+Root cause is not the key representation but an x64 register-width bug:
+the checked `int64->int32` CONV (`lj_asm_x86.h` asm_conv, `movsxd; cmp; jne`)
+left the sign extension in the result register, while `asm_href` and
+`asm_tvptr` (NEWREF's `cTValue *key`) build the key word as
+`(LJ_TISNUM<<47) | reg64`, assuming a zero-extended int32 register. A
+negative `math.random(lo,up)` result used as a table key therefore became a
+nil-tagged garbage key: HREF missed the interpreter's node, NEWREF inserted a
+node whose `hashkey()` disagrees with its position, and the collision-chain
+walk at `lj_tab_newkey:519` crashed or spun. Same family as `adc0eb97`
+(snapshot restore). Positive ranges never failed (`aux(1,32)` 0/20);
+`aux(-40,-1)` failed 20/20. arm64 is immune: its checked CONV ends in a
+32-bit `mov` and `asm_tvstore64` uses `UXTW`.
+
+Fix: the CONV re-materializes its result with a 32-bit `mov` (restores the
+backend invariant for every consumer), and `asm_tvptr` writes an int32 key
+as two 32-bit stores like ASTORE/HSTORE. Regression
+`tests/lib/math-random-jit.lua` (ranges with negative keys, seeded, 20
+rounds, plus a trace-stored/interpreter-read count) runs in ci-box under
+`-joff`, `-O0`, `-O3` with a timeout; it fails on the unfixed tree and
+passes after. Repro 50x at -O0 and -O3: 0 failures (before: 17/20 at -O3,
+20/20 at -O0). Known-bad math B removed; `puc54/math.lua` mode B passes on
+x64. Dossier updated with the root cause.
+
+## Session 55 — bit.* hybrid rule for native 5.4 integers (branch `bit-hybrid`)
 
 Review of `6e4d7bb9` (Fable) found that `lj_carith_check64` truncated widened
 and boxed 5.4 integers to 32 bits and wrote them back, so a native int64 lost

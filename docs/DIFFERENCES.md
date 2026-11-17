@@ -51,9 +51,12 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   See `docs/bug-bit-shift-arm64.md`; `tests/lib/bit-checkint.lua` is the
   regression test.
 
-- `PENDING` `math.lua` mode B on x64: intermittent SIGSEGV/hang in the
-  `math.random` statistics loops; first logical change `ad283709`; minimal repro
-  `tests/lib/math-jit-repro.lua`; crash RIP `lj_tab_newkey:519`.
+- `FIXED` `math.lua` mode B on x64: intermittent SIGSEGV/hang in the
+  `math.random` statistics loops. x64 backend width bug: the checked
+  `int64->int32` CONV left a sign extension in the register and HREF/NEWREF
+  OR-ed the type tag into it, so negative int32 keys corrupted the hash
+  part. See `docs/bug-math-random-jit.md`; `tests/lib/math-random-jit.lua` is
+  the regression test.
 - `PENDING` `closure.lua` mode B on arm64: JIT-on exceeds 600 s while JIT-off
   passes (PERF triage).
 - `PENDING` `heavy.lua` needs near 8 GiB in the PUC reference and OOM-kills an

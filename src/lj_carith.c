@@ -343,11 +343,22 @@ uint64_t lj_carith_check64(lua_State *L, int narg, CTypeID *id)
     lj_cconv_ct_ct(cts, ctype_get(cts, *id), s,
 		   (uint8_t *)&x, sp, CCF_ARG(narg));
     return x;
+  } else if (tvisi64(o)) {
+    /* Boxed 5.4 integer: the bit library works on the low 32 bits. Store the
+    ** int32 back like a coerced string, so an FFH_RETRY of the asm fast
+    ** function finds a plain int32 instead of falling back forever. */
+    int32_t k = (int32_t)(uint32_t)i64V(o);
+    setintV(o, k);
+    return (uint32_t)k;
   } else if (!(tvisstr(o) && lj_strscan_number(strV(o), o))) {
     goto err;
   }
   if (LJ_LIKELY(tvisint(o))) {
-    return (uint32_t)intV(o);
+    /* Inline int32 or widened 47-bit: the low word holds the low 32 bits.
+    ** Normalize a widened value in place for the FFH_RETRY (see above). */
+    int32_t k = intV(o);
+    if (tvisi47w(o)) setintV(o, k);
+    return (uint32_t)k;
   } else {
     return (uint32_t)lj_num2bit(numV(o));
   }

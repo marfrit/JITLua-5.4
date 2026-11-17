@@ -291,12 +291,12 @@
 |.macro checktab, reg, target; checktp reg, LJ_TTAB, target; .endmacro
 |.macro checkfunc, reg, target; checktp reg, LJ_TFUNC, target; .endmacro
 |.macro checkint, reg, target
+|  // TISNUMhi is LJ_TISNUM << 15 with payload bits 32..46 zero, so this compare of
+|  // the whole upper word already rejects the widened 47-bit integer form. Do not
+|  // add a scratch-register range test here: callers keep live values in TMP0
+|  // (.ffunc_bit_sh, .ffunc_bit_op), which such a test would clobber.
 |  cmp TISNUMhi, reg, lsr #32
 |  bne target
-|.if DUALNUM
-|  ubfx TMP0, reg, #32, #15	// widened 47-bit inline uses payload bits 32..46
-|  cbnz TMP0, target		// not int32-proven: use the C helper instead
-|.endif
 |.endmacro
 |.macro checkintw, reg, fptarget, i64target
 |  cmp TISNUMhi, reg, lsr #32

@@ -39,6 +39,7 @@
 ** path instead of falling back again. Mixed calls return a cdata result and
 ** never retry, so their slots keep the exact value for lj_cconv_ct_tv.
 */
+#if LJ_HASFFI
 static void bit_narrow_args(lua_State *L)
 {
   TValue *o;
@@ -50,7 +51,6 @@ static void bit_narrow_args(lua_State *L)
   }
 }
 
-#if LJ_HASFFI
 static int bit_result64(lua_State *L, CTypeID id, uint64_t x)
 {
   GCcdata *cd = lj_cdata_new_(L, id, 8);

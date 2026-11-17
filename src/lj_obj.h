@@ -753,6 +753,8 @@ struct lua_State {
   MSize tailhi;		/* One past the highest set bit. */
   MSize tailepoch;	/* g->hookepoch the marks belong to. */
   MRef hookff;		/* ASM fast function that got the last call hook. */
+  uint8_t errnest;	/* Nested message-handler invocations (5.4 ERRERR bound). */
+  MSize errnestofs;	/* Stack offset at the first handler invocation. */
 };
 
 #define G(L)			(mref(L->glref, global_State))

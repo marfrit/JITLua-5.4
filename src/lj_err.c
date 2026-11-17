@@ -837,6 +837,10 @@ LJ_NOINLINE void LJ_FASTCALL lj_err_throw(lua_State *L, int errcode)
   lj_trace_abort(g);
   g->tailofs = 0;  /* A CALLT that never reached its callee (5.4 hooks). */
   g->ffretry = 0;
+  if (errcode == LUA_ERRERR) {  /* A handler episode is over. */
+    L->errnest = 0;
+    L->errnestofs = 0;
+  }
   L->status = LUA_OK;
 #if LJ_UNWIND_EXT
   err_raise_ext(g, errcode);
@@ -965,12 +969,38 @@ LJ_NOINLINE void LJ_FASTCALL lj_err_run(lua_State *L)
       setstrV(L, top-1, lj_err_str(L, LJ_ERR_ERRERR));
       lj_err_throw(L, LUA_ERRERR);
     }
+    /* PUC bounds message-handler re-entry through its C-call limit. For a
+    ** handler that errors directly, the LUA_ERRERR shortcut below is the
+    ** guard; this bound covers handlers that reset the status (e.g. via pcall)
+    ** and are then re-entered recursively. Use LJ_MAX_XLEVEL (200; PUC 5.4
+    ** raises ERRERR at 220) and raise the same "error in error handling".
+    ** Stack offsets make the count depth-relative: episodes unwound back below
+    ** the first invocation start from zero.
+    */
+    {
+      MSize ofs = (MSize)((char *)top - (char *)tvref(L->stack)) /
+		  sizeof(TValue);
+      if (L->errnest == 0 || ofs < L->errnestofs) {
+	L->errnest = 0;
+	L->errnestofs = ofs;
+      }
+      if (++L->errnest > LJ_MAX_XLEVEL) {
+	setstrV(L, top-1, lj_err_str(L, LJ_ERR_ERRERR));
+	L->errnest = 0;
+	L->errnestofs = 0;
+	lj_err_throw(L, LUA_ERRERR);
+      }
+    }
     L->status = LUA_ERRERR;
     copyTV(L, top+LJ_FR2, top-1);
     copyTV(L, top-1, errfunc);
     if (LJ_FR2) setnilV(top++);
     L->top = top+1;
     lj_vm_call(L, top, 1+1);  /* Stack: |errfunc|msg| -> |msg| */
+    if (L->errnest > 0) {
+      L->errnest--;
+      if (L->errnest == 0) L->errnestofs = 0;
+    }
   }
   lj_err_throw(L, LUA_ERRRUN);
 }

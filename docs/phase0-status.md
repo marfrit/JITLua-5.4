@@ -1418,3 +1418,15 @@ lua_getglobal/setglobal are real functions (getglobal returns the type),
 lua_version returns lua_Number 504 (5.4 signature, not LuaJIT's pointer form),
 luaL_tolstring, luaL_requiref and luaL_typeerror are implemented, with
 LUA_LOADED_TABLE defined; capi tests cover version/tolstring/requiref.
+
+## Session 45 — message-handler re-entry bound (small commit)
+
+`lua_State` gains depth-relative `errnest`/`errnestofs`; `lj_err_run` bounds
+message-handler re-entry at `LJ_MAX_XLEVEL` (200) and raises PUC's exact
+"error in error handling" object. The count is reset on ERRERR exit (including
+handler-failure unwinds) so healthy handlers are unaffected. New d54 test
+`err_03_handler_reentry.lua` drives a handler that resets status with pcall and
+then errors; it passes A/B/R on both boxes in well under a second. Calls.lua
+stays known-bad in mode A with the remaining VM work (pcall nesting bound and
+`__call` chain argument prepending) parked on branch `wip-calls-vm`, plus the
+arbitrary-`_ENV` blocker at line 359.

@@ -7,7 +7,8 @@ with PUC parity are not listed.
 
 Status tags: `FORK` (deliberate fork decision), `IMPL-DEFINED` (the 5.4 manual
 allows it / observable is implementation-defined), `PENDING` (known gap on
-`wip-calls-vm` or a named VM item), `EXTENSION` (kept LuaJIT feature).
+`wip-calls-vm` or a named VM item), `EXTENSION` (kept LuaJIT feature), `FIXED`
+(historical known bug fixed; kept for traceability).
 
 ## Against PUC Lua 5.4.9
 
@@ -45,9 +46,10 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   are not supported (GC layout / GCRef-slot limitation; C API notes).
 
 ### Known JIT/performance rows (not semantic divergences)
-- `PENDING` arm64 `bit.lshift/rshift/arshift/rol/ror` return 0 for native and
-  cdata (`-joff`/`-jon`, all opt levels); x64 correct, see
-  `docs/bug-bit-shift-arm64.md`.
+- `FIXED` arm64 `bit.lshift/rshift/arshift/rol/ror` returned 0 for native and
+  cdata; regression `cb2f6da`, fix `6e4d7bb9` (TMP0 clobber in checkint).
+  See `docs/bug-bit-shift-arm64.md`; `tests/lib/bit-checkint.lua` is the
+  regression test.
 
 - `PENDING` `math.lua` mode B on x64: intermittent SIGSEGV/hang in the
   `math.random` statistics loops; first logical change `ad283709`; minimal repro

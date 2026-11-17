@@ -1,7 +1,10 @@
 # Bug dossier — arm64 bit.* shifts return 0
 
-Status: known bug, **no VM fix** (Fable/VM owner). Not asserted in the portable
-ffi_int tests; this dossier is the handover.
+Status: **FIXED** in `6e4d7bb9` (His, agent-reviewed, both-box gates green).
+Kept for traceability: the regression repro and the bisect evidence remain the
+acceptance test. The fix removes the widened-range TMP0 clobber from arm64
+`checkint`; `tests/lib/bit-checkint.lua` is the ci-box regression (shifts,
+multi-argument bit ops, boxed/widened inputs, hot loops, `-joff` and `-jon`).
 
 ## Repro and fail rate
 
@@ -38,7 +41,16 @@ Parent `63c8f1a9` (LuaJIT 2.1 base) passes; the fork tree at `27de9ae`,
 `c3e739b`, `e76a680`, `844188b` still passes; `cb2f6da` fails and every later
 tested commit fails. The bisect range was 63c8f1a9..73b2a2cb.
 
-## Hypothesis (one line)
+## Fix
+
+`6e4d7bb9` "arm64 checkint must not clobber TMP0; bit.* args: accept boxed
+ints, no retry loop". The widened-range test was redundant (the TISNUMhi
+compare already rejects payload bits 32..46); `lj_carith_check64` now accepts
+boxed ints and normalizes widened/boxed args in place, so no FFH_RETRY loop.
+Verified on arm-box after fetch/rebase: `tests/lib/bit-shift-repro.lua` and
+`tests/lib/bit-checkint.lua` pass under `-joff` and `-jon`.
+
+## Hypothesis (one line, historical)
 
 `cb2f6da` added the widened-range test inside the arm64 `checkint` macro, which
 uses **TMP0 as scratch** (`ubfx TMP0, reg, #32, #15; cbnz TMP0`); the bit-shift

@@ -61,11 +61,10 @@ exist. Measured 64-bit behavior:
   `int64 -1` → -1).
 - `bit.tohex(uint64 max)` → `ffffffffffffffff`;
   `bit.tohex(int64 -1, 8)` → `ffffffff`.
-- `bit.lshift/rshift/arshift/rol/ror` are **broken on arm64** in this fork:
-  they return 0 for both cdata and native arguments, under `-joff` and `-jon`
-  alike (x64 returns the proper 32-bit native / 64-bit cdata result). This is
-  not a JIT fast-path issue; root cause not yet located. The portable test does
-  not assert shifts; `tohex` plus `band/bor/bxor/bnot/tobit` are covered.
+- `bit.lshift/rshift/arshift/rol/ror` were broken on arm64 (returned 0 for
+  native and cdata). Fixed in `6e4d7bb9`; the regression is covered by
+  `tests/lib/bit-checkint.lua` (`-joff` and `-jon`), while the portable ffi_int
+  test still asserts only `tohex` and `band/bor/bxor/bnot/tobit`.
 
 ## Tests and gate
 

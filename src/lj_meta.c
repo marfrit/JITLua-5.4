@@ -450,7 +450,7 @@ TValue *lj_meta_bitop(lua_State *L, TValue *ra, cTValue *rb, cTValue *rc, BCReg 
     break;
   }
   setintV(ra, (int32_t)b);
-  return;
+  return NULL;
 err:
 #endif
   UNUSED(ra); UNUSED(op);

@@ -78,23 +78,66 @@ end
 
 -- hot loops: traces must agree with the closed forms (widened, boxed, float and
 -- mixed operands included: the recorder narrows them like the interpreter)
-local s, a, o = 0, 0, 0
-for i = 1, 300 do
-  s = s + bit.lshift(i, 2) + bit.rshift(i * 16, 4)
-  a = bit.bxor(a, bit.band(i, 0x5a, 0xff))
-  o = bit.bor(o, bit.lshift(1, i % 31))
+-- The hot loops must become root loop traces. A "stop" event alone is not
+-- enough: an aborted trace never reaches it, and the result would still be
+-- right in the interpreter. Map each trace back to the function and start line
+-- from its "start" event (the "stop" event carries no pc).
+-- Keep each first "for" on the second line of the body: the check below
+-- expects funcinfo(fn).linedefined + 2.
+local function number_loop()
+  local s, a, o = 0, 0, 0
+  for i = 1, 300 do
+    s = s + bit.lshift(i, 2) + bit.rshift(i * 16, 4)
+    a = bit.bxor(a, bit.band(i, 0x5a, 0xff))
+    o = bit.bor(o, bit.lshift(1, i % 31))
+  end
+  return s, a, o
 end
+local function wide_loop()
+  local sw, sb, sd, sh = 0, 0, 0, 0
+  for i = 1, 300 do
+    sw = sw + bit.band(w + i, 0xff)         -- widened operand
+    sb = sb + bit.band(b + i, 0xff)         -- boxed operand
+    sd = sd + bit.band(2^40 + 3 + i, 0xff)  -- float operand
+    sh = sh + bit.lshift(w, i % 8)          -- widened value, int32 count
+  end
+  return sw, sb, sd, sh
+end
+local loop_fns = {number_loop, wide_loop}
+local loop_set = {[number_loop] = true, [wide_loop] = true}
+local trace_starts, loop_lines, loop_starts = {}, {}, {}
+local trace_handler
+if jit and jit.status() then
+  local ju = require("jit.util")
+  for _, fn in ipairs(loop_fns) do
+    loop_starts[fn] = ju.funcinfo(fn).linedefined + 2
+  end
+  trace_handler = function(what, tr, func, pc)
+    if what == "start" then
+      trace_starts[tr] = { func = func, line = ju.funcinfo(func, pc).currentline }
+    elseif what == "stop" then
+      local st = trace_starts[tr]
+      if st and loop_set[st.func] and ju.traceinfo(tr).linktype == "loop" then
+        loop_lines[st.func] = st.line
+      end
+    end
+  end
+  jit.attach(trace_handler, "trace")
+end
+local s, a, o = number_loop()
 local ws, wa = 0, 0
 for i = 1, 300 do ws = ws + i * 4 + i; wa = wa ~ (i & 0x5a) end
 eq("loop-shift", function() return s end, ws)
 eq("loop-band", function() return a end, wa)
 eq("loop-bor", function() return o end, 0x7fffffff)
-local sw, sb, sd, sh = 0, 0, 0, 0
-for i = 1, 300 do
-  sw = sw + bit.band(w + i, 0xff)         -- widened operand
-  sb = sb + bit.band(b + i, 0xff)         -- boxed operand
-  sd = sd + bit.band(2^40 + 3 + i, 0xff)  -- float operand
-  sh = sh + bit.lshift(w, i % 8)          -- widened value, int32 count
+local sw, sb, sd, sh = wide_loop()
+if jit and jit.status() then
+  for _, fn in ipairs(loop_fns) do
+    assert(loop_lines[fn] == loop_starts[fn],
+      "hot bit loop did not compile to a root loop trace at line " ..
+      loop_starts[fn] .. " (got " .. tostring(loop_lines[fn]) .. ")")
+  end
+  jit.attach(trace_handler)  -- Detach: stop collecting.
 end
 local want, wanth = 0, 0
 for i = 1, 300 do want = want + ((3 + i) & 0xff); wanth = wanth + (3 << (i % 8)) end

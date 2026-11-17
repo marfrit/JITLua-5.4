@@ -218,18 +218,36 @@ static void LJ_FASTCALL recff_assert(jit_State *J, RecordFFData *rd)
   rd->nres = J->maxslot;  /* Pass through all arguments. */
 }
 
+/* ADR-001b trap: a boxed 5.4 integer is a GCudata with itype LJ_TUDATA, so
+** the type guard of an IRT_UDATA load (SLOAD/ALOAD/HLOAD of a real userdata
+** seen at record time) accepts a box as well. A recorder that decides
+** anything from a real-userdata argv must therefore also guard the udtype
+** (the reverse is safe: a box loads as an IRT_I64 ref, whose guard checks
+** UDTYPE_I64BOX). This emits that guard; a no-op for every other argv. */
+static void recff_udata_notbox(jit_State *J, RecordFFData *rd, ptrdiff_t arg)
+{
+  cTValue *o = &rd->argv[arg];
+  if (tvisudata(o) && !tvisi64(o) && tref_isudata(J->base[arg])) {
+    TRef tr = emitir(IRT(IR_FLOAD, IRT_U8), J->base[arg], IRFL_UDATA_UDTYPE);
+    emitir(IRTGI(IR_NE), tr, lj_ir_kint(J, UDTYPE_I64BOX));
+  }
+}
+
 static void LJ_FASTCALL recff_type(jit_State *J, RecordFFData *rd)
 {
-  /* Arguments already specialized. Result is a constant string. Neat, huh? */
+  /* Arguments already specialized. Result is a constant string. Neat, huh?
+  ** Except for a real userdata: its load guard admits a boxed int64 (see
+  ** recff_udata_notbox), which would then be reported as "userdata". */
   uint32_t t;
-  if (tvisnumber(&rd->argv[0]) || tvisi64(&rd->argv[0]))
+  if (tvisnumber(&rd->argv[0]) || tvisi64(&rd->argv[0])) {
     t = ~LJ_TNUMX;  /* ADR-001b: a boxed int64 is a number */
-  else if (LJ_64 && !LJ_GC64 && tvislightud(&rd->argv[0]))
+  } else if (LJ_64 && !LJ_GC64 && tvislightud(&rd->argv[0])) {
     t = ~LJ_TLIGHTUD;
-  else
+  } else {
+    recff_udata_notbox(J, rd, 0);
     t = ~itype(&rd->argv[0]);
+  }
   J->base[0] = lj_ir_kstr(J, strV(&J->fn->c.upvalue[t]));
-  UNUSED(rd);
 }
 
 static void LJ_FASTCALL recff_getmetatable(jit_State *J, RecordFFData *rd)
@@ -239,6 +257,10 @@ static void LJ_FASTCALL recff_getmetatable(jit_State *J, RecordFFData *rd)
     RecordIndex ix;
     ix.tab = tr;
     copyTV(J->L, &ix.tabv, &rd->argv[0]);
+    /* A plain userdata gets no udtype guard from lj_record_mm_lookup; a
+    ** boxed int64 would read its (null) metatable where the interpreter
+    ** answers with the number base metatable. */
+    recff_udata_notbox(J, rd, 0);
     if (lj_record_mm_lookup(J, &ix, MM_metatable))
       J->base[0] = ix.mobj;
     else
@@ -297,7 +319,12 @@ static void LJ_FASTCALL recff_rawequal(jit_State *J, RecordFFData *rd)
   TRef tra = J->base[0];
   TRef trb = J->base[1];
   if (tra && trb) {
-    int diff = lj_record_objcmp(J, tra, trb, &rd->argv[0], &rd->argv[1]);
+    int diff;
+    /* (userdata, int64) records a constant "different"; a box that later
+    ** passes the userdata load guard could be equal to the int64. */
+    recff_udata_notbox(J, rd, 0);
+    recff_udata_notbox(J, rd, 1);
+    diff = lj_record_objcmp(J, tra, trb, &rd->argv[0], &rd->argv[1]);
     J->base[0] = diff ? TREF_FALSE : TREF_TRUE;
   }  /* else: Interpreter will throw. */
 }
@@ -1754,6 +1781,7 @@ static void LJ_FASTCALL recff_debug_getmetatable(jit_State *J, RecordFFData *rd)
     mt = tabref(tabV(&rd->argv[0])->metatable);
     mtref = emitir(IRT(IR_FLOAD, IRT_TAB), tr, IRFL_TAB_META);
   } else if (tref_isudata(tr)) {
+    recff_udata_notbox(J, rd, 0);  /* A box has no metatable of its own. */
     mt = tabref(udataV(&rd->argv[0])->metatable);
     mtref = emitir(IRT(IR_FLOAD, IRT_TAB), tr, IRFL_UDATA_META);
   } else {

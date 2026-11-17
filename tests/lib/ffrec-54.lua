@@ -9,12 +9,14 @@ local function eq(name, got, want)
 end
 local W = (1 << 40) + 3            -- widened inline int64
 local B = (1 << 50) + 3            -- boxed int64
-local vals = { 1, -7, 2.5, -2.5, "s", true, nil, {}, W, B, -W, -B, print, 1/0, -(2^31) }
+-- io.stdout is a real userdata: its load guard admits a boxed int64 (same
+-- type tag), so the type() recorder must guard the udtype as well.
+local vals = { 1, -7, 2.5, -2.5, "s", true, nil, {}, W, B, -W, -B, print, 1/0, -(2^31), io.stdout }
 
 local function type_loop()
   local n, s = #vals, {}
-  for i = 1, 300 do
-    local v = vals[(i % 12) + 1]
+  for i = 1, 320 do
+    local v = vals[(i % 16) + 1]
     local t = type(v)
     s[t] = (s[t] or 0) + 1
   end
@@ -81,25 +83,34 @@ local function floor_wide_loop()  -- integer args pass through unchanged
   return s, t
 end
 
-local loop_fns = {type_loop, rawlen_loop, abs_loop, floor_loop, abs_wide_loop, floor_wide_loop}
--- line of the `for` relative to the function line
-local loop_ofs = {[type_loop] = 3, [rawlen_loop] = 3, [abs_loop] = 3, [floor_loop] = 2, [abs_wide_loop] = 2, [floor_wide_loop] = 2}
+-- Recorded on the real userdata first: the udata load guard alone would let
+-- the boxes through and report them as "userdata".
+local function type_udfirst_loop()
+  local tv, nn, nu = { io.stdout, io.stdout, io.stdout, io.stdout, B, B, B, B }, 0, 0
+  for i = 1, 400 do
+    local v = tv[(i % 8) + 1]
+    if type(v) == "number" then nn = nn + 1 else nu = nu + 1 end
+  end
+  return nn, nu
+end
+local loop_fns = {type_loop, rawlen_loop, abs_loop, floor_loop, abs_wide_loop, floor_wide_loop, type_udfirst_loop}
 local loop_set = {}
 for _, fn in ipairs(loop_fns) do loop_set[fn] = true end
-local trace_starts, loop_lines, loop_starts, stitched = {}, {}, {}, {}
+local trace_starts, loop_ok, stitched = {}, {}, {}
 local trace_handler
 if jit and jit.status() then
   local ju = require("jit.util")
-  for _, fn in ipairs(loop_fns) do
-    loop_starts[fn] = ju.funcinfo(fn).linedefined + loop_ofs[fn]
-  end
+  -- Note: this replaces any jit.v/jit.dump handler for the "trace" event.
   trace_handler = function(what, tr, func, pc, otr, oex)
     if what == "start" then
-      trace_starts[tr] = { func = func, line = ju.funcinfo(func, pc).currentline, stitch = (oex == "stitch") }
+      trace_starts[tr] = { func = func, stitch = (oex == "stitch") }
     elseif what == "stop" then
       local st = trace_starts[tr]
       if st and loop_set[st.func] then
-        if ju.traceinfo(tr).linktype == "loop" then loop_lines[st.func] = st.line end
+        local info = ju.traceinfo(tr)
+        -- A root loop trace links to itself (a side trace linking back to
+        -- the loop also says "loop", but its link is the root).
+        if info.linktype == "loop" and info.link == tr then loop_ok[st.func] = true end
         if st.stitch then stitched[st.func] = (stitched[st.func] or 0) + 1 end
       end
     end
@@ -108,11 +119,13 @@ if jit and jit.status() then
 end
 
 local s = type_loop()
-eq("type-number", s.number, 8 * 25)  -- 1, -7, 2.5, -2.5, W, B, -W, -B, each 25 times
-eq("type-string", s.string, 25)
-eq("type-boolean", s.boolean, 25)
-eq("type-nil", s["nil"], 25)
-eq("type-table", s.table, 25)
+eq("type-number", s.number, 10 * 20)  -- 1, -7, 2.5, -2.5, W, B, -W, -B, 1/0, -(2^31): 20 each
+eq("type-string", s.string, 20)
+eq("type-boolean", s.boolean, 20)
+eq("type-nil", s["nil"], 20)
+eq("type-table", s.table, 20)
+eq("type-function", s["function"], 20)
+eq("type-userdata", s.userdata, 20)
 local a, b = rawlen_loop()
 eq("rawlen-tab", a, 5 * 50 + 6 * 50 + 7 * 50 + 8 * 50 + 9 * 50 + 10 * 50)
 eq("rawlen-str", b, 1500)
@@ -135,18 +148,23 @@ eq("abs-wide-type", awt, "integerinteger")
 local am, amt = abs_min_loop()
 eq("abs-min", am, 45150 - 200 + 2^31)
 eq("abs-min-type", amt, "integer")
+local un, uu = type_udfirst_loop()
+eq("type-udfirst-number", un, 200)
+eq("type-udfirst-userdata", uu, 200)
 local fw, fwt = floor_wide_loop()
 eq("floor-wide", fw, 2 * 45150)
 eq("floor-wide-type", fwt, "integer")
 if jit and jit.status() then
-  for _, fn in ipairs(loop_fns) do
-    if loop_lines[fn] ~= loop_starts[fn] then
+  for i, fn in ipairs(loop_fns) do
+    local ju = require("jit.util")
+    local where = "loop " .. i .. " (function at line " .. ju.funcinfo(fn).linedefined .. ")"
+    if not loop_ok[fn] then
       fails = fails + 1
-      print("FAIL hot loop did not compile to a root loop trace at line " .. loop_starts[fn] .. " (got " .. tostring(loop_lines[fn]) .. ")")
+      print("FAIL " .. where .. " did not compile to a root loop trace")
     end
     if stitched[fn] then
       fails = fails + 1
-      print("FAIL stitch trace recorded for the loop at line " .. loop_starts[fn])
+      print("FAIL " .. where .. ": " .. stitched[fn] .. " stitch trace(s) recorded (a builtin fell back to a C call)")
     end
   end
   jit.attach(trace_handler)

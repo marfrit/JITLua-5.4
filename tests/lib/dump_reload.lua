@@ -24,6 +24,16 @@ end
 
 -- Mirror the standalone interpreter's arg table for the target script.
 local newarg = { [0] = target }
+-- Mirror the interpreter's negative arg entries (options and progname) so
+-- scripts that derive 'progname' by walking negative indices can spawn the
+-- interpreter exactly as in a direct run.
+if arg then
+  local i = -1
+  while arg[i] do
+    newarg[i] = arg[i]
+    i = i - 1
+  end
+end
 for i = 1, n do newarg[i] = args[i] end
 arg = newarg
 

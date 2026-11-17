@@ -117,7 +117,7 @@ def directives(path, text):
     return d
 
 
-def discover(corpus_dirs, filters):
+def discover(corpus_dirs, filters, include_heavy=False):
     tests = []
     for c in corpus_dirs:
         base = ROOT / c
@@ -127,6 +127,8 @@ def discover(corpus_dirs, filters):
             rel = p.relative_to(ROOT).as_posix()
             if "/libs/" in rel or "/packtests/" in rel:
                 continue
+            if rel.endswith("/puc54/heavy.lua") and not include_heavy:
+                continue  # OOMs the 8G boxes; explicit --include-heavy stage only.
             if filters and not any(fnmatch.fnmatch(rel, f) or f in rel for f in filters):
                 continue
             tests.append(p)
@@ -315,6 +317,8 @@ def main():
     ap.add_argument("--verbose", action="store_true")
     ap.add_argument("--gc-stress", action="store_true",
                     help="run every arm with collectgarbage('setpause', 0)")
+    ap.add_argument("--include-heavy", action="store_true",
+                    help="include puc54/heavy.lua (needs >8G; run alone, not in the default corpus)")
     ap.add_argument("--list", action="store_true")
     opts = ap.parse_args()
 
@@ -331,7 +335,7 @@ def main():
         sys.exit("error: %s not found -- run tests/ref/fetch-ref.sh" % ref)
 
     corpus = opts.corpus or DEFAULT_CORPUS
-    tests = discover(corpus, opts.filter)
+    tests = discover(corpus, opts.filter, opts.include_heavy)
     if opts.list:
         for p in tests:
             print(p.relative_to(ROOT).as_posix())

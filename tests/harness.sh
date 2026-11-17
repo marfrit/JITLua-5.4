@@ -6,6 +6,7 @@
 #   tests/harness.sh --mode B --opt-levels 0,1,2,3
 #   tests/harness.sh --mode R             # string.dump -> load -> re-run
 #   tests/harness.sh --filter 'd54/numeric*' --verbose
+#   tests/harness.sh --include-heavy   # opt-in OOM-heavy stage; needs >8G
 #   tests/harness.sh --update-known-bad   # refresh the expected-failure baseline
 #
 # Environment overrides: LUAJIT (our binary), REF (PUC 5.4.9 binary).

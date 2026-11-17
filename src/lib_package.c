@@ -250,6 +250,20 @@ static int ll_loadfunc(lua_State *L, const char *path, const char *name, int r)
     lua_pushboolean(L, 1);
     return 0;
   } else {
+    const char *mark = strchr(name, *LUA_IGMARK);
+    if (!r && mark) {  /* PUC 5.4: try luaopen_X before old-style luaopen_Y. */
+      lua_pushlstring(L, name, (size_t)(mark - name));
+      const char *head = lua_tostring(L, -1);
+      head = luaL_gsub(L, head, ".", "_");
+      head = lua_pushfstring(L, SYMPREFIX_CF, head);
+      lua_remove(L, -2);
+      lua_CFunction fh = ll_sym(L, *reg, head);
+      if (fh) {
+	lua_pushcfunction(L, fh);
+	return 0;
+      }
+      lua_pop(L, 1);  /* drop dlerror */
+    }
     const char *sym = r ? name : mksymname(L, name, SYMPREFIX_CF);
     lua_CFunction f = ll_sym(L, *reg, sym);
     if (f) {

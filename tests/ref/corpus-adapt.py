@@ -7,9 +7,9 @@ Four divergence classes are intentional (see docs/phase0-status.md):
   and would make every differential arm flaky.
 - literals.lua / pm.lua: no %p / lua_topointer identity assertion for long
   strings; LuaJIT interns every string while PUC does not intern long strings.
-- math.lua / sort.lua: omit PRNG seeds/statistics and timing/comparison-count
-  prints; these are process- or implementation-defined across arms, while the
-  corresponding assertions still run.
+- math.lua / sort.lua / files.lua / main.lua: omit PRNG seeds/statistics,
+  timing/comparison counts, wall-clock date/time and process-defined
+  interpreter paths/banners; the corresponding assertions still run.
 """
 import sys
 
@@ -69,6 +69,12 @@ patch('main.lua',
 patch('main.lua',
       'assert(string.find(t, "PUC%-Rio\\nhello"))',
       'assert(string.find(t, "hello"))  -- banner is implementation-defined')
+
+patch('files.lua',
+      "io.write(string.format('test done on %2.2d/%2.2d/%d', d, m, a))\n"
+      "io.write(string.format(', at %2.2d:%2.2d:%2.2d\\n', h, min, s))",
+      "-- Not printed: wall-clock date/time differs across arms (IMPL-DEFINED).\n"
+      "io.write('test done\\n')")
 
 patch('pm.lua',
       'assert(r == s and string.format("%p", s) ~= string.format("%p", r))',

@@ -944,8 +944,8 @@ a = tonumber(a)
 h = tonumber(h)
 min = tonumber(min)
 s = tonumber(s)
-io.write(string.format('test done on %2.2d/%2.2d/%d', d, m, a))
-io.write(string.format(', at %2.2d:%2.2d:%2.2d\n', h, min, s))
+-- Not printed: wall-clock date/time differs across arms (IMPL-DEFINED).
+io.write('test done\n')
 io.write(string.format('%s\n', _VERSION))
 
 

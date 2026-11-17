@@ -1442,6 +1442,50 @@ lua_warning("@on")) and collects the flag. Corpus adaptations omit three
 process-defined outputs: the interpreter pathname, the os.tmpname filename and
 the exact `-v` banner; the remaining assertions still run. The interactive
 prompt sub-tests are fully scriptable over piped stdin (custom _PROMPT/
-_PROMPT2), and the Ctrl-C checks use shell `kill`; no TTY is required. Mode R
-stays known-bad for main.lua only because dump/reload turns progname into the
-script name, so the test cannot spawn a standalone interpreter.
+_PROMPT2), and the Ctrl-C checks use shell `kill`; no TTY is required. Mode R now passes too: the dump/reload wrapper mirrors the interpreter's
+negative arg entries (arg[-1] option, arg[-2] progname), so files.lua and
+main.lua can spawn the interpreter in the reload arm.
+
+## Session 47 — heavy.lua OOM quarantined from the default corpus
+
+A full mode-A corpus run including tests/corpus/puc54/heavy.lua peaks at the
+8 GiB x64-box/arm-box scope limit and the kernel OOM-kills the whole job; the
+test killed at that moment appears as an unrelated random FAIL (attrib, files,
+math). Runner discovery now excludes puc54/heavy.lua by default. It remains
+known-bad (PERF/memory) and can only be run as an explicit `--include-heavy`
+stage alone on a box with more than 8 GiB. The other corpus files measure at
+96 MiB peak or less serially (errors.lua 96 MiB, constructs 89 MiB), so serial
+runs below the cap no longer have a memory hog.
+
+## Session 48 — corpus memory/OOM triage, lib2-v2 loader, dump-reload args
+
+`tests/corpus/puc54/heavy.lua` is the real memory hog: the PUC reference peaks
+at the 8 GiB box cap and the kernel OOM-kills the whole scope, making whichever
+test is running look like a random FAIL. Runner discovery now excludes it by
+default; `--include-heavy` is an explicit stage for a box above 8 GiB, and the
+known-bad row records PERF/memory. With heavy excluded, a serial PUC mode-A
+scan of every corpus file peaks at 96 MiB (errors.lua), so the other files are
+not memory sources.
+
+Two non-memory failures had root causes and are fixed:
+- attrib A: LuaJIT's `ll_loadfunc` only built `luaopen_Y` for `X-Y` module
+  names; PUC first tries `luaopen_X` and then the old-style `luaopen_Y`.
+  lib_package now does the same, so `lib2-v2.so` (symbol `luaopen_lib2`)
+  loads. -l semantics stay PUC's: require gets the full name, the global is
+  cut at the version mark.
+- files B: the corpus printed the wall-clock date/time; two arms can straddle a
+  second boundary. The date/time print is now a stable "test done" line.
+- files R/main R: dump_reload.lua set only arg[0], so scripts that derive
+  progname by walking negative arg indices spawned `files.lua` instead of the
+  interpreter. The wrapper now mirrors arg[-1], arg[-2], ... exactly.
+
+math B is a genuine x64 JIT bug, not flaky/OOM: with -jon the random-stats
+loops segfault (~0.02 s, RSS <7 MiB) or hang (>40 s), while -joff always
+passes. Minimal repro tests/lib/math-jit-repro.lua: aux(1,32), aux(1,33),
+aux(-10,10) (2.1-compatible, 13/20 failures). Bisect (with a git clean before each box build) puts the
+first logical change at ad283709 "JIT: math.random on the 5.4 xoshiro state";
+fcc6df4d is only the build repair for its math.modf dispatch-table mismatch.
+A `-jdump=+rsi` crash dump shows the live trace calling lj_tab_newkey, with
+the mcode post-call chain write; a core RIP maps to lj_tab_newkey:519
+(`while (noderef(collide->next) != n)`) after a JIT table store. Known-bad
+math B records this for Fable.

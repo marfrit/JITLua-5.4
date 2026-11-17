@@ -625,6 +625,10 @@
 
 /* Disable or enable the FFI extension. */
 #if defined(LUAJIT_DISABLE_FFI) || defined(LJ_ARCH_NOFFI)
+/* LuaJIT-5.4: the 64-bit integer paths (shifts, bit ops, int64 constants in
+** traces) are implemented on the FFI's int64 support; a build without the
+** FFI compiles but computes 1 << 40 as 256. Refuse it. */
+#error "LuaJIT-5.4 requires the FFI: do not define LUAJIT_DISABLE_FFI (and this target must have it)"
 #define LJ_HASFFI		0
 #else
 #define LJ_HASFFI		1

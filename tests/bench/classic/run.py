@@ -16,7 +16,7 @@ STOCK = ROOT / "tmp" / "stock-luajit"
 REF = ROOT / "tests" / "ref" / "bin" / "lua54ref"
 OURS = ROOT / "src" / "luajit"
 REPS = int(os.environ.get("BENCH_REPS", "3"))
-STOCK_URL = ROOT / "tests" / "bench" / "dist" / "luajit-v2.1.tar.gz"
+STOCK_TAR = BENCH / "luajit-63c8f1a9.tar.gz"
 
 # name: (script, argv, stdin, compare_stdout)
 _ONLY = os.environ.get("BENCH_ONLY", "").strip()
@@ -86,7 +86,7 @@ def build_stock():
     if STOCK.exists():
         shutil.rmtree(STOCK)
     STOCK.mkdir(parents=True)
-    with tarfile.open(STOCK_URL) as t:
+    with tarfile.open(STOCK_TAR) as t:
         t.extractall(STOCK, filter="data")
     tops = [p for p in STOCK.iterdir() if p.is_dir()]
     base = tops[0]

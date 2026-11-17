@@ -77,7 +77,7 @@ harness is run on arm64 (native) and x64 (CI).
 See `docs/phase0-status.md`. Baseline: PASS 82, XFAIL 39, SKIP 12, TIMEOUT 2,
 FAIL 0, BAD 0; ASan+UBSan build clean on `tests/d54`.
 Remaining polish: `[ ]` per-test timeout overrides for `heavy.lua`/`calls.lua`;
-`[ ]` full-corpus ASan run; `[ ]` mneme persistence of decisions.
+`[ ]` full-corpus ASan run; `[ ]` persistence of decisions in the project's shared memory store.
 
 ## Phase 1 — lexer, parser, bytecode, interpreter (M1)
 Gate: **mode A fully green** (interpreter ≡ PUC 5.4.7), dump round-trip normalized.

@@ -5,7 +5,8 @@ Measurement only. Compares **stock LuaJIT 2.1** (`-jon`), **this fork**
 3 runs per arm, serially in one box job.
 
 Sources are pinned by sha256 in `manifest.txt` and live in `.dlcache/bench/`;
-`fetch.sh` downloads the two tarballs on a networked host, and `input.fasta`
+`fetch.sh` downloads the three tarballs (two benchmark sources and the stock
+LuaJIT 2.1 snapshot) on a networked host, and `input.fasta`
 is generated once from `fasta.lua` with the PUC reference. Boxes stay offline.
 Not available in the pinned sources: richards, havlak (no Lua source found);
 k-nucleotide/regex-dna use the pinned `input.fasta`.

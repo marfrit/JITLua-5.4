@@ -1,4 +1,6 @@
-# MISSION: LuaJIT 5.4 — a maintained JIT compiler for the Lua 5.4 language
+# MISSION: JITLua-5.4 — a maintained JIT compiler for the Lua 5.4 language
+
+> This is the original mission paper dated 2026-11-14. The current status is in [README.md](README.md).
 
 Status: public release preparation. Lua 5.4 language and C API port implemented and differentially gated on Linux arm64/x86_64; current gates A+B 115 PASS / 0 FAIL / 5 XFAIL, optimization levels 248, R 62. Remaining divergences and known gaps are tracked in docs/DIFFERENCES.md and tests/known-bad.tsv.
 Date: 2026-11-14
@@ -9,7 +11,7 @@ Target language/ABI: PUC-Rio Lua 5.4 (5.4.4/5.4.7 semantics)
 
 ## 1. Mission statement
 
-Deliver **LuaJIT 5.4**: the LuaJIT 2.1 JIT compiler ported so that it fully
+Deliver **JITLua-5.4**: the LuaJIT 2.1 JIT compiler ported so that it fully
 implements the Lua 5.4 language and the Lua 5.4 C API (source- and ABI-
 compatible), with a verification harness that proves the JIT is correct against
 the reference interpreter.
@@ -321,7 +323,7 @@ Acceptance (M6): zero open harness failures; fuzz dashboard green for
   dump-reload-fuzz, GC-fuzz) + `harness.sh` + CI config
 - `docs/54port.md`: semantic-delta checklist with test references
   (every §4 box linked to its test)
-- Release: `LuaJIT-5.4.0.tar.gz`, release notes, perf report
+- Release: `JITLua-5.4.0.tar.gz`, release notes, perf report
 
 ## 10. Open questions (resolve in Phase 0)
 

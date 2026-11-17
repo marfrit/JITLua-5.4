@@ -82,7 +82,7 @@ exits 97 (wrapper at ~/.local/bin/make; comment cites Markus "Do not build
 locally"). So **nothing may be compiled or tested on pica any more**. All
 verification must go to the boxes:
 - `arm-box` = escher, aarch64 (works; proven this session)
-- `build-box` = `build@born.fritz.box`, **x86_64** (new from outside; restricted
+- `build-box` = `build@<build host>`, **x86_64** (new from outside; restricted
   key that only runs build-box). Currently blocked: a card measurement window
   on dirac (`~/wp/window.lock`, started 08:31 UTC, ~80 min) -> exit 75 "try
   later". Re-run after ~09:51 UTC.

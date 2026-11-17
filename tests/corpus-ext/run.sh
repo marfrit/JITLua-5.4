@@ -40,7 +40,7 @@ CPATH_PUC=; CPATH_OURS=
 norm() {
   sed -e 's/0x[0-9a-fA-F]\{6,\}/0xADDR/g' \
       -e 's/^Lua 5\.4\.[0-9]*  Copyright (C) .*$/VERSION-BANNER/' \
-      -e 's/^LuaJIT 2\.1\.[A-Za-z0-9]* -- Copyright (C) .*$/VERSION-BANNER/' \
+      -e 's/^JITLua-5\.4 .*$/VERSION-BANNER/' \
       -e 's/[0-9]\+\.[0-9]\+ *\(s\|ms\|sec\|seconds\)\b/T/g' \
       -e 's/[0-9]\+\.[0-9]\+\(e[-+]\?[0-9]\+\)\?s\b/T/g' \
       -e "s#$OUT#OUT#g" -e "s#$ROOT#ROOT#g" \

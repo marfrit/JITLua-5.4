@@ -280,14 +280,10 @@ int lj_record_objcmp(jit_State *J, TRef a, TRef b, cTValue *av, cTValue *bv)
       } else if (ta == IRT_NUM && tb == IRT_INT) {
 	b = emitir(IRTN(IR_CONV), b, IRCONV_NUM_INT);
       } else {
-	/* "Never equal" holds for the recorded types only if a real userdata
-	** stays one: a boxed int64 passing its guard can equal the int64 (or
-	** an integral float; never an int32, boxes live outside int32). */
-	if (ta == IRT_UDATA && (tb == IRT_I64 || tb == IRT_NUM))
-	  lj_record_udata_notbox(J, a, av);
-	else if (tb == IRT_UDATA && (ta == IRT_I64 || ta == IRT_NUM))
-	  lj_record_udata_notbox(J, b, bv);
-	return 2;  /* Two different types are never equal. */
+	/* Two different types are never equal -- for (userdata, int64/num)
+	** only under a udtype guard, which the BC_ISEQV path emits before
+	** its comparison snapshot (see there); rawequal guards its own args. */
+	return 2;
       }
     }
     emitir(IRTG(diff ? IR_NE : IR_EQ, ta), a, b);
@@ -2775,6 +2771,16 @@ void lj_record_ins(jit_State *J)
       rec_comp_fixup(J, J->pc, ((int)op & 1) == !diff);
       break;
     }
+    /* A real userdata against an int64 or float: lj_record_objcmp records
+    ** "never equal", which holds only if the userdata stays one. A boxed
+    ** int64 passes the userdata load guard, so guard the udtype here --
+    ** before rec_comp_prep(): a guard emitted after it would inherit the
+    ** comparison snapshot, whose PC rec_comp_fixup() rewrites to the other
+    ** branch, and an exiting box would resume at the "equal" branch. */
+    if (tref_isudata(ra) && (tref_isi64(rc) || tref_isnum(rc)))
+      lj_record_udata_notbox(J, ra, rav);
+    else if (tref_isudata(rc) && (tref_isi64(ra) || tref_isnum(ra)))
+      lj_record_udata_notbox(J, rc, rcv);
     /* Emit nothing for two non-table, non-udata consts. */
     if (!(tref_isk2(ra, rc) && !(tref_istab(ra) || tref_isudata(ra)))) {
       int diff;

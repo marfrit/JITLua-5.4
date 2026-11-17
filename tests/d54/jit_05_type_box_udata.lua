@@ -83,3 +83,41 @@ local function eqfloat()  -- an integral float constant equals the boxed integer
   return eq
 end
 print("eq-float", eqfloat())
+
+-- Non-equal boxes: the udtype guard must sit before the comparison snapshot,
+-- or an exiting box resumes at the "equal" branch without comparing.
+local function neloop(tab, w)
+  local eq, ne, eqr, ner = 0, 0, 0, 0
+  for i = 1, 400 do
+    local v = tab[(i % 8) + 1]
+    if v == w then eq = eq + 1 end
+    if v ~= w then ne = ne + 1 end
+    if w == v then eqr = eqr + 1 end
+    if w ~= v then ner = ner + 1 end
+  end
+  return eq, ne, eqr, ner
+end
+local tab = { ud, ud, ud, ud, B, B, B, B }
+print("ne-int64", neloop(tab, B + 1))
+print("ne-box-const", neloop(tab, 1125899906842628))
+print("ne-float-const", neloop(tab, 1125899906842628.0))
+local function nefloat()
+  local eq, ne = 0, 0
+  for i = 1, 400 do
+    local v = tab[(i % 8) + 1]
+    if v == 1125899906842628.0 then eq = eq + 1 end
+    if v ~= 1125899906842628.0 then ne = ne + 1 end
+  end
+  return eq, ne
+end
+print("ne-float-literal", nefloat())
+local function neint64lit()
+  local eq, ne = 0, 0
+  for i = 1, 400 do
+    local v = tab[(i % 8) + 1]
+    if v == 1125899906842628 then eq = eq + 1 end
+    if 1125899906842628 ~= v then ne = ne + 1 end
+  end
+  return eq, ne
+end
+print("ne-int64-literal", neint64lit())

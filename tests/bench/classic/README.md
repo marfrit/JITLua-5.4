@@ -14,10 +14,10 @@ Workloads: nbody 10000, spectral-norm 200, fannkuch-redux 9, binary-trees 14,
 fasta 10000, deltablue locals (10000 iterations), scimark -small,
 k-nucleotide and regex-dna on `input.fasta`.
 
-Run on a box:
+Run on a box (arm64-build/x64-build are private remote wrappers that copy the tree, run there and return stdout; they are not part of this repository):
 
-    arm-box -t 1800 sh tests/bench/classic/run.sh
-    x64-box -t 1800 sh tests/bench/classic/run.sh
+    arm64-build -t 1800 sh tests/bench/classic/run.sh
+    x64-build -t 1800 sh tests/bench/classic/run.sh
 
 The script never fails on a slowdown: results are a report/table. stdout is
 compared only where deterministic; scimark prints rates and is `result -`.

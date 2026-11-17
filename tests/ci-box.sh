@@ -1,7 +1,7 @@
 #!/bin/sh
 # One-shot verification for a clean, possibly offline machine (build box).
 #
-#   build-box -t 3600 tests/ci-box.sh              # x64 build box (born)
+#   x64-build -t 3600 tests/ci-box.sh              # x64 build box
 #   sh tests/ci-box.sh                             # here (aarch64)
 #
 # Builds our LuaJIT, builds the PUC-Lua 5.4.9 reference from the vendored

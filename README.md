@@ -57,6 +57,10 @@ The local CI equivalent, including C API and fuzz runs:
 tests/ci-box.sh
 ```
 
+The box scripts are thin wrappers around private remote build hosts: they copy
+the working tree, run the command there and return stdout; the wrappers
+themselves are not part of this repository.
+
 Harness modes: **A** (reference vs this fork, JIT off), **B** (JIT on vs off),
 **R** (direct vs `string.dump`→`load` round-trip). `--strict` treats an
 unexpected pass of a known-bad entry as a failure.

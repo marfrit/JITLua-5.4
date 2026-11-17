@@ -49,6 +49,7 @@ T_HOOK_RE = re.compile(r"\bT\s*[.\[]")
 def canon(s):
     s = s.replace("\r\n", "\n").replace("\r", "\n")
     s = ADDR_RE.sub("0xADDR", s)
+    s = re.sub(r"==\d+==", "==PID==", s)  # sanitizer report PID
     lines = [re.sub(r"[ \t]+", " ", ln).strip() for ln in s.split("\n")]
     while lines and not lines[-1]:
         lines.pop()

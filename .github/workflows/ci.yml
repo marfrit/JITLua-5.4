@@ -17,7 +17,9 @@ jobs:
       - run: make -j$(nproc)
       - run: tests/ref/fetch-ref.sh
       - run: tests/harness.sh --mode all --timeout 120 --strict
-# Sanitizer CI is intentionally not part of the public gate yet: a local
-# arm64 ASan+UBSan run is red on pre-existing UBSan reports (lj_bcread.c
-# shift) and the differential harness compares sanitizer stack traces across
-# arms.  tests/ci-local.sh --sanitizers-only remains available for manual use.
+  linux-x64-sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: tests/ref/fetch-ref.sh
+      - run: tests/ci-local.sh --sanitizers-only

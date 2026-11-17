@@ -20,7 +20,7 @@ if [ ! -d "$LUA_SRC" ]; then
   exit 1
 fi
 
-LUA_DIR="$LUA_SRC"
+LUA_DIR="$LUA_SRC/src"
 
 # Detect available compiler
 if command -v gcc >/dev/null 2>&1; then
@@ -49,6 +49,10 @@ done
 
 # lib2-v2.so is compiled from lib22.c (same as lib2 but with id() returning bool)
 srcfile="$LIBS_DIR/lib22.c"
+if [ ! -f "$srcfile" ]; then
+  echo "build-puc54-libs: source $srcfile not found" >&2
+  exit 1
+fi
 out="$LIBS_DIR/lib2-v2.so"
 $CC $CFLAGS -o "$out" "$srcfile"
 echo "built $out"

@@ -57,6 +57,19 @@ patch('sort.lua',
       '      limit, x, i))',
       '-- No timing/comparison print (implementation-defined across arms).')
 
+patch('main.lua',
+      'print("progname: "..progname)',
+      '-- Not printed: progname is process/implementation-defined.')
+patch('main.lua',
+      'print(string.format("(temporary program file used in these tests: %s)", prog))',
+      '-- Not printed: os.tmpname is process-dependent (IMPL-DEFINED).')
+patch('main.lua',
+      "RUN('lua -v')",
+      "RUN('lua -v > /dev/null')")
+patch('main.lua',
+      'assert(string.find(t, "PUC%-Rio\\nhello"))',
+      'assert(string.find(t, "hello"))  -- banner is implementation-defined')
+
 patch('pm.lua',
       'assert(r == s and string.format("%p", s) ~= string.format("%p", r))',
       'assert(r == s)\n'

@@ -6,7 +6,7 @@ tests/corpus/puc54/calls.lua	*	PENDING VM WORK: pcall/xpcall nesting bound and _
 tests/corpus/puc54/closure.lua	B	PERF: JIT-on arm exceeds 600s while A (JIT-off) passes; JIT slowdown to triage
 tests/corpus/puc54/db.lua	A	P5: debug.getinfo(1,"t").istailcall must be true without a hook; Fable tail marks exist only while a call hook is installed (db.lua:619). nups/getlocal now match.
 tests/corpus/puc54/heavy.lua	A	PERF: reference exceeds 60s (triage; raise timeout)
-tests/corpus/puc54/main.lua	A	P5: corpus lacks built libs/*.so fixtures (both stop there); with fixtures PUC itself stops on the interactive prompt test in this harness; progname/argv/traceback naming differ
+tests/corpus/puc54/main.lua	R	R mode dumps/reloads this driver, so its progname becomes the script name and it cannot spawn a standalone interpreter for its subprocess checks. A/B pass: libs/*.so are built by tests/ref/build-puc54-libs.sh; the interactive prompt tests are scriptable over pipes and the Ctrl-C checks use shell kill.
 tests/d54/dump_02_border.lua	A	IMPL-DEFINED: dump/reload border bug FIXED and rawlen added; only the runtime-built sparse-table border differs (any border is legal per the 5.4 manual)
 tests/d54/err_02_tailname.lua	A	P1.8b: tail-call error names -- LuaJIT reuses the caller frame, so the loaded-module fallback reports 'string.rep' where 5.4 reports the short 'rep'. Non-tail and pcall paths match.
 tests/d54/gc_01_tbc_gc.lua	A	IMPL-DEFINED: LuaJIT runs __gc only for userdata, not tables (PUC 5.4 finalizes tables); gc options now match

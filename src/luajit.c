@@ -89,6 +89,7 @@ static void print_usage(void)
   "  -i        Enter interactive mode after executing " LUA_QL("script") ".\n"
   "  -v        Show version information.\n"
   "  -E        Ignore environment variables.\n"
+  "  -W        Turn on warnings.\n"
   "  --        Stop handling options.\n"
   "  -         Execute stdin and stop handling options.\n", stderr);
   fflush(stderr);
@@ -196,8 +197,9 @@ static int dolibrary(lua_State *L, const char *name)
 {
   /* PUC 5.4 -l semantics: 'global=module' names the global explicitly;
   ** without '=', the module name (minus a '-suffix') names the global.
-  ** The version suffix ('-vN') is stripped from both modname and gname
-  ** to match PUC 5.4 library resolution. */
+  ** PUC keeps the full module name for require() and strips the suffix only
+  ** from the global name; loadfunc itself handles the 'X-Y' open-function
+  ** convention. */
   const char *eq = strchr(name, '=');
   const char *modname = eq ? eq+1 : name;
   const char *gname = name;
@@ -205,11 +207,6 @@ static int dolibrary(lua_State *L, const char *name)
   if (!eq) {
     const char *suffix = strchr(name, '-');
     if (suffix) glen = (size_t)(suffix-name);
-  }
-  /* Strip version suffix from modname for require() lookup. */
-  {
-    const char *msuffix = strchr(modname, '-');
-    if (msuffix) modname = msuffix + 1;
   }
   lua_getglobal(L, "require");
   lua_pushstring(L, modname);
@@ -451,7 +448,6 @@ static int dobytecode(lua_State *L, char **argv)
 #define FLAGS_EXEC		4
 #define FLAGS_OPTION		8
 #define FLAGS_NOENV		16
-#define FLAGS_WARN		32
 
 static int collectargs(char **argv, int *flags)
 {
@@ -494,7 +490,6 @@ static int collectargs(char **argv, int *flags)
       break;
     case 'W':
       notail(argv[i]);
-      *flags |= FLAGS_WARN;
       break;
     default: return -1;  /* invalid option */
     }
@@ -517,6 +512,9 @@ static int runargs(lua_State *L, char **argv, int argn)
 	return 1;
       break;
       }
+    case 'W':
+      lua_warning(L, "@on", 0);  /* PUC enables at this option's position. */
+      break;
     case 'l': {
       const char *filename = argv[i] + 2;
       if (*filename == '\0') filename = argv[++i];
@@ -599,10 +597,6 @@ static int pmain(lua_State *L)
     s->status = handle_luainit(L);
     if (s->status != LUA_OK) return 0;
   }
-
-  /* -W: turn warnings on (PUC 5.4 standalone interpreter). */
-  if (flags & FLAGS_WARN)
-    lua_warning(L, "@on", 0);
 
   if ((flags & FLAGS_VERSION)) print_version();
 

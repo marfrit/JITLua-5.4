@@ -1430,3 +1430,18 @@ then errors; it passes A/B/R on both boxes in well under a second. Calls.lua
 stays known-bad in mode A with the remaining VM work (pcall nesting bound and
 `__call` chain argument prepending) parked on branch `wip-calls-vm`, plus the
 arbitrary-`_ENV` blocker at line 359.
+
+## Session 46 — main.lua interpreter parity; C corpus fixtures built per box
+
+`tests/corpus/puc54/main.lua` passes modes A and B on arm-box and x64-box.
+`tests/ref/build-puc54-libs.sh` (called by fetch-ref.sh) builds lib1, lib11,
+lib2, lib21 and lib2-v2 from the vendored PUC 5.4.9 headers into the corpus
+libs directory on each box, so package.loadlib/-l sub-tests have their
+fixtures. `src/luajit.c` gains the PUC `-W` option (enables warnings through
+lua_warning("@on")) and collects the flag. Corpus adaptations omit three
+process-defined outputs: the interpreter pathname, the os.tmpname filename and
+the exact `-v` banner; the remaining assertions still run. The interactive
+prompt sub-tests are fully scriptable over piped stdin (custom _PROMPT/
+_PROMPT2), and the Ctrl-C checks use shell `kill`; no TTY is required. Mode R
+stays known-bad for main.lua only because dump/reload turns progname into the
+script name, so the test cannot spawn a standalone interpreter.

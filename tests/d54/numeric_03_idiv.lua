@@ -17,7 +17,7 @@ p("minint // -1", math.mininteger // -1, math.mininteger % -1)
 p("minint // 1", math.mininteger // 1, math.mininteger // 2)
 p("maxint // -1", math.maxinteger // -1)
 p("zero divisor", pcall(function() return 1 // 0 end))
---! NaN *sign* is implementation-defined per the CPU/OS (PUC 5.4.7 gives
+--! NaN *sign* is implementation-defined per the CPU/OS (PUC 5.4.9 gives
 --! -nan on x86_64 and nan on aarch64); canonicalise only the NaN sign here so
 --! this test compares semantics, not the platform's QNaN bit.
 local function nz(v)

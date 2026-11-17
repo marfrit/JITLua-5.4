@@ -1,6 +1,6 @@
 --! §4.1 bitwise & | ~ << >> : integer semantics, logical >>, negative counts
 -- 5.4-only syntax (unported 2.1 fails at parse time).
--- Verified against PUC 5.4.7: floats with an exact integer representation ARE
+-- Verified against PUC 5.4.9: floats with an exact integer representation ARE
 -- accepted; negative shift counts reverse direction (they do NOT error).
 local function p(...)
   local n, t = select("#", ...), {}

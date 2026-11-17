@@ -1,5 +1,5 @@
 --! coroutine.close and <close> in coroutines: the relevant sections of the
---! PUC 5.4.7 test suite's coroutine.lua (lines 132-277 and 444-475 of the
+--! PUC 5.4.9 test suite's coroutine.lua (lines 132-277 and 444-475 of the
 --! vendored file), unchanged except for this header, the final print and one
 --! assertion: inside a __close handler run on the error path, level 2 is the
 --! unwound Lua function in this port (PUC: the pcall C function) -- LuaJIT

@@ -1,5 +1,5 @@
 #!/bin/sh
-# LuaJIT-5.4 differential verification harness (MISSION Phase 0).
+# JITLua-5.4 differential verification harness (MISSION Phase 0).
 #
 #   tests/harness.sh                      # modes A + B over the whole corpus
 #   tests/harness.sh --mode A             # interpreter vs PUC-Lua 5.4.9

@@ -1,7 +1,7 @@
 --! §5 package library 5.4 exactness, part 2: package.searchers, require's
 --! loader protocol (two results, loader data, second return value), the
 --! preload/Lua searchers, error accumulation and package.searchpath shapes.
---! Differential: LuaJIT-5.4 vs PUC-Lua 5.4.7 -- byte-identical output.
+--! Differential: JITLua-5.4 vs PUC-Lua 5.4.9 -- byte-identical output.
 --!
 --! Not covered: the LuaJIT-only sentinel that turns a recursive require into
 --! "loop or previous error loading module" (PUC 5.4 recurses into a stack

@@ -1,4 +1,4 @@
---! 5.4 to-be-closed variables: the <close> sections of the PUC 5.4.7 test
+--! 5.4 to-be-closed variables: the <close> sections of the PUC 5.4.9 test
 --! suite's locals.lua (lines 206-571, 861-1046 and 1047-1057 of the vendored
 --! file), unchanged except for this header, the final print, one left-out
 --! block (see the note in the file) and four

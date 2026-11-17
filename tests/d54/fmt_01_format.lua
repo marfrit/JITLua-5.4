@@ -1,5 +1,5 @@
 --! §4.2 string.format 5.4 rules + float rendering (tostring/%g use %.14g in
---! 5.4.7 -- NOT shortest-round-trip; MISSION 4.2 claim corrected by experiment).
+--! 5.4.9 -- NOT shortest-round-trip; MISSION 4.2 claim corrected by experiment).
 local function p(...)
   local n, t = select("#", ...), {}
   for i = 1, n do t[i] = tostring((select(i, ...))) end

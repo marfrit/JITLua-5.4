@@ -1,4 +1,4 @@
--- coroutine.close / coroutine.running, Lua 5.4 semantics (PUC 5.4.7 reference).
+-- coroutine.close / coroutine.running, Lua 5.4 semantics (PUC 5.4.9 reference).
 local t, ismain = coroutine.running()
 print("running", type(t), ismain)
 

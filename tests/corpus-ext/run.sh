@@ -50,12 +50,12 @@ norm() {
 # extract NAME: verify the archive and unpack it into $OUT/NAME/<topdir>.
 extract() {
   name=$1
-  line=$(grep "^$name	" tests/corpus-ext/manifest.tsv) || { say "no manifest entry: $name"; return 1; }
+  line=$(grep "^$name	" tests/corpus-ext/manifest.tsv) || { say "no manifest entry: $name"; echo "$name" >>"$OUT/.missing"; return 1; }
   file=$(printf '%s' "$line" | cut -f2); sum=$(printf '%s' "$line" | cut -f3)
   top=$(printf '%s' "$line" | cut -f4)
-  [ -s "$DL/$file" ] || { say "missing $DL/$file (download it on a networked machine)"; return 1; }
+  [ -s "$DL/$file" ] || { say "missing $DL/$file (download it on a networked machine)"; echo "$name" >>"$OUT/.missing"; return 1; }
   have=$(sha256sum "$DL/$file" | cut -d' ' -f1)
-  [ "$have" = "$sum" ] || { say "sha256 mismatch for $file: $have"; return 1; }
+  [ "$have" = "$sum" ] || { say "sha256 mismatch for $file: $have"; echo "$name" >>"$OUT/.missing"; return 1; }
   mkdir -p "$OUT/$name"
   case "$file" in
     *.src.rock)  # a zip holding the release tarball; no unzip on the boxes
@@ -65,7 +65,7 @@ n = [m for m in z.namelist() if m.endswith(".tar.gz")][0]
 sys.stdout.buffer.write(z.read(n))' "$DL/$file" | tar xz -C "$OUT/$name" ;;
     *) tar xzf "$DL/$file" -C "$OUT/$name" ;;
   esac
-  [ -d "$OUT/$name/$top" ] || { say "unexpected layout for $name"; return 1; }
+  [ -d "$OUT/$name/$top" ] || { say "unexpected layout for $name"; echo "$name" >>"$OUT/.missing"; return 1; }
   printf '%s' "$OUT/$name/$top"
 }
 
@@ -191,6 +191,11 @@ fi
 
 say "== corpus-ext summary =="
 say "  arms same $nsame, unexpected diffs $ndiff"
+if [ -s "$OUT/.missing" ]; then
+  # A partial corpus is not a pass either: every pinned library must run.
+  say "  libraries not run: $(sort -u "$OUT/.missing" | tr '\n' ' ')(fetch them with tests/corpus-ext/fetch.sh)"
+  fail=1
+fi
 if [ "$nsame" -eq 0 ] && [ "$ndiff" -eq 0 ]; then
   # Nothing compared is not a pass: usually the pinned sources are missing.
   say "  no corpus program ran (missing .dlcache? run tests/corpus-ext/fetch.sh)"

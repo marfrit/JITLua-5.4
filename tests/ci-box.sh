@@ -55,13 +55,13 @@ fi
 tests/ref/bin/lua54ref -v | head -1
 
 say "harness: modes A+B (port corpus)"
-stage 'tail -12' tests/harness.sh --mode both --corpus tests/d54 --timeout 120
+stage 'tail -12' tests/harness.sh --strict --mode both --corpus tests/d54 --timeout 120
 
 say "harness: mode B at opt levels 0..3"
-stage 'tail -12' tests/harness.sh --mode B --opt-levels 0,1,2,3 --corpus tests/d54 --timeout 120
+stage 'tail -12' tests/harness.sh --strict --mode B --opt-levels 0,1,2,3 --corpus tests/d54 --timeout 120
 
 say "harness: dump/reload (mode R)"
-stage 'tail -12' tests/harness.sh --mode R --corpus tests/d54 --timeout 120
+stage 'tail -12' tests/harness.sh --strict --mode R --corpus tests/d54 --timeout 120
 echo "=== lib checks ==="
 for j in -joff -jon; do timeout 120 ./src/luajit $j tests/lib/bit-checkint.lua || exit 1; done
 for j in -joff -jon; do timeout 120 ./src/luajit $j tests/lib/ffrec-54.lua || exit 1; done
@@ -70,7 +70,7 @@ for j in -joff -jon; do timeout 120 ./src/luajit $j tests/lib/ffrec-54.lua || ex
 for j in -joff -O0 -O3; do timeout 120 ./src/luajit $j tests/lib/math-random-jit.lua || exit 1; done
 
 say "harness: GC stress (pause 0 in every arm), int64 + close tests, modes A+B+R"
-stage 'tail -12' tests/harness.sh --mode all --opt-levels 0,3 --gc-stress --corpus tests/d54 \
+stage 'tail -12' tests/harness.sh --strict --mode all --opt-levels 0,3 --gc-stress --corpus tests/d54 \
   --filter 'i64_' --filter 'close_' --filter 'coro_' --filter 'gc_' --filter 'bits_' --timeout 300
 
 say "JIT tooling smoke (-jv/-jdump/-jbc/-jp over the int64 tests)"

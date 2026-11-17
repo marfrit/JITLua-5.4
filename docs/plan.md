@@ -1,4 +1,4 @@
-# LuaJIT-5.4 — master execution plan
+# JITLua-5.4 — master execution plan
 
 Companion to `MISSION.md`. Tracks every phase as concrete tasks with
 dependencies, verification gates and status. Read `docs/phase0-status.md` for

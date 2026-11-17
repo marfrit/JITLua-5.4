@@ -1,7 +1,7 @@
 # Lua 5.4 semantic delta — checklist → test map (MISSION §4)
 
 Status: Phase 0 (M0). Every box below has at least one differential test.
-Tests **print** behavior; the harness compares PUC-Lua 5.4.7 (oracle) vs our
+Tests **print** behavior; the harness compares PUC-Lua 5.4.9 (oracle) vs our
 interpreter (`-joff`, mode A) and our JIT (`-jon`, mode B), plus dump/reload (mode R).
 Run: `tests/harness.sh --mode all`. Expected failures: `tests/known-bad.tsv`.
 
@@ -55,7 +55,7 @@ Run: `tests/harness.sh --mode all`. Expected failures: `tests/known-bad.tsv`.
 | weak tables (k/v), `__gc`, cycles, resurrection | `gc_01_tbc_gc.lua` |
 | GC-pressure fuzzing | `tests/fuzz/fuzz.py --gc` |
 
-## MISSION errata (verified against PUC-Lua 5.4.7)
+## MISSION errata (verified against PUC-Lua 5.4.9)
 Details and probe results: `docs/phase0-status.md`. Summary: no underscore
 separators, no `0b` literals, `table.create` is not PUC 5.4, `%g`/`tostring` use
 `%.14g` (not shortest round-trip), bitwise accepts exactly-representable floats,

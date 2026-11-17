@@ -1,5 +1,5 @@
 --! §4.1 two number types; math.type; integer vs float rendering
--- Differential test: prints behavior, harness compares PUC 5.4.7 vs ours.
+-- Differential test: prints behavior, harness compares PUC 5.4.9 vs ours.
 -- Parseable by Lua 5.1 (no 5.4-only syntax) so mode A gives semantic diffs.
 
 local function p(...)

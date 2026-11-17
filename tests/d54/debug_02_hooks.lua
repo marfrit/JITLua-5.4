@@ -1,4 +1,4 @@
----! 5.4 debug hooks (derived from PUC-Lua 5.4.7 testes/db.lua): line events
+---! 5.4 debug hooks (derived from PUC-Lua 5.4.9 testes/db.lua): line events
 ---! (if/then, loops, large line gaps, no event for the sethook line, entry and
 ---! return rules), call/return/"tail call" events incl. C functions, fast
 ---! functions, pcall/xpcall, coroutine.wrap and debug.sethook itself,

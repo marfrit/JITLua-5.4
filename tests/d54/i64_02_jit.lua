@@ -1,6 +1,6 @@
 --! §4.1 64-bit integers in traces (ADR-001b step 3). Every loop below is hot
 --! enough to be compiled; mode B compares the JIT against the interpreter and
---! mode A the interpreter against PUC 5.4.7, so the printed values pin down
+--! mode A the interpreter against PUC 5.4.9, so the printed values pin down
 --! the int64 IR paths: int64 slots (widened inline and boxed), int32 -> int64
 --! widening on overflow, narrowing back to int32, loop PHIs of both kinds,
 --! trace exits with int64 live values and constants, trace tails that store

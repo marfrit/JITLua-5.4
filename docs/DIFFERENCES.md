@@ -51,13 +51,21 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   See `docs/bug-bit-shift-arm64.md`; `tests/lib/bit-checkint.lua` is the
   regression test.
 
-- `PENDING` `math.lua` mode B on x64: intermittent SIGSEGV/hang in the
-  `math.random` statistics loops; first logical change `ad283709`; minimal repro
-  `tests/lib/math-jit-repro.lua`; crash RIP `lj_tab_newkey:519`.
+- `FIXED` `math.lua` mode B on x64: intermittent SIGSEGV/hang in the
+  `math.random` statistics loops. x64 backend width bug: the checked
+  `int64->int32` CONV left a sign extension in the register and HREF/NEWREF
+  OR-ed the type tag into it, so negative int32 keys corrupted the hash
+  part. See `docs/bug-math-random-jit.md`; `tests/lib/math-random-jit.lua` is
+  the regression test.
 - `PENDING` `closure.lua` mode B on arm64: JIT-on exceeds 600 s while JIT-off
   passes (PERF triage).
 - `PENDING` `heavy.lua` needs near 8 GiB in the PUC reference and OOM-kills an
   8 GiB box; excluded from the default corpus, explicit `--include-heavy` stage.
+- `PENDING` Classic benchmarks slower than stock 2.1 (>10%): deltablue both
+  arches (missing-metamethod trace loss), spectral-norm x64 (integer-loop
+  guards/CONVs), k-nucleotide x64 (`__index`/string-key path); see
+  `docs/perf-regression-2026-11-17.md` and `docs/bench-classic-2026-11-17.md`.
+
 
 ## Against stock LuaJIT 2.1
 
@@ -83,6 +91,21 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
 - `EXTENSION` `jit.*`, `bit.*`, `ffi`/cdata, `bcsave`, `-j`/`-O`/`-b` options.
 - `EXTENSION` FFI int64/uint64 cdata and bit operations on cdata; intended
   semantics are in `docs/ffi-int-semantics.md` (tests `ffi_int_*`, modes B/R).
+- `FORK` Native 5.4 integers in `bit.*` follow a hybrid rule (Markus,
+  2026-11-17). A call whose arguments are all numbers (int32, widened/boxed
+  int64, floats, numeric strings) keeps stock semantics: every operand wraps
+  modulo 2^32 and the result is an int32 (`bit.band(2^32+1, 0xffffffff00000000)`
+  → 0; exact 64-bit work uses `& | ~ << >>`). A call with a 64-bit cdata value
+  operand converts native integers with their exact 64-bit value, the way
+  stock converts a Lua number in a mixed call (`bit.band(uint64 max,
+  (1<<40)|0xff)` → `1099511628031ULL`, as with an `int64_t` partner). Shifts
+  and `tohex` decide by the value operand; a cdata shift count or digit count
+  does not promote. `-joff` and `-jon` agree (pure calls compile, mixed calls
+  with native int64 operands run in the interpreter). Details and mechanism in
+  `docs/ffi-int-semantics.md`; test `tests/lib/bit-checkint.lua`.
+- `EXTENSION` FFI source-literal suffixes `LL`, `ULL`/`LLU` and imaginary `i`
+  (`1LL`, `1ULL`, `0x10ULL`, `12.5i`) are accepted when FFI is compiled;
+  PUC 5.4 rejects them (`lex_03_ffi_suffix`).
 - `EXTENSION` LuaJIT's pattern-matching implementation and its string-buffer
   optimizations remain; 5.4 pattern behaviors are covered by `str_03_patterns`.
 - `EXTENSION` `string.dump` bytecode format and `-b`/`bcsave` are

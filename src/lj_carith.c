@@ -344,21 +344,17 @@ uint64_t lj_carith_check64(lua_State *L, int narg, CTypeID *id)
 		   (uint8_t *)&x, sp, CCF_ARG(narg));
     return x;
   } else if (tvisi64(o)) {
-    /* Boxed 5.4 integer: the bit library works on the low 32 bits. Store the
-    ** int32 back like a coerced string, so an FFH_RETRY of the asm fast
-    ** function finds a plain int32 instead of falling back forever. */
-    int32_t k = (int32_t)(uint32_t)i64V(o);
-    setintV(o, k);
-    return (uint32_t)k;
+    /* Boxed 5.4 integer: the exact 64-bit value, slot untouched. The caller
+    ** decides (lib_bit.c, hybrid rule): a 64-bit cdata partner uses the full
+    ** value through lj_cconv_ct_tv, a pure-number call wraps the slot to
+    ** int32 with bit_narrow_args() before its FFH_RETRY. */
+    return (uint64_t)i64V(o);
   } else if (!(tvisstr(o) && lj_strscan_number(strV(o), o))) {
     goto err;
   }
   if (LJ_LIKELY(tvisint(o))) {
-    /* Inline int32 or widened 47-bit: the low word holds the low 32 bits.
-    ** Normalize a widened value in place for the FFH_RETRY (see above). */
-    int32_t k = intV(o);
-    if (tvisi47w(o)) setintV(o, k);
-    return (uint32_t)k;
+    /* int32 zero-extended (stock); widened 47-bit exact (see above). */
+    return tvisi47w(o) ? (uint64_t)intV47(o) : (uint64_t)(uint32_t)intV(o);
   } else {
     return (uint32_t)lj_num2bit(numV(o));
   }

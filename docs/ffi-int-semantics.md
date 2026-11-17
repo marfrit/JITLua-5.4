@@ -66,6 +66,45 @@ exist. Measured 64-bit behavior:
   `tests/lib/bit-checkint.lua` (`-joff` and `-jon`), while the portable ffi_int
   test still asserts only `tohex` and `band/bor/bxor/bnot/tobit`.
 
+### Native 5.4 integers in bit.* (hybrid rule, decided 2026-11-17)
+
+A native integer is an int32, a widened 47-bit inline integer or an interned
+int64 box; `bit.*` never distinguishes the three.
+- **Pure-number call** (int32, widened/boxed int64, float, numeric string; no
+  64-bit cdata): stock semantics. Every operand wraps modulo 2^32 like
+  `bit.tobit`, the result is an int32. `bit.band((1<<40)|0xff, 0x0f)` → 15,
+  `bit.lshift((1<<40)+3, 1)` → 6, `bit.tobit(0xffffffff)` → -1,
+  `bit.tohex((1<<40)|0xff)` → `000000ff` (and `00000000000000ff` with 16
+  digits), `bit.band(2^32+1, 0xffffffff00000000)` → 0 while
+  `(2^32+1) & 0xffffffff00000000` → 4294967296. Exact 64-bit work uses the
+  5.4 operators.
+- **Mixed call** (a 64-bit cdata value operand): native integers take part
+  with their exact 64-bit value, the way stock converts a Lua number in a
+  mixed call; the result is cdata of the cdata operand's rank.
+  `bit.band(uint64 max, (1<<40)|0xff)` → `1099511628031ULL`, the same as with
+  an `int64_t` partner; `bit.bor((1<<40)|0xff, int64 1)` → `1099511628031LL`
+  (argument order does not matter); an int32 sign-extends
+  (`bit.band(uint64 max, -1)` → `18446744073709551615ULL`).
+- **Shifts and `tohex`** decide by the value operand, as stock does: the count
+  always wraps to int32. `bit.lshift(int64 1, (1<<40)+3)` → `8LL` (count
+  modulo 2^32 = 3); `bit.lshift((1<<40)+3, int64 1)` → 6 (int32 result);
+  `bit.tohex((1<<40)|0xff, int64 16)` → `00000000000000ff`.
+- Mechanism: `lj_carith_check64` returns the exact value and no longer writes
+  the slot; a pure call narrows widened/boxed slots in place
+  (`bit_narrow_args`, `src/lib_bit.c`) before `FFH_RETRY`, so the asm fast
+  function reruns on int32 instead of falling back again (the retry loop of
+  `6e4d7bb9`). Non-FFI builds (`LUAJIT_DISABLE_FFI`) narrow the same way in
+  `bit_checkbit`; note that such a build is not a supported configuration of
+  this fork anyway — its 5.4 operators keep the legacy 32-bit path in
+  `lj_meta_bitop` (`1<<40` evaluates to 256 there).
+- JIT: the bit library records through `lj_opt_narrow_bitop` (TOBIT for
+  floats, truncating `CONV int.i64` for widened/boxed, STRTO for strings), so
+  pure calls with any operand type compile and match `-joff`. Mixed calls with
+  a native int64 operand leave the trace (`crec_ct_tv` has no IRT_I64 source)
+  and run in the interpreter with the same result. The 5.4 operators keep
+  `lj_opt_narrow_tobit`, which only accepts int32 (exact semantics; float
+  operands of `&`/`|` stay in the interpreter).
+
 ## Tests and gate
 
 Each test is a purposeful differential/self-check in modes B (JIT on/off) and

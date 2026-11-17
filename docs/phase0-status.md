@@ -1505,12 +1505,13 @@ ffi_int_* 6 PASS / 0 FAIL per box on arm64 and x86_64 (B,R).
 ## Session 50 — DIFFERENCES.md (docs-only)
 
 `docs/DIFFERENCES.md` lists recorded, user-facing divergences only. Against PUC
-Lua 5.4.9 there are 17 entries: FORK 2 (interning/%p identity, private dump
+Lua 5.4.9 there are 20 entries: FORK 2 (interning/%p identity, private dump
 format); PENDING 6 (arbitrary `_ENV`, pcall/`__call` VM work, tail error names,
 istailcall without hook, `lua_setcstacklimit`, >1 userdata values);
 IMPL-DEFINED 4 (sparse-table border, table `__gc`, `__close` debug/yield
-corners); EXTENSION 1 (`table.create`); plus four known JIT/PERF rows (math
-random, closure, heavy, arm64 bit shifts). Against stock LuaJIT 2.1 there are 10 entries: added 5.4
+corners); EXTENSION 1 (`table.create`); plus seven known JIT/PERF rows (math
+random, closure, heavy, arm64 bit shifts fixed, deltablue, spectral-norm,
+k-nucleotide). Against stock LuaJIT 2.1 there are 10 entries: added 5.4
 language/VM and stdlib/C-API surface, getfenv/setfenv kept, jit/bit/FFI/bcsave
 kept, strict ASCII identifiers, FFI cdata semantics reference. Implemented
 parity features are deliberately not listed. Sources: MISSION.md,
@@ -1555,9 +1556,61 @@ faster (1.27), so that earlier row was noise; arm deltablue rerun improves to
 0.76 but remains. x64 checkint still has the widened test but no bit/tobit
 calls are in these hot traces. Diagnosis only; Fable owns fixes.
 
-## Session 54 — `__index` regression item: alias-analysis miscompilation, io.lines, x64 checkint
+## Session 54 — x64 math.random JIT crash (known-bad math B) fixed
 
-Branch `jit-index-chain`. Verified DeepSeek's two findings from Session 53
+Root cause is not the key representation but an x64 register-width bug:
+the checked `int64->int32` CONV (`lj_asm_x86.h` asm_conv, `movsxd; cmp; jne`)
+left the sign extension in the result register, while `asm_href` and
+`asm_tvptr` (NEWREF's `cTValue *key`) build the key word as
+`(LJ_TISNUM<<47) | reg64`, assuming a zero-extended int32 register. A
+negative `math.random(lo,up)` result used as a table key therefore became a
+nil-tagged garbage key: HREF missed the interpreter's node, NEWREF inserted a
+node whose `hashkey()` disagrees with its position, and the collision-chain
+walk at `lj_tab_newkey:519` crashed or spun. Same family as `adc0eb97`
+(snapshot restore). Positive ranges never failed (`aux(1,32)` 0/20);
+`aux(-40,-1)` failed 20/20. arm64 is immune: its checked CONV ends in a
+32-bit `mov` and `asm_tvstore64` uses `UXTW`.
+
+Fix: the CONV re-materializes its result with a 32-bit `mov` (restores the
+backend invariant for every consumer), and `asm_tvptr` writes an int32 key
+as two 32-bit stores like ASTORE/HSTORE. Regression
+`tests/lib/math-random-jit.lua` (ranges with negative keys, seeded, 20
+rounds, plus a trace-stored/interpreter-read count) runs in ci-box under
+`-joff`, `-O0`, `-O3` with a timeout; it fails on the unfixed tree and
+passes after. Repro 50x at -O0 and -O3: 0 failures (before: 17/20 at -O3,
+20/20 at -O0). Known-bad math B removed; `puc54/math.lua` mode B passes on
+x64. Dossier updated with the root cause.
+
+## Session 55 — bit.* hybrid rule for native 5.4 integers (branch `bit-hybrid`)
+
+Review of `6e4d7bb9` (Fable) found that `lj_carith_check64` truncated widened
+and boxed 5.4 integers to 32 bits and wrote them back, so a native int64 lost
+its high bits even next to a 64-bit cdata (`bit.band(uint64 max, (1<<40)|0xff)`
+→ `255ULL`), undocumented and inconsistent with the cdata path and with `&`.
+Markus decided the hybrid rule (DIFFERENCES.md, ffi-int-semantics.md): pure-
+number calls wrap modulo 2^32 (stock); a 64-bit cdata value operand promotes
+native integers to their exact value; shifts/tohex decide by the value operand.
+Commits: `941260e1` interpreter (`lj_carith_check64` returns the exact value,
+`bit_narrow_args` narrows slots before `FFH_RETRY`, tohex masks, non-FFI
+`bit_checkbit` normalizes), `9eaa36c2` JIT (`lj_opt_narrow_bitop`: TOBIT for
+floats, `CONV int.i64` for widened/boxed; bit ffids admitted by the IRT_I64
+gate in `lj_ffrecord_func`; `lj_opt_narrow_tobit` comment corrected — it serves
+the 5.4 operators), `f4396401` tests (`bit-checkint.lua` pcall per row, hash
+`cb2f6da2`, mixed rows, widened/boxed/float/mixed hot loops; ci-box `timeout`).
+Measured on both boxes: `bit-checkint` green `-joff`/`-jon`; 24-input × 14-op
+differential interpreter vs hot loop identical; `-jv` shows compiled traces for
+widened, boxed, float and table-loaded operands (no `bad argument type`);
+mixed-call output `-joff == -jon`; d54 `ffi_int_*`/`bits_*` 6/6. Gate
+`tests/ci-box.sh` green on both boxes — arm64: A+B 114 PASS/5 XFAIL, B@0-3 244, R 61, GC-stress 59/1 XFAIL, jitutil 30 ok, corpus-ext 0 diffs, C API 112+14 checks 0 failures, fuzz 160/0; x86_64: the same numbers (114/5, 244, 61, 59/1, 30, 0 diffs, 112+14/0, 160/0).
+Open: mixed calls with a native int64 operand run in the interpreter
+(`crec_ct_tv` has no IRT_I64 source branch); a `-DLUAJIT_DISABLE_FFI` build
+is not a supported configuration (its 5.4 operators are 32-bit:
+`lj_meta_bitop` legacy path) although `bit.*` itself is correct there; the
+`ULL` literal regression (`98f99180`) is DeepSeek's on main.
+
+## Session 56 — `__index` regression item: alias-analysis miscompilation, io.lines, x64 checkint
+
+Branch `jit-index-chain` (merged onto 2abfe5f5). Verified DeepSeek's two findings from Session 53
 before changing code; both root causes turned out to be elsewhere than the
 hypotheses said. Full account in `docs/perf-regression-2026-11-17.md`.
 

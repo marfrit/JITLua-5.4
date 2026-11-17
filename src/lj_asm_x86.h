@@ -975,6 +975,13 @@ static void asm_conv(ASMState *as, IRIns *ir)
 	*/
 	Reg left = ra_alloc1(as, lref, RSET_GPR);
 	Reg t = dest == left ? ra_scratch(as, rset_exclude(RSET_GPR, dest)) : dest;
+	/* The backend relies on int32 registers being zero-extended (32 bit
+	** ops clear the upper half): HREF/NEWREF OR the type tag into the
+	** 64 bit register and the unchecked int32->int64 zero extension is
+	** a no-op. The sign extension from movsxd must not survive the guard,
+	** so the result is re-materialized with a 32 bit mov (executed last).
+	*/
+	emit_rr(as, XO_MOV, dest, left);
 	asm_guardcc(as, CC_NE);
 	emit_rr(as, XO_CMP, t|REX_64, left);
 	emit_rr(as, XO_MOVSXd, t|REX_64, left);
@@ -1128,6 +1135,15 @@ static void asm_tvptr(ASMState *as, Reg dest, IRRef ref, MSize mode)
 	tmp = ra_scratch(as, rset_exclude(RSET_GPR, dest));
 	emit_rmro(as, XO_MOVto, tmp|REX_64, dest, 0);
 	emit_loadu64(as, tmp, k.u64);
+      } else if (LJ_DUALNUM && !irt_is64(ir->t) && irt_isinteger(ir->t)) {
+	/* int32: two 32 bit stores, like ASTORE/HSTORE and the snapshot
+	** restore, so the key word never depends on the register's upper
+	** half (the checked int64->int32 CONV used to leave a sign extension
+	** there, which turned negative keys into nil-tagged garbage for
+	** lj_tab_newkey). */
+	Reg src = ra_alloc1(as, ref, rset_exclude(RSET_GPR, dest));
+	emit_movmroi(as, dest, 4, LJ_TISNUM << 15);
+	emit_movtomro(as, src, dest, 0);
       } else {
 	RegSet allow = rset_exclude(RSET_GPR, dest);
 	Reg src = ra_alloc1(as, ref, allow);
@@ -1324,7 +1340,9 @@ static void asm_href(ASMState *as, IRIns *ir, IROp merge)
   emit_sfixup(as, l_loop);
 #if LJ_GC64
   if (!isk && (irt_isaddr(kt) || irt_isinteger(kt))) {
-    /* Tagged key word; an int32 key register is zero-extended (32 bit ops). */
+    /* Tagged key word. An int32 key register is zero-extended: 32 bit ops
+    ** clear the upper half and the checked int64->int32 CONV re-materializes
+    ** its result with a 32 bit mov (see asm_conv). */
     emit_rr(as, XO_OR, tmp|REX_64, key);
     emit_loadu64(as, tmp, (uint64_t)irt_toitype(kt) << 47);
   }

@@ -98,7 +98,7 @@ Not a string-interning change.
 - String interning: both stock and ours intern; k's delta is the table/__index
   lookup path, not interning itself.
 
-## Outcome (Session 54, branch `jit-index-chain`)
+## Outcome (Session 56, branch `jit-index-chain`)
 
 Both hypotheses above were verified before changing code; both root causes
 are elsewhere than stated.
@@ -177,7 +177,7 @@ interpreter on both arches (looped kernels on the real input:
   in-script phase timings (startup 1.29 vs 1.32 ms, readlines, f1..K18 at
   parity with -jon) do not contain; it is after the script (lua_close /
   teardown) or in output. Measured next with os.exit(0,false) vs normal exit
-  and strace -c (job queued at the time of writing; see Session 54 numbers).
+  and strace -c (job queued at the time of writing; see Session 56 numbers).
 - arm k-nucleotide: the box is bimodal (both binaries 1.6x slower in some
   runs); phase timings are at parity in the fast mode. The Session 53 "1.27"
   row and a 29 vs 17 ms run seen here are both that noise.

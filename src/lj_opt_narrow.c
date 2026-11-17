@@ -479,15 +479,34 @@ TRef LJ_FASTCALL lj_opt_narrow_toint(jit_State *J, TRef tr)
   return narrow_stripov(J, tr, IR_MULOV, (IRT_INT<<5)|IRT_INT|IRCONV_TOBIT);
 }
 
-/* Narrow conversion to bitop operand (overflow wrapped). */
+/* Narrow conversion to a 5.4 bitwise-operator operand (& | ~ << >>). The
+** recorder routes int64 operands (widened/boxed, IRT_I64) to rec_i64_bitop
+** before calling this, and a float operand must convert exactly or raise
+** ("number has no integer representation"), so anything but an int32 is left
+** to the interpreter. Not for the bit.* library: see lj_opt_narrow_bitop. */
 TRef LJ_FASTCALL lj_opt_narrow_tobit(jit_State *J, TRef tr)
 {
   if (tref_isstr(tr))
     tr = emitir(IRTG(IR_STRTO, IRT_NUM), tr, 0);
   if (!tref_isinteger(tr))
-    lj_trace_err(J, LJ_TRERR_BADTYPE);  /* 5.4: exact int64 bit semantics */
+    lj_trace_err(J, LJ_TRERR_BADTYPE);
   /* Keep the overflow guards: a guarded int is proven int32 at the use, so
   ** the bit operand is exact there; an overflow exits to the interpreter. */
+  return tr;
+}
+
+/* Narrow conversion to a bit.* library operand: stock semantics, modulo 2^32.
+** Floats via TOBIT, 5.4 int64 operands (IRT_I64) truncated to the low 32 bits,
+** strings via STRTO. Mirrors lj_carith_check64 + bit_narrow_args (lib_bit.c)
+** for the pure-number call; a 64-bit cdata partner takes the crec path. */
+TRef LJ_FASTCALL lj_opt_narrow_bitop(jit_State *J, TRef tr)
+{
+  if (tref_isstr(tr))
+    tr = emitir(IRTG(IR_STRTO, IRT_NUM), tr, 0);
+  if (tref_type(tr) == IRT_I64)
+    return emitir(IRTI(IR_CONV), tr, IRCONV_INT_I64);
+  if (!tref_isinteger(tr))
+    tr = emitir(IRTI(IR_TOBIT), tr, lj_ir_knum_tobit(J));
   return tr;
 }
 

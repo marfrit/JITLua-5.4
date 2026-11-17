@@ -28,6 +28,28 @@
 
 #define LJLIB_MODULE_bit
 
+/* Hybrid rule for native 5.4 integers (docs/ffi-int-semantics.md): a call
+** whose arguments are all numbers keeps stock bit.* semantics, i.e. every
+** operand wraps modulo 2^32 and the result is an int32; a call with a 64-bit
+** cdata value operand converts native integers with their exact 64-bit value.
+**
+** The asm fast functions accept int32 and double slots only. For the
+** pure-number case a 5.4 integer outside int32 (widened inline or boxed) is
+** stored back as its low 32 bits before FFH_RETRY, so the retry runs the fast
+** path instead of falling back again. Mixed calls return a cdata result and
+** never retry, so their slots keep the exact value for lj_cconv_ct_tv.
+*/
+static void bit_narrow_args(lua_State *L)
+{
+  TValue *o;
+  for (o = L->base; o < L->top; o++) {
+    if (tvisi47w(o))
+      setintV(o, intV(o));  /* Low word of the widened form. */
+    else if (tvisi64(o))
+      setintV(o, (int32_t)(uint32_t)i64V(o));
+  }
+}
+
 #if LJ_HASFFI
 static int bit_result64(lua_State *L, CTypeID id, uint64_t x)
 {
@@ -37,18 +59,24 @@ static int bit_result64(lua_State *L, CTypeID id, uint64_t x)
   return FFH_RES(1);
 }
 #else
+/* Non-FFI build: every argument wraps modulo 2^32 and is normalized in place
+** (int32 slot) for the FFH_RETRY of the asm fast function. */
 static int32_t bit_checkbit(lua_State *L, int narg)
 {
   TValue *o = L->base + narg-1;
-  if (!(o < L->top && lj_strscan_numberobj(o)))
+  int32_t i;
+  if (!(o < L->top && lj_strscan_numberobj64(L, o)))
     lj_err_argt(L, narg, LUA_TNUMBER);
   if (LJ_LIKELY(tvisint(o))) {
-    return tvisi47w(o) ? (int32_t)intV47(o) : intV(o);
+    if (!tvisi47w(o)) return intV(o);
+    i = intV(o);  /* Widened: low word. */
+  } else if (tvisi64(o)) {
+    i = (int32_t)(uint32_t)i64V(o);
   } else {
-    int32_t i = lj_num2bit(numV(o));
-    if (LJ_DUALNUM) setintV(o, i);
-    return i;
+    i = lj_num2bit(numV(o));
   }
+  setintV(o, i);
+  return i;
 }
 #endif
 
@@ -59,7 +87,7 @@ LJLIB_ASM(bit_tobit)		LJLIB_REC(bit_tobit)
   setintV(L->base-1-LJ_FR2, (int32_t)lj_carith_check64(L, 1, &id));
   return FFH_RES(1);
 #else
-  lj_lib_checknumber(L, 1);
+  bit_checkbit(L, 1);
   return FFH_RETRY;
 #endif
 }
@@ -69,9 +97,11 @@ LJLIB_ASM(bit_bnot)		LJLIB_REC(bit_unary IR_BNOT)
 #if LJ_HASFFI
   CTypeID id = 0;
   uint64_t x = lj_carith_check64(L, 1, &id);
-  return id ? bit_result64(L, id, ~x) : FFH_RETRY;
+  if (id) return bit_result64(L, id, ~x);
+  bit_narrow_args(L);
+  return FFH_RETRY;
 #else
-  lj_lib_checknumber(L, 1);
+  bit_checkbit(L, 1);
   return FFH_RETRY;
 #endif
 }
@@ -81,9 +111,11 @@ LJLIB_ASM(bit_bswap)		LJLIB_REC(bit_unary IR_BSWAP)
 #if LJ_HASFFI
   CTypeID id = 0;
   uint64_t x = lj_carith_check64(L, 1, &id);
-  return id ? bit_result64(L, id, lj_bswap64(x)) : FFH_RETRY;
+  if (id) return bit_result64(L, id, lj_bswap64(x));
+  bit_narrow_args(L);
+  return FFH_RETRY;
 #else
-  lj_lib_checknumber(L, 1);
+  bit_checkbit(L, 1);
   return FFH_RETRY;
 #endif
 }
@@ -94,14 +126,15 @@ LJLIB_ASM(bit_lshift)		LJLIB_REC(bit_shift IR_BSHL)
   CTypeID id = 0, id2 = 0;
   uint64_t x = lj_carith_check64(L, 1, &id);
   int32_t sh = (int32_t)lj_carith_check64(L, 2, &id2);
-  if (id) {
+  if (id) {  /* The value operand decides; the count always wraps to int32. */
     x = lj_carith_shift64(x, sh, curr_func(L)->c.ffid - (int)FF_bit_lshift);
     return bit_result64(L, id, x);
   }
+  bit_narrow_args(L);
   setintV(L->base+1, sh);
   return FFH_RETRY;
 #else
-  lj_lib_checknumber(L, 1);
+  bit_checkbit(L, 1);
   bit_checkbit(L, 2);
   return FFH_RETRY;
 #endif
@@ -130,10 +163,11 @@ LJLIB_ASM(bit_band)		LJLIB_REC(bit_nary IR_BAND)
     } while (++o < top);
     return bit_result64(L, id, y);
   }
+  bit_narrow_args(L);
   return FFH_RETRY;
 #else
   int i = 0;
-  do { lj_lib_checknumber(L, ++i); } while (L->base+i < L->top);
+  do { bit_checkbit(L, ++i); } while (L->base+i < L->top);
   return FFH_RETRY;
 #endif
 }
@@ -149,6 +183,7 @@ LJLIB_CF(bit_tohex)		LJLIB_REC(.)
   uint64_t b = lj_carith_check64(L, 1, &id);
   int32_t n = L->base+1>=L->top ? (id ? 16 : 8) :
 				  (int32_t)lj_carith_check64(L, 2, &id2);
+  if (!id) b = (uint32_t)b;  /* Native value operand: modulo 2^32. */
 #else
   uint32_t b = (uint32_t)bit_checkbit(L, 1);
   int32_t n = L->base+1>=L->top ? 8 : bit_checkbit(L, 2);

@@ -746,8 +746,10 @@ LJLIB_CF(coroutine_create)
 
 LJLIB_ASM(coroutine_yield)
 {
-  /* 5.4 raises this without a source location (PUC lua_yieldk wording). */
-  lj_err_msg(L, LJ_ERR_CYIELD);
+  /* 5.4 raises this without a source location (PUC lua_yieldk wording):
+  ** "across a C-call boundary" inside a coroutine, "outside a coroutine"
+  ** only on the main thread. */
+  lj_err_msg(L, L != mainthread(G(L)) ? LJ_ERR_CYIELDK : LJ_ERR_CYIELD);
   return FFH_UNREACHABLE;
 }
 

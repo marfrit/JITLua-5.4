@@ -1641,8 +1641,10 @@ LUA_API int lua_pcallk(lua_State *L, int nargs, int nresults, int errfunc,
   int status;
   UNUSED(ctx); UNUSED(k);
   status = lua_pcall(L, nargs, nresults, errfunc);
-  if (status == LUA_YIELD) {  /* No C continuation: refuse instead of returning. */
-    lj_err_msg(L, LJ_ERR_CYIELDK);
+  if (status == LUA_YIELD) {
+    /* Not reachable: lua_pcall never returns LUA_YIELD. If it ever did, a
+    ** throw here would unwind an unprotected API call, so report instead. */
+    lua_pushliteral(L, "attempt to yield across a C-call boundary");
     return LUA_ERRRUN;
   }
   return status;
@@ -1733,7 +1735,10 @@ LUA_API int lua_yield(lua_State *L, int nresults)
 #endif
     }
   }
-  lj_err_msg(L, LJ_ERR_CYIELD);
+  /* 5.4 wording: inside a coroutine the yield is blocked by a C-call
+  ** boundary (pcall of a C function, a sort/gsub callback); only the main
+  ** thread is "outside a coroutine". */
+  lj_err_msg(L, L != mainthread(g) ? LJ_ERR_CYIELDK : LJ_ERR_CYIELD);
   return 0;  /* unreachable */
 }
 

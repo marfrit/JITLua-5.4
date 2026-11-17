@@ -619,7 +619,8 @@ static void test_continuations(void)
        "yield over lua_pcallk returns LUA_ERRRUN");
     lua_pushvalue(co, -1);
     lua_xmove(co, L, 1);
-    check_err(L, "attempt to yield", "yield over lua_pcallk error wording");
+    check_err(L, "attempt to yield across a C-call boundary",
+              "yield over lua_pcallk error wording");
     lua_pop(L, 1);
   }
   lua_pop(L, 1);

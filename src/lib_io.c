@@ -226,17 +226,39 @@ static int io_file_readnum(lua_State *L, FILE *fp)
   return 0;
 }
 
+/* 5.4 read_line keeps embedded zero bytes, so fgets() (which cannot report
+** how much it stored) is out. A locked getc() per byte made io.lines()
+** 2x slower than stock; POSIX getline() returns the byte count and scans
+** with memchr, so it keeps stock's speed. Other targets read byte-wise.
+*/
 static int io_file_readline(lua_State *L, FILE *fp, MSize chop)
 {
   MSize m = LUAL_BUFFERSIZE, n = 0;
   int c = EOF;
-  char *buf = lj_buf_tmp(L, m);
+  char *buf;
+#if LJ_TARGET_POSIX
+  {
+    char *lp = NULL;
+    size_t cap = 0;
+    ssize_t len = getline(&lp, &cap, fp);
+    if (len > 0) {
+      n = (MSize)len;
+      if (lp[n-1] == '\n') { c = '\n'; n--; }
+    }
+    buf = lj_buf_tmp(L, n + 1);
+    if (n) memcpy(buf, lp, n);
+    free(lp);
+    m = n + 1;
+  }
+#else
+  buf = lj_buf_tmp(L, m);
   for (;;) {
     c = getc(fp);
     if (c == EOF || c == '\n') break;
     if (n >= m) { m += m; buf = lj_buf_tmp(L, m); }
     buf[n++] = (char)c;  /* keeps embedded zero bytes */
   }
+#endif
   if (chop == 0 && c == '\n') {  /* 'L' keeps the end-of-line */
     if (n >= m) { m += m; buf = lj_buf_tmp(L, m); }
     buf[n++] = '\n';

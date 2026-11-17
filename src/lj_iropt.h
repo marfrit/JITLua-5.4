@@ -144,6 +144,7 @@ LJ_FUNC TRef LJ_FASTCALL lj_opt_narrow_convert(jit_State *J);
 LJ_FUNC TRef LJ_FASTCALL lj_opt_narrow_index(jit_State *J, TRef key);
 LJ_FUNC TRef LJ_FASTCALL lj_opt_narrow_toint(jit_State *J, TRef tr);
 LJ_FUNC TRef LJ_FASTCALL lj_opt_narrow_tobit(jit_State *J, TRef tr);
+LJ_FUNC TRef LJ_FASTCALL lj_opt_narrow_bitop(jit_State *J, TRef tr);
 #if LJ_HASFFI
 LJ_FUNC TRef LJ_FASTCALL lj_opt_narrow_cindex(jit_State *J, TRef key);
 #endif

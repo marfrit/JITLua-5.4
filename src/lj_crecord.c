@@ -1902,7 +1902,7 @@ int recff_bit64_shift(jit_State *J, TRef *rb, TRef *rc,
   if (id) {
     TRef tr = crec_bit64_arg(J, ctype_get(cts, id), *rb, rbv);
     IRType t;
-    if (!tsh) tsh = lj_opt_narrow_tobit(J, *rc);
+    if (!tsh) tsh = lj_opt_narrow_bitop(J, *rc);
     t = tref_isinteger(tsh) ? IRT_INT : tref_type(tsh);
     if (!(op < IR_BROL ? LJ_TARGET_MASKSHIFT : LJ_TARGET_MASKROT) &&
 	!tref_isk(tsh))
@@ -1933,7 +1933,7 @@ TRef recff_bit64_tohex(jit_State *J, RecordFFData *rd, TRef hdr)
     if (id2)
       trsf = crec_bit64_arg(J, ctype_get(cts, CTID_INT32), trsf, &rd->argv[1]);
     else
-      trsf = lj_opt_narrow_tobit(J, trsf);
+      trsf = lj_opt_narrow_bitop(J, trsf);
     emitir(IRTGI(IR_EQ), trsf, lj_ir_kint(J, n));  /* Specialize to n. */
   } else {
     n = id ? 16 : 8;
@@ -1947,7 +1947,7 @@ TRef recff_bit64_tohex(jit_State *J, RecordFFData *rd, TRef hdr)
       tr = emitir(IRT(IR_BAND, IRT_U64), tr,
 		  lj_ir_kint64(J, ((uint64_t)1 << 4*n)-1));
   } else {
-    tr = lj_opt_narrow_tobit(J, J->base[0]);
+    tr = lj_opt_narrow_bitop(J, J->base[0]);
     if (n < 8)
       tr = emitir(IRTI(IR_BAND), tr, lj_ir_kint(J, (int32_t)((1u << 4*n)-1)));
     tr = emitconv(tr, IRT_U64, IRT_INT, 0);  /* No sign-extension. */

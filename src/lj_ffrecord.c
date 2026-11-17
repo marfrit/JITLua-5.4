@@ -869,7 +869,7 @@ static void LJ_FASTCALL recff_bit_tobit(jit_State *J, RecordFFData *rd)
 #if LJ_HASFFI
   if (tref_iscdata(tr)) { recff_bit64_tobit(J, rd); return; }
 #endif
-  J->base[0] = lj_opt_narrow_tobit(J, tr);
+  J->base[0] = lj_opt_narrow_bitop(J, tr);
   UNUSED(rd);
 }
 
@@ -880,7 +880,7 @@ static void LJ_FASTCALL recff_bit_unary(jit_State *J, RecordFFData *rd)
   if (recff_bit64_unary(J, rd))
     return;
 #endif
-  J->base[0] = emitir(IRTI(rd->data), lj_opt_narrow_tobit(J, J->base[0]), 0);
+  J->base[0] = emitir(IRTI(rd->data), lj_opt_narrow_bitop(J, J->base[0]), 0);
 }
 
 /* Record N-ary bit.band, bit.bor, bit.bxor. */
@@ -891,11 +891,11 @@ static void LJ_FASTCALL recff_bit_nary(jit_State *J, RecordFFData *rd)
     return;
 #endif
   {
-    TRef tr = lj_opt_narrow_tobit(J, J->base[0]);
+    TRef tr = lj_opt_narrow_bitop(J, J->base[0]);
     uint32_t ot = IRTI(rd->data);
     BCReg i;
     for (i = 1; J->base[i] != 0; i++)
-      tr = emitir(ot, tr, lj_opt_narrow_tobit(J, J->base[i]));
+      tr = emitir(ot, tr, lj_opt_narrow_bitop(J, J->base[i]));
     J->base[0] = tr;
   }
 }
@@ -908,8 +908,8 @@ static void LJ_FASTCALL recff_bit_shift(jit_State *J, RecordFFData *rd)
     return;
 #endif
   {
-    TRef tr = lj_opt_narrow_tobit(J, J->base[0]);
-    TRef tsh = lj_opt_narrow_tobit(J, J->base[1]);
+    TRef tr = lj_opt_narrow_bitop(J, J->base[0]);
+    TRef tsh = lj_opt_narrow_bitop(J, J->base[1]);
     IROp op = (IROp)rd->data;
     if (!(op < IR_BROL ? LJ_TARGET_MASKSHIFT : LJ_TARGET_MASKROT) &&
 	!tref_isk(tsh))
@@ -1780,8 +1780,10 @@ void lj_ffrecord_func(jit_State *J)
     /* Handlers that only copy, compare or type-dispatch their arguments, or
     ** that understand an IRT_I64 argument (step 4: tostring/tonumber,
     ** string.format, math.abs/min/max, and the FP functions, which take the
-    ** int64 as a double like lj_lib_checknum does). */
-    int generic = ffid == FF_type || ffid == FF_select || ffid == FF_assert ||
+    ** int64 as a double like lj_lib_checknum does; the bit library, which
+    ** narrows it modulo 2^32 through lj_opt_narrow_bitop, hybrid rule). */
+    int generic = (ffid >= FF_bit_tobit && ffid <= FF_bit_tohex) ||
+		  ffid == FF_type || ffid == FF_select || ffid == FF_assert ||
 		  ffid == FF_pcall || ffid == FF_xpcall || ffid == FF_rawequal ||
 		  ffid == FF_rawget || ffid == FF_rawset ||
 		  ffid == FF_tostring || ffid == FF_tonumber ||

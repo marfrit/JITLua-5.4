@@ -240,15 +240,31 @@ static int io_file_readline(lua_State *L, FILE *fp, MSize chop)
   {
     char *lp = NULL;
     size_t cap = 0;
-    ssize_t len = getline(&lp, &cap, fp);
-    if (len > 0) {
-      n = (MSize)len;
-      if (lp[n-1] == '\n') { c = '\n'; n--; }
+    GCstr *s;
+    ssize_t len;
+    errno = 0;  /* getline leaves errno alone on a plain EOF. */
+    len = getline(&lp, &cap, fp);
+    if (len < 0) {  /* EOF or error: getline may still have allocated. */
+      int err = errno;
+      free(lp); lp = NULL;
+      if (err == ENOMEM) lj_err_mem(L);
+      len = 0;
+    } else if ((size_t)len > LJ_MAX_STR) {
+      free(lp);  /* MSize cannot hold the line; refuse like a huge string. */
+      lj_err_mem(L);
     }
-    buf = lj_buf_tmp(L, n + 1);
-    if (n) memcpy(buf, lp, n);
+    n = (MSize)len;
+    if (n && lp[n-1] == '\n') { c = '\n'; n--; }
+    /* Build the string straight from the getline buffer ('L' keeps the
+    ** newline) and free that buffer right after, before the GC step (which
+    ** can run finalizers that throw). An OOM inside lj_str_new itself
+    ** leaks at most this one line buffer. */
+    s = lj_str_new(L, lp ? lp : "", (chop == 0 && c == '\n') ? n + 1 : n);
     free(lp);
-    m = n + 1;
+    UNUSED(buf); UNUSED(m);
+    setstrV(L, L->top++, s);
+    lj_gc_check(L);
+    return (c == '\n' || n > 0);
   }
 #else
   buf = lj_buf_tmp(L, m);

@@ -1734,25 +1734,6 @@ From `origin/release-candidate` 5a9ac048. Four items, four commits:
   IRT_I64 calls lj_i64_abs; floor/ceil pass integer refs through and convert
   a rounded float to int32 under a guard (NaN/inf/outside-int32 exit to the
   interpreter; a rounded value outside int32 at record time is not recorded).
-  floor/ceil joined lj_ffrecord_funcs list of handlers that accept IRT_I64
-
-## Session 57 — release fixes from the pre-release review (branch `release-jit-fixes`)
-
-From `origin/release-candidate` 5a9ac048. Four items, four commits:
-- `f0b84fde` parse: unary `~` on constants folded through `lj_num2bit`
-  (modulo 2^32, no exactness): `~(2^40)` gave -1, `~(2^31)` 2147483647,
-  `~2.5` -3, `~(2^63)` -1 (PUC: -1099511627777, -2147483649, error, error).
-  Now folds only an exact integer operand whose `~` fits int32, like
-  `foldbitop`; everything else is a runtime BC_BNOT. `expr_bitV()` removed
-  (no other caller). `tests/d54/parse_fold_int.lua` extended; red in mode A
-  before.
-- `f78cc3b6` jit: the LJLIB_CF rewrites of type/rawlen/math.abs/floor/ceil
-  had lost their LJLIB_REC, so the recorders were dead code (-Wunused) and
-  every call stitched. Re-enabled with 5.4 result types: abs of an int32 is
-  sign-specialised (GE guard / LT guard + SUBOV so -(-2^31) exits), of an
-  IRT_I64 calls lj_i64_abs; floor/ceil pass integer refs through and convert
-  a rounded float to int32 under a guard (NaN/inf/outside-int32 exit to the
-  interpreter; a rounded value outside int32 at record time is not recorded).
   floor/ceil joined the lj_ffrecord_func list of handlers that accept IRT_I64
   arguments (that list aborted them with "bad argument type" first).
   `tests/lib/ffrec-54.lua` (ci-box lib check): root loop trace, no stitch

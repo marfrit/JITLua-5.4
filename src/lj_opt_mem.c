@@ -14,6 +14,7 @@
 #if LJ_HASJIT
 
 #include "lj_tab.h"
+#include "lj_i64.h"
 #include "lj_ir.h"
 #include "lj_jit.h"
 #include "lj_iropt.h"
@@ -100,6 +101,30 @@ int LJ_FASTCALL lj_opt_fwd_tptr(jit_State *J, IRRef lim)
   return fwd_aa_tab_clear(J, lim, ta);
 }
 
+/* Lua 5.4 integer keys (ADR-001b): stock 2.1 converts every integer hash
+** key to IRT_NUM before HREF/NEWREF, so "irt_isnum(key)" meant "this key
+** may be an array index or change the table length". This fork keeps hash
+** keys as IRT_INT (int32 range), IRT_I64 (outside int32) or an interned box
+** constant (IRT_UDATA KGC). The checks below must treat IRT_INT like a
+** number key, or a NEWREF/HSTORE with an int key is mistaken for a string
+** key: loads from a fresh table were folded to nil and ALEN was forwarded
+** across a store that changed the length (deltablue, k-nucleotide probes).
+** Float keys are guarded non-integral by the recorder but stay included;
+** that matches stock and only costs a forwarding opportunity.
+*/
+#define irt_isnumkey(t)		(irt_isnum(t) || irt_isint(t))
+
+/* Key type for hash disambiguation: an interned int64 box constant is the
+** same key as an IRT_I64 ref holding that value.
+*/
+static IRType aa_keytype(IRIns *key)
+{
+  if (key->o == IR_KGC && irt_type(key->t) == IRT_UDATA &&
+      gco2ud(ir_kgc(key))->udtype == UDTYPE_I64BOX)
+    return IRT_I64;
+  return irt_type(key->t);
+}
+
 /* Alias analysis for array and hash access using key-based disambiguation. */
 static AliasRet aa_ahref(jit_State *J, IRIns *refa, IRIns *refb)
 {
@@ -149,7 +174,7 @@ static AliasRet aa_ahref(jit_State *J, IRIns *refa, IRIns *refb)
     lj_assertJ((refa->o==IR_HREF || refa->o==IR_HREFK || refa->o==IR_NEWREF) &&
 	       (refb->o==IR_HREF || refb->o==IR_HREFK || refb->o==IR_NEWREF),
 	       "bad xREF IR op %d or %d", refa->o, refb->o);
-    if (!irt_sametype(keya->t, keyb->t))
+    if (aa_keytype(keya) != aa_keytype(keyb))
       return ALIAS_NO;  /* Different key types. */
   }
   if (ta == tb)
@@ -193,14 +218,14 @@ static TRef fwd_ahload(jit_State *J, IRRef xref)
 	IRRef ref2 = J->chain[IR_NEWREF];
 	while (ref2 > tab) {
 	  IRIns *newref = IR(ref2);
-	  if (irt_isnum(IR(newref->op2)->t))
+	  if (irt_isnumkey(IR(newref->op2)->t))
 	    goto cselim;
 	  ref2 = newref->prev;
 	}
       } else {
 	IRIns *key = IR(xr->op2);
 	if (key->o == IR_KSLOT) key = IR(key->op1);
-	if (irt_isnum(key->t) && J->chain[IR_NEWREF] > tab)
+	if (irt_isnumkey(key->t) && J->chain[IR_NEWREF] > tab)
 	  goto cselim;
       }
       /* NEWREF inhibits CSE for HREF, and dependent FLOADs from HREFK/AREF.
@@ -225,7 +250,10 @@ static TRef fwd_ahload(jit_State *J, IRRef xref)
 	cTValue *tv;
 	IRIns *key = IR(xr->op2);
 	if (key->o == IR_KSLOT) key = IR(key->op1);
-	lj_ir_kvalue(J->L, &keyv, key);
+	if (key->o == IR_KINT64)  /* A 5.4 integer constant, not FFI cdata. */
+	  lj_i64_toTValue(J->L, &keyv, (int64_t)ir_kint64(key)->u64);
+	else
+	  lj_ir_kvalue(J->L, &keyv, key);
 	tv = lj_tab_get(J->L, ir_ktab(IR(ir->op1)), &keyv);
 	if (tvispri(tv))
 	  return TREF_PRI(itype2irt(tv));
@@ -327,7 +355,7 @@ int LJ_FASTCALL lj_opt_fwd_href_nokey(jit_State *J)
   IRRef ref;
 
   /* The key for an ASTORE may end up in the hash part after a NEWREF. */
-  if (irt_isnum(fright->t) && J->chain[IR_NEWREF] > lim) {
+  if (irt_isnumkey(fright->t) && J->chain[IR_NEWREF] > lim) {
     ref = J->chain[IR_ASTORE];
     while (ref > lim) {
       if (ref < J->chain[IR_NEWREF])
@@ -408,7 +436,7 @@ TRef LJ_FASTCALL lj_opt_fwd_alen(jit_State *J)
     IRRef htab = xref->o == IR_HREFK ? IR(xref->op1)->op1 : xref->op1;
     if ((tab == htab || aa_table(J, tab, htab) != ALIAS_NO) &&
 	(xref->o == IR_NEWREF ||
-	 irt_isnum(key->o == IR_KSLOT ? IR(key->op1)->t : key->t))) {
+	 irt_isnumkey(key->o == IR_KSLOT ? IR(key->op1)->t : key->t))) {
       lim = ref;  /* Conflicting store found, limits search for ALEN. */
       break;
     }

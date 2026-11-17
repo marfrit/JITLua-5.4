@@ -77,6 +77,9 @@ if [ "$FORCE" = 1 ] || [ ! -x "$HERE/bin/lua54ref" ]; then
 fi
 "$HERE/bin/lua54ref" -v
 
+# Build PUC-5.4 libs/*.so fixtures for tests/corpus/puc54.
+. "$HERE/build-puc54-libs.sh"
+
 if [ "$CORPUS" = 1 ]; then
   fetch_advisory "$LUA_GH_URL" "$LUA_GH_SHA256" "$LUA_GH_TARBALL"
   rm -rf "$CACHE/lua-$LUA_VERSION"

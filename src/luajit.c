@@ -194,9 +194,10 @@ static int dostring(lua_State *L, const char *s, const char *name)
 
 static int dolibrary(lua_State *L, const char *name)
 {
-  /* PUC 5.4 -l semantics: 'global=module' names the global explicitly; without
-  ** '=', the module name (minus a '-suffix') names the global. The require
-  ** result is stored in that global. */
+  /* PUC 5.4 -l semantics: 'global=module' names the global explicitly;
+  ** without '=', the module name (minus a '-suffix') names the global.
+  ** The version suffix ('-vN') is stripped from both modname and gname
+  ** to match PUC 5.4 library resolution. */
   const char *eq = strchr(name, '=');
   const char *modname = eq ? eq+1 : name;
   const char *gname = name;
@@ -204,6 +205,11 @@ static int dolibrary(lua_State *L, const char *name)
   if (!eq) {
     const char *suffix = strchr(name, '-');
     if (suffix) glen = (size_t)(suffix-name);
+  }
+  /* Strip version suffix from modname for require() lookup. */
+  {
+    const char *msuffix = strchr(modname, '-');
+    if (msuffix) modname = msuffix + 1;
   }
   lua_getglobal(L, "require");
   lua_pushstring(L, modname);
@@ -445,6 +451,7 @@ static int dobytecode(lua_State *L, char **argv)
 #define FLAGS_EXEC		4
 #define FLAGS_OPTION		8
 #define FLAGS_NOENV		16
+#define FLAGS_WARN		32
 
 static int collectargs(char **argv, int *flags)
 {
@@ -484,6 +491,10 @@ static int collectargs(char **argv, int *flags)
       return i+1;
     case 'E':
       *flags |= FLAGS_NOENV;
+      break;
+    case 'W':
+      notail(argv[i]);
+      *flags |= FLAGS_WARN;
       break;
     default: return -1;  /* invalid option */
     }
@@ -588,6 +599,10 @@ static int pmain(lua_State *L)
     s->status = handle_luainit(L);
     if (s->status != LUA_OK) return 0;
   }
+
+  /* -W: turn warnings on (PUC 5.4 standalone interpreter). */
+  if (flags & FLAGS_WARN)
+    lua_warning(L, "@on", 0);
 
   if ((flags & FLAGS_VERSION)) print_version();
 

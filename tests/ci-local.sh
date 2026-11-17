@@ -45,4 +45,13 @@ fi
 ASAN_OPTIONS=detect_leaks=0:abort_on_error=1 \
   UBSAN_OPTIONS=print_stacktrace=0:halt_on_error=1 \
   LUAJIT="$SANBUILD/src/luajit" tests/harness.sh --mode all --corpus tests/d54 --timeout 120
+# C API stage under the sanitizers: compile the harness and tests with the same
+# instrumentation, link the instrumented libluajit.a and run them.
+ASAN_OPTIONS=detect_leaks=0:abort_on_error=1 \
+  UBSAN_OPTIONS=print_stacktrace=0:halt_on_error=1 \
+  LUAJIT_LIB="$SANBUILD/src/libluajit.a" LUAINC="$SANBUILD/src" \
+  CAPI_OUT="$SANBUILD/capi-build" \
+  CC="gcc -fsanitize=address,undefined -fno-sanitize=alignment -fno-omit-frame-pointer -g" \
+  LDFLAGS="-fsanitize=address,undefined -fno-sanitize=alignment" \
+  tests/capi/run.sh
 echo "ci-local: OK"

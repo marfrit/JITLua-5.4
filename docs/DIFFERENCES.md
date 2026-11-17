@@ -42,6 +42,13 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   call; PUC resumes it (`close_04`; documented/accepted divergence).
 - `PENDING` `lua_setcstacklimit` is a no-op returning `LUAI_MAXCCALLS` (200);
   PUC sets a new C-stack limit and returns the previous one.
+- `FORK` The 5.4 C continuation API (`lua_callk`, `lua_pcallk`, `lua_yieldk`)
+  is present, but LuaJIT has no C-level continuation frames: `k` is never
+  called and `ctx` is ignored. `lua_pcallk` never returns `LUA_YIELD`;
+  `lua_yieldk` with a non-NULL `k` raises "attempt to yield across a C-call
+  boundary" instead of silently skipping the continuation. Plain
+  `lua_yield` from a C function still works, including a tail yield
+  (`tests/capi` `test_continuations`).
 - `PENDING` Userdata arrays with more than one user value and non-GC user values
   are not supported (GC layout / GCRef-slot limitation; C API notes).
 

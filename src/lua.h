@@ -50,7 +50,9 @@
 
 typedef struct lua_State lua_State;
 
+typedef LUA_KCONTEXT lua_KContext;  /* Lua 5.4 continuation context */
 typedef int (*lua_CFunction) (lua_State *L);
+typedef int (*lua_KFunction) (lua_State *L, int status, lua_KContext ctx);
 
 
 /*
@@ -226,7 +228,11 @@ LUA_API int   (lua_setfenv) (lua_State *L, int idx);
 ** `load' and `call' functions (load and run Lua code)
 */
 LUA_API void  (lua_call) (lua_State *L, int nargs, int nresults);
+LUA_API void  (lua_callk) (lua_State *L, int nargs, int nresults,
+                           lua_KContext ctx, lua_KFunction k);
 LUA_API int   (lua_pcall) (lua_State *L, int nargs, int nresults, int errfunc);
+LUA_API int   (lua_pcallk) (lua_State *L, int nargs, int nresults, int errfunc,
+                            lua_KContext ctx, lua_KFunction k);
 LUA_API int   (lua_cpcall) (lua_State *L, lua_CFunction func, void *ud);
 LUA_API int   (lua_load) (lua_State *L, lua_Reader reader, void *dt,
                                         const char *chunkname);
@@ -238,6 +244,8 @@ LUA_API int (lua_dump) (lua_State *L, lua_Writer writer, void *data);
 ** coroutine functions
 */
 LUA_API int  (lua_yield) (lua_State *L, int nresults);
+LUA_API int  (lua_yieldk) (lua_State *L, int nresults, lua_KContext ctx,
+                           lua_KFunction k);
 LUA_API int  (lua_resume) (lua_State *L, lua_State *from, int narg, int *nres);
 LUA_API int  (lua_status) (lua_State *L);
 

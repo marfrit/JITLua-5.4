@@ -1605,6 +1605,15 @@ LUA_API void lua_call(lua_State *L, int nargs, int nresults)
   lj_vm_call(L, api_call_base(L, nargs), nresults+1);
 }
 
+/* Lua 5.4 continuation variants. LuaJIT has no C-level continuation frames,
+** so k is never invoked: callk/pcallk behave exactly like call/pcall. */
+LUA_API void lua_callk(lua_State *L, int nargs, int nresults,
+		       lua_KContext ctx, lua_KFunction k)
+{
+  UNUSED(ctx); UNUSED(k);
+  lua_call(L, nargs, nresults);
+}
+
 LUA_API int lua_pcall(lua_State *L, int nargs, int nresults, int errfunc)
 {
   global_State *g = G(L);
@@ -1622,6 +1631,19 @@ LUA_API int lua_pcall(lua_State *L, int nargs, int nresults, int errfunc)
   }
   status = lj_vm_pcall(L, api_call_base(L, nargs), nresults+1, ef);
   if (status) hook_restore(g, oldh);
+  return status;
+}
+
+LUA_API int lua_pcallk(lua_State *L, int nargs, int nresults, int errfunc,
+		       lua_KContext ctx, lua_KFunction k)
+{
+  int status;
+  UNUSED(ctx); UNUSED(k);
+  status = lua_pcall(L, nargs, nresults, errfunc);
+  if (status == LUA_YIELD) {  /* No C continuation: refuse instead of returning. */
+    lj_err_msg(L, LJ_ERR_CYIELDK);
+    return LUA_ERRRUN;
+  }
   return status;
 }
 
@@ -1712,6 +1734,22 @@ LUA_API int lua_yield(lua_State *L, int nresults)
   }
   lj_err_msg(L, LJ_ERR_CYIELD);
   return 0;  /* unreachable */
+}
+
+/* Lua 5.4 lua_yieldk: k == NULL is plain lua_yield. A non-NULL continuation
+** cannot be called after a resume in LuaJIT, so yielding with one is refused
+** instead of silently skipping the continuation. */
+LUA_API int lua_yieldk(lua_State *L, int nresults, lua_KContext ctx,
+		       lua_KFunction k)
+{
+  UNUSED(ctx);
+  if (k != NULL) {
+    if (L != mainthread(G(L)))
+      lj_err_msg(L, LJ_ERR_CYIELDK);
+    else
+      lj_err_msg(L, LJ_ERR_CYIELD);
+  }
+  return lua_yield(L, nresults);
 }
 
 /* Lua 5.4 signature: from is the resuming thread (ignored here; LuaJIT resumes

@@ -11,4 +11,3 @@ tests/d54/err_02_tailname.lua	A	P1.8b: tail-call error names -- LuaJIT reuses th
 tests/d54/gc_01_tbc_gc.lua	A	IMPL-DEFINED: LuaJIT runs __gc only for userdata, not tables (PUC 5.4 finalizes tables); gc options now match
 tests/d54/tbl_03_border_divergence.lua	A	IMPL-DEFINED: runtime-built sparse tables may report any legal border (5.4 manual 3.4.7); LuaJIT's array-growth policy differs from PUC's alimit hint
 tests/d54/dump_03_version.lua	A	FORK: private dump format (LuaJIT-5.4 fork); PUC 5.4.7 cannot round-trip it, mode R checks ours
-tests/corpus/puc54/math.lua	B	x64 JIT bug, intermittent SIGSEGV/hang in math.random stats loops, under investigation: first logical change ad283709 (JIT math.random on 5.4 xoshiro state); minimal repro tests/lib/math-jit-repro.lua (aux(1,32), aux(1,33), aux(-10,10)); crash RIP lj_tab_newkey:519 after lj_tab_newkey call in trace mcode; Fable

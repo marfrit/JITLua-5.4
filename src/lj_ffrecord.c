@@ -226,11 +226,7 @@ static void LJ_FASTCALL recff_assert(jit_State *J, RecordFFData *rd)
 ** UDTYPE_I64BOX). This emits that guard; a no-op for every other argv. */
 static void recff_udata_notbox(jit_State *J, RecordFFData *rd, ptrdiff_t arg)
 {
-  cTValue *o = &rd->argv[arg];
-  if (tvisudata(o) && !tvisi64(o) && tref_isudata(J->base[arg])) {
-    TRef tr = emitir(IRT(IR_FLOAD, IRT_U8), J->base[arg], IRFL_UDATA_UDTYPE);
-    emitir(IRTGI(IR_NE), tr, lj_ir_kint(J, UDTYPE_I64BOX));
-  }
+  lj_record_udata_notbox(J, J->base[arg], &rd->argv[arg]);  /* lj_record.c */
 }
 
 static void LJ_FASTCALL recff_type(jit_State *J, RecordFFData *rd)

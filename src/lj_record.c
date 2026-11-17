@@ -252,6 +252,20 @@ static TRef getcurrf(jit_State *J)
 ** Returns 2 for two different types.
 ** Comparisons between primitives always return 1 -- no caller cares about it.
 */
+/* ADR-001b trap: a boxed 5.4 integer is a GCudata with itype LJ_TUDATA, so
+** the type guard of an IRT_UDATA load (SLOAD/ALOAD/HLOAD of a real userdata
+** seen at record time) accepts a box as well. Anything recorded from a
+** real-userdata TValue must also guard the udtype; the reverse is safe (a
+** box loads as an IRT_I64 ref whose guard checks UDTYPE_I64BOX). Emits that
+** guard for a real userdata; a no-op for every other value. */
+void lj_record_udata_notbox(jit_State *J, TRef tr, cTValue *tv)
+{
+  if (tvisudata(tv) && !tvisi64(tv) && tref_isudata(tr)) {
+    TRef t = emitir(IRT(IR_FLOAD, IRT_U8), tr, IRFL_UDATA_UDTYPE);
+    emitir(IRTGI(IR_NE), t, lj_ir_kint(J, UDTYPE_I64BOX));
+  }
+}
+
 int lj_record_objcmp(jit_State *J, TRef a, TRef b, cTValue *av, cTValue *bv)
 {
   int diff = !lj_obj_equal(av, bv);
@@ -266,6 +280,13 @@ int lj_record_objcmp(jit_State *J, TRef a, TRef b, cTValue *av, cTValue *bv)
       } else if (ta == IRT_NUM && tb == IRT_INT) {
 	b = emitir(IRTN(IR_CONV), b, IRCONV_NUM_INT);
       } else {
+	/* "Never equal" holds for the recorded types only if a real userdata
+	** stays one: a boxed int64 passing its guard can equal the int64 (or
+	** an integral float; never an int32, boxes live outside int32). */
+	if (ta == IRT_UDATA && (tb == IRT_I64 || tb == IRT_NUM))
+	  lj_record_udata_notbox(J, a, av);
+	else if (tb == IRT_UDATA && (ta == IRT_I64 || ta == IRT_NUM))
+	  lj_record_udata_notbox(J, b, bv);
 	return 2;  /* Two different types are never equal. */
       }
     }

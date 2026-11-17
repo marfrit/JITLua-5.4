@@ -39,3 +39,47 @@ for i = 1, 400 do
   if rawequal(v, B) then ge = ge + 1 end
 end
 print("getmetatable", gm, dm, "rawequal", ge)
+
+-- Plain == / ~= (BC_ISEQV/ISNEV): (userdata, int64) was recorded as a
+-- constant "different" with no guard, so a box passing the userdata load
+-- guard compared unequal to its own value. Both orders, slot vs slot, slot
+-- vs upvalue, and other userdata kinds (newproxy is LuaJIT-only; PUC gets
+-- a second io handle, the counts are the same).
+local ud2 = newproxy and newproxy(true) or io.stderr
+local ud3 = newproxy and newproxy() or io.stdin
+local function eqloop(tab, w)
+  local eq, ne, eqr, ner = 0, 0, 0, 0
+  for i = 1, 400 do
+    local v = tab[(i % 8) + 1]
+    if v == w then eq = eq + 1 end
+    if v ~= w then ne = ne + 1 end
+    if w == v then eqr = eqr + 1 end
+    if w ~= v then ner = ner + 1 end
+  end
+  return eq, ne, eqr, ner
+end
+print("eq-stdout", eqloop({ ud, ud, ud, ud, B, B, B, B }, B))
+print("eq-proxy", eqloop({ ud2, ud2, ud2, ud2, B, B, B, B }, B))
+print("eq-proxy2", eqloop({ ud3, ud3, ud3, ud3, B, B, B, B }, B))
+print("eq-widened", eqloop({ ud, ud, ud, ud, W, W, W, W }, W))
+local function equp()  -- the int64 as an upvalue, the userdata in a slot
+  local eq, ne = 0, 0
+  local tab = { ud, ud, ud, ud, B, B, B, B }
+  for i = 1, 400 do
+    local v = tab[(i % 8) + 1]
+    if v == B then eq = eq + 1 end
+    if B ~= v then ne = ne + 1 end
+  end
+  return eq, ne
+end
+print("eq-upvalue", equp())
+local function eqfloat()  -- an integral float constant equals the boxed integer
+  local eq = 0
+  local tab = { ud, ud, ud, ud, B, B, B, B }
+  for i = 1, 400 do
+    local v = tab[(i % 8) + 1]
+    if v == 1125899906842627.0 then eq = eq + 1 end
+  end
+  return eq
+end
+print("eq-float", eqfloat())

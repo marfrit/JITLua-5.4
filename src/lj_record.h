@@ -27,6 +27,7 @@ typedef struct RecordIndex {
   int idxchain;		/* Index indirections left or 0 for raw lookup. */
 } RecordIndex;
 
+LJ_FUNC void lj_record_udata_notbox(jit_State *J, TRef tr, cTValue *tv);
 LJ_FUNC int lj_record_objcmp(jit_State *J, TRef a, TRef b,
 			     cTValue *av, cTValue *bv);
 LJ_FUNC void lj_record_stop(jit_State *J, TraceLink linktype, TraceNo lnk);

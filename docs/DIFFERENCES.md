@@ -49,6 +49,11 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   boundary" instead of silently skipping the continuation. Plain
   `lua_yield` from a C function still works, including a tail yield
   (`tests/capi` `test_continuations`).
+- `PENDING` The number metatable does not apply to integers outside the inline
+  47-bit range (boxed int64): after `debug.setmetatable(0, {__index = math})`,
+  `(1):floor()` works but `((1 << 50) + 3):floor()` raises, and
+  `getmetatable` of such an integer returns nil (PUC returns the number
+  metatable). Interpreter and JIT agree; found in the release review.
 - `PENDING` Userdata arrays with more than one user value and non-GC user values
   are not supported (GC layout / GCRef-slot limitation; C API notes).
 
@@ -82,6 +87,11 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
 - `EXTENSION` 5.4 `goto`/label scoping, `return`-ends-block grammar.
 - `FORK` ASCII-only identifiers: bytes 128–255 are rejected; stock LuaJIT
   accepted them as identifier bytes (strict PUC 5.4 alignment, no switch).
+- `FORK` `jit.version` and `luajit -v` read `JITLua-5.4 (LuaJIT 2.1.<relver>)`.
+  Code that matches `^LuaJIT` to pick 5.1-era behaviour (luaunit keys its
+  version branches off it) no longer takes those branches, which is right
+  for 5.4 semantics; code that uses the match only to detect the `ffi`
+  module should test `pcall(require, "ffi")` instead.
 
 ### Added 5.4 standard library / C API
 - `EXTENSION` `utf8.*`, `string.pack/unpack`, `table.rawlen`, `math.type/

@@ -193,7 +193,7 @@ say "== corpus-ext summary =="
 say "  arms same $nsame, unexpected diffs $ndiff"
 if [ -s "$OUT/.missing" ]; then
   # A partial corpus is not a pass either: every pinned library must run.
-  say "  libraries not run: $(sort -u "$OUT/.missing" | tr '\n' ' ')(fetch them with tests/corpus-ext/fetch.sh)"
+  say "  libraries not run: $(sort -u "$OUT/.missing" | tr '\n' ' ' | sed 's/ $//') (fetch them with tests/corpus-ext/fetch.sh)"
   fail=1
 fi
 if [ "$nsame" -eq 0 ] && [ "$ndiff" -eq 0 ]; then

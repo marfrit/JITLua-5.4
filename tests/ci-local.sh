@@ -35,7 +35,7 @@ if [ ! -x "$SANBUILD/src/luajit" ] || [ "$SAN" = 1 ]; then
   # otherwise abort the build under LSan.
   ( cd "$SANBUILD" && ASAN_OPTIONS=detect_leaks=0 make -j"$(nproc)" \
       CC="gcc -fsanitize=address,undefined -fno-sanitize=alignment -fno-omit-frame-pointer -g" \
-      HOST_CC="gcc" \
+      HOST_CC="gcc" CCDEBUG="-g" \
       LDFLAGS="-fsanitize=address,undefined -fno-sanitize=alignment" )
 fi
 if ! ASAN_OPTIONS=detect_leaks=0 "$SANBUILD/src/luajit" -e 'os.exit(0)' >/dev/null 2>&1; then

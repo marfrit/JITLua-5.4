@@ -31,7 +31,7 @@ backend, the same family as `adc0eb97` (snapshot restore).
   its predecessor (hang). The randomness came from which negative key
   collided first; `aux(1,32)`/`aux(1,33)` were never the trigger.
 
-Measured on x64-box before the fix (20 runs each, -O3): `math-jit-repro.lua`
+Measured on x64-build before the fix (20 runs each, -O3): `math-jit-repro.lua`
 17/20, `-O0` 20/20; `aux(1,32)` only 0/20; `aux(-10,10)` only 7/20;
 `aux(-40,-1)` only 20/20. After: 0/50 at -O0 and -O3, 0/20 on both negative
 ranges.
@@ -60,7 +60,7 @@ hypothesis was wrong.
 ## Repro and fail rate
 
 `tests/lib/math-jit-repro.lua` (2.1-compatible): one `aux` loop called with
-`aux(1,32)`, `aux(1,33)`, `aux(-10,10)`. On x64-box under `-jon`:
+`aux(1,32)`, `aux(1,33)`, `aux(-10,10)`. On x64-build under `-jon`:
 13/20 failures (SIGSEGV ~0.02 s or hang >40 s; RSS stays <7 MiB), `-joff`
 passes. Failures are seed/timing dependent, not OOM.
 
@@ -72,7 +72,7 @@ required for the failure.
 
 ## First bad commit
 
-`git bisect` on x64-box with a clean build per commit (2.1-compatible repro,
+`git bisect` on x64-build with a clean build per commit (2.1-compatible repro,
 fail threshold >=3/20): first **logical** bad change
 `ad28370970dc96be44abafff0511a24119af7067`
 "JIT: math.random on the 5.4 xoshiro state (same sequence as the interpreter);

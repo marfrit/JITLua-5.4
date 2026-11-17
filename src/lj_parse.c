@@ -1495,7 +1495,9 @@ static void gola_fixup(LexState *ls, FuncScope *bl)
   VarInfo *v = ls->vstack + bl->vstart;
   VarInfo *ve = ls->vstack + ls->vtop;
   for (; v < ve; v++) {
-    GCstr *name = strref(v->name);
+    GCstr *name;
+    if (gcref(v->name) == NULL) continue;
+    name = strref(v->name);
     if (name != NULL) {  /* Only consider remaining valid gotos/labels. */
       if (gola_islabel(v)) {
 	VarInfo *vg;
@@ -1535,7 +1537,7 @@ static VarInfo *gola_findlabel(LexState *ls, GCstr *name)
   VarInfo *v = ls->vstack + ls->fs->bl->vstart;
   VarInfo *ve = ls->vstack + ls->vtop;
   for (; v < ve; v++)
-    if (strref(v->name) == name && gola_islabel(v))
+    if (gcref(v->name) != NULL && strref(v->name) == name && gola_islabel(v))
       return v;
   return NULL;
 }
@@ -1548,7 +1550,7 @@ static VarInfo *gola_findlabel_all(LexState *ls, GCstr *name)
   VarInfo *v = ls->vstack + ls->fs->vbase;
   VarInfo *ve = ls->vstack + ls->vtop;
   for (; v < ve; v++)
-    if (strref(v->name) == name && gola_islabel(v))
+    if (gcref(v->name) != NULL && strref(v->name) == name && gola_islabel(v))
       return v;
   return NULL;
 }

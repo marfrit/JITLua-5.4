@@ -825,7 +825,7 @@ static void asm_href(ASMState *as, IRIns *ir, IROp merge)
   if (isk) {
     int64_t kk;
     if (irt_isaddr(kt)) {
-      kk = ((int64_t)irt_toitype(kt) << 47) | irkey[1].tv.u64;
+      kk = ((int64_t)((uint64_t)irt_toitype(kt) << 47)) | irkey[1].tv.u64;
     } else if (irt_isnum(kt)) {
       kk = (int64_t)ir_knum(irkey)->u64;
       /* Assumes -0.0 is already canonicalized to +0.0. */

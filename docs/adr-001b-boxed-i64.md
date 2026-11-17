@@ -2,8 +2,8 @@
 
 Status: **spike step 1 landed** (C-side box + intern + C display paths, verified by
 a C test); Lua-visible use is blocked by step 2/3. ADR-001 (16-byte `TValue`)
-demoted to documented fallback. Second opinion: `ANSWER-from-His.md` (His, plus
-Markus addenda 1 and 2).
+demoted to documented fallback. Second opinion: the former internal coordinator answer (plus Markus
+addenda 1 and 2).
 
 ## Measured findings (this session)
 
@@ -41,11 +41,11 @@ Two ways to give Lua 5.4 exact 64-bit integers on a LuaJIT base:
 | buildability | step 1 breaks every VM at once; nothing runs until step 3 lands per backend | tree stays buildable and green after each step |
 | verdict | fallback, only if B forces changes into every arithmetic fast path | **preferred** |
 
-His's precedent check: there is no 16-byte-value LuaJIT branch or patch anywhere in the fleet, and
+the coordinator's precedent check: there is no 16-byte-value LuaJIT branch or patch anywhere in the fleet, and
 deferring int64 entirely does not meet MISSION §2 goal 1. Staging the int64 work is fine and is what
 `tests/known-bad.tsv` already records.
 
-## What the spike must show (arm64 only, via `arm-box`)
+## What the spike must show (arm64 only, via `arm64-build`)
 
 Succeed = green without touching slot code, on these three tests:
 
@@ -117,7 +117,7 @@ Net: one new tag `LJ_TI64 = ~13`, `LJ_TNUMX = ~14`, explicit `itype2irt` case, n
 
 ## Verification
 
-Each step: `arm-box -t 1200 sh tests/ci-box.sh`. Step 1 verified: modes A+B
+Each step: `arm64-build -t 1200 sh tests/ci-box.sh`. Step 1 verified: modes A+B
 42 PASS / 0 FAIL, opt levels 0–3 124 PASS, mode R 31 PASS, C API 34/34 plus the
 new box test 7/7, short GC fuzz 160/160.
 
@@ -148,7 +148,7 @@ tests/d54/numeric_03_idiv.lua and bits_01_ops.lua PASS in modes A, B and R
 (mode A identical to PUC 5.4.7). Gate: A+B 47 PASS / 0 FAIL / 17 XFAIL,
 opt 0-3 128 PASS, R 32 PASS, C API 34/34 + i64 14/14.
 
-x64 (born) is NOT complete. Shifts work, but a runtime BC_IDIV (`local a=7
+x64 (the x64 build box) is NOT complete. Shifts work, but a runtime BC_IDIV (`local a=7
 local b=2; a//b`) yields a value whose printed type is "table": the destination
 slot receives the box with a GC pointer but a tag that decodes as ~11, i.e. the
 udata tag is not encoded consistently on x64 -- or the destination slot pointer
@@ -160,7 +160,7 @@ specifically the runtime BC_IDIV store on x64. Also already measured: GC64 tag
 encoding preserves only tags with bit 0 = 0, so LJ_TNUMX must stay odd (~13) --
 ~14 broke VM/C agreement and was reverted.
 
-## Benchmark gate result (arm-box, median of 3, 2026-11-15)
+## Benchmark gate result (arm64-build, median of 3, 2026-11-15)
 
 Boxed interned int64, steps 2-3 + literal constants, recorder NYI for boxes.
 "alloc" is the collectgarbage("count") delta of our arms.
@@ -205,7 +205,7 @@ collection, table-key use, 100 interned values survive two full GCs. Gates on
 both boxes green: A+B 47 PASS / 0 FAIL / 17 XFAIL, opt 0-3 128 PASS, R 32 PASS,
 C API 34/34 + i64 14/14.
 
-Benchmark after step 1 (arm-box, median of 3):
+Benchmark after step 1 (arm64-build, median of 3):
 
 | bench | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
 |---|---|---|---|---|
@@ -307,17 +307,17 @@ revisit (b) if the B1/B2 numbers after step 3 demand it.
 
 ### What a fresh context must know
 
-- Repo `/home/mfritsche/src/LuaJIT-5.4`, branch main; bare origin
-  `~/src/git/LuaJIT-5.4.git`. Local builds are REFUSED on pica (external guard);
-  verify only via `arm-box -t 1200 sh tests/ci-box.sh` (aarch64 escher) and
-  `build-box -t 1200 sh tests/ci-box.sh` (x86_64 born). Both do a fresh copy +
+- Repo at the project root, branch main; bare origin outside the working tree.
+  Local builds are REFUSED on the build host (external guard);
+  verify only via `arm64-build -t 1200 sh tests/ci-box.sh` (on the arm64 build box) and
+  `x64-build -t 1200 sh tests/ci-box.sh` (on the x64 build box). Both do a fresh copy +
   clean build; always include `make clean` in ad-hoc box jobs — a copied
-  `src/luajit` from pica is a foreign-arch stale binary otherwise.
-- Benchmark gate: `arm-box -t 1800 sh tests/bench/run.sh` (four arms, median of
+  `src/luajit` from the build host is a foreign-arch stale binary otherwise.
+- Benchmark gate: `arm64-build -t 1800 sh tests/bench/run.sh` (four arms, median of
   3; prints B1, B2, B2b, B3; "unsupported"/"FAILED" lines mean the model lacks
   something). Current numbers are in the table above.
 - After each step: gate both boxes, commit+push, `send claude` the benchmark
-  table (His relays to Markus), continue.
+  table (the coordinator relays to Markus), continue.
 
 ### Sub-step 1 landed (green, inert): primitives + first consumers
 
@@ -476,14 +476,14 @@ boxed literals segfaults in jit.util (also at the base commit 1e883ab8).
 
 Benchmark gate `tests/bench/run.sh`, median of 3, same box, same moment:
 
-| bench (arm64, escher) | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
+| bench (arm64, the arm64 build box) | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
 |---|---|---|---|---|
 | B1 FNV-1a-64, 10 MiB | **16.4 ms** (1.08x FFI) | 6870.6 ms | 15.2 ms | 292.1 ms |
 | B2 1e6 64-bit values | 2279.7 ms, 522 MB | 2264.2 ms | 698.7 ms | 565.3 ms |
 | B2b 1e6 ~2^41 values | 270.0 ms, 79 MB | 285.2 ms | 147.6 ms (float) | 162.9 ms |
 | B3 int32 control (fnv / table) | **20.9 / 209.3 ms** | 4323.7 / 684.9 ms | 37.9 / 200.8 ms | 308.9 / 253.5 ms |
 
-| bench (x64, pve2 NUC) | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
+| bench (x64, the x64 build box NUC) | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
 |---|---|---|---|---|
 | B1 | **30.2 ms** (1.03x FFI) | 21468 ms | 29.2 ms | 1332 ms |
 | B2 | 7327.7 ms | 7600.5 ms | 2596.0 ms | 2159.7 ms |
@@ -543,17 +543,17 @@ XFAIL / 0 XPASS, mode B at opt 0-3 172 PASS / 0 FAIL / 4 XFAIL (math_os_01 B
 from main), mode R 44 PASS, C API 34 + i64 14/14, fuzz 160/160.
 
 Benchmark gate `tests/bench/run.sh`, median of 3, same box, same moment
-(escher shares its CPU with model serving; its -joff arm was ~2x slower than
+(the arm64 build box shares its CPU with model serving; its -joff arm was ~2x slower than
 in the step-3 run, the JIT arms are what the gate is about):
 
-| bench (arm64, escher) | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
+| bench (arm64, the arm64 build box) | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
 |---|---|---|---|---|
 | B1 FNV-1a-64, 10 MiB | **14.9 ms** (0.98x FFI) | 13347.7 ms | 15.2 ms | 311.6 ms |
 | B2 1e6 64-bit values | **1358.6 ms, 79 MB** (was 2279.7 ms, 522 MB) | 4548.8 ms, 522 MB | 719.0 ms, 31.6 MB | 598.0 ms, 16.4 MB |
 | B2b 1e6 ~2^41 values | **148.1 ms, 8.2 MB** (was 270.0 ms, 79 MB) | 394.1 ms, 79 MB | 139.7 ms (float) | 176.8 ms |
 | B3 int32 control (fnv / table) | **22.2 / 226.4 ms** | 8304.0 / 1118.6 ms | 38.0 / 203.2 ms | 320.9 / 284.4 ms |
 
-| bench (x64, pve2 NUC) | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
+| bench (x64, the x64 build box NUC) | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
 |---|---|---|---|---|
 | B1 | **30.4 ms** (1.04x FFI) | 21658.2 ms | 29.2 ms | 1331.3 ms |
 | B2 | **3405.9 ms, 79 MB** (was 7327.7 ms, 522 MB; 3095.3 in the run before) | 7522.6 ms, 522 MB | 2589.7 ms, 31.6 MB | 2151.5 ms, 16.4 MB |
@@ -640,14 +640,14 @@ Benchmark gate `tests/bench/run.sh`, median of 3 (the x64 box was shared
 during the FFI and PUC arms of this run; the JIT arm is unchanged against
 part 2):
 
-| bench (arm64, escher) | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
+| bench (arm64, the arm64 build box) | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
 |---|---|---|---|---|
 | B1 FNV-1a-64, 10 MiB | **16.5 ms** (1.09x FFI) | 12036.3 ms | 15.2 ms | 289.0 ms |
 | B2 1e6 64-bit values | **1520.6 ms, 79 MB** | 2667.7 ms, 522 MB | 622.8 ms, 31.6 MB | 547.6 ms, 16.4 MB |
 | B2b 1e6 ~2^41 values | **130.7 ms, 8.2 MB** | 383.9 ms, 79 MB | 125.7 ms (float) | 176.0 ms |
 | B3 int32 control (fnv / table) | **23.7 / 212.9 ms** | 4315.9 / 672.7 ms | 37.9 / 200.2 ms | 309.1 / 255.3 ms |
 
-| bench (x64, pve2 NUC) | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
+| bench (x64, the x64 build box NUC) | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
 |---|---|---|---|---|
 | B1 | **30.2 ms** | 21419.0 ms | 36.5 ms | 3152.1 ms |
 | B2 | **3124.3 ms, 79 MB** | 7597.5 ms, 522 MB | 5402.4 ms, 31.6 MB | 3172.1 ms, 16.4 MB |
@@ -745,14 +745,14 @@ rerun: the run inside the gate overlapped another job on the NUC and showed
 every JIT arm, int32-only B3 included, 1.5-2x slower with the FFI and PUC
 arms unchanged):
 
-| bench (arm64, escher) | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
+| bench (arm64, the arm64 build box) | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
 |---|---|---|---|---|
 | B1 FNV-1a-64, 10 MiB | **16.6 ms** (1.05x FFI) | 3995.9 ms (was 12036: the GC step keeps the box heap small) | 15.8 ms | 296.4 ms |
 | B2 1e6 64-bit values | **1496.6 ms, 79 MB** | 4508.5 ms, 190 MB (was 522 MB) | 823.0 ms, 31.6 MB | 579.1 ms, 16.4 MB |
 | B2b 1e6 ~2^41 values | **148.9 ms, 8.2 MB** | 344.7 ms, 79 MB | 140.7 ms (float) | 175.6 ms |
 | B3 int32 control (fnv / table) | **23.0 / 215.2 ms** | 2281.8 / 614.5 ms | 43.7 / 203.5 ms | 307.6 / 276.2 ms |
 
-| bench (x64, pve2 NUC) | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
+| bench (x64, the x64 build box NUC) | ours JIT | ours -joff | stock 2.1 FFI | PUC 5.4.7 |
 |---|---|---|---|---|
 | B1 | **30.5 ms** (1.04x FFI) | 13407.0 ms | 29.2 ms | 1342.0 ms |
 | B2 | **3211.6 ms, 79 MB** | 7581.8 ms, 110 MB (was 522 MB) | 2591.2 ms, 31.6 MB | 2153.2 ms, 16.4 MB |

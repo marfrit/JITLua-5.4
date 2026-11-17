@@ -1,6 +1,6 @@
 # Bug dossier — arm64 bit.* shifts return 0
 
-Status: **FIXED** in `6e4d7bb9` (His, agent-reviewed, both-box gates green).
+Status: **FIXED** in `6e4d7bb9` (the coordinator, agent-reviewed, both-box gates green).
 Kept for traceability: the regression repro and the bisect evidence remain the
 acceptance test. The fix removes the widened-range TMP0 clobber from arm64
 `checkint`; `tests/lib/bit-checkint.lua` is the ci-box regression (shifts,
@@ -9,14 +9,14 @@ multi-argument bit ops, boxed/widened inputs, hot loops, `-joff` and `-jon`).
 ## Repro and fail rate
 
 `tests/lib/bit-shift-repro.lua` (stock LuaJIT 2.1 API; INT32_MIN computed as
-`-2147483647-1`). On arm-box it exits 1 with:
+`-2147483647-1`). On arm64-build it exits 1 with:
 
 ```
 shift-ok false 0 0 0 0 0 0 0 0LL false
 ```
 
 All `bit.lshift/rshift/arshift/rol/ror` return **0** for native integers and
-cdata. Fail rate 10/10 on arm64; x64-box 10/10 passes (`lshift(1,31)` ->
+cdata. Fail rate 10/10 on arm64; x64-build 10/10 passes (`lshift(1,31)` ->
 -2147483648, cdata lshift 63 -> -9223372036854775808LL).
 
 ## Interpreter vs JIT, opt levels
@@ -34,7 +34,7 @@ cdata. Fail rate 10/10 on arm64; x64-box 10/10 passes (`lshift(1,31)` ->
 
 ## First bad commit
 
-`git bisect` on arm-box (clean build per commit, repro above):
+`git bisect` on arm64-build (clean build per commit, repro above):
 **first bad commit `cb2f6da23b5cf88668718f6a79cf7e95143e4c08`**
 "Phase 1 (ADR-001b step 6 sub-step 1b): VM checkint range test on arm64 + x64".
 Parent `63c8f1a9` (LuaJIT 2.1 base) passes; the fork tree at `27de9ae`,
@@ -47,7 +47,7 @@ tested commit fails. The bisect range was 63c8f1a9..73b2a2cb.
 ints, no retry loop". The widened-range test was redundant (the TISNUMhi
 compare already rejects payload bits 32..46); `lj_carith_check64` now accepts
 boxed ints and normalizes widened/boxed args in place, so no FFH_RETRY loop.
-Verified on arm-box after fetch/rebase: `tests/lib/bit-shift-repro.lua` and
+Verified on arm64-build after fetch/rebase: `tests/lib/bit-shift-repro.lua` and
 `tests/lib/bit-checkint.lua` pass under `-joff` and `-jon`.
 
 ## Hypothesis (one line, historical)

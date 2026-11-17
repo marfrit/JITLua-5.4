@@ -89,12 +89,6 @@ typedef struct ExpDesc {
 #define EXPR_F_NONAV		0x04	/* Disallow safe navigation. */
 #define EXPR_F_RET1		0x08	/* Return a single expr. */
 
-static LJ_AINLINE int32_t expr_bitV(ExpDesc *e)
-{
-  TValue *o = expr_numtv(e);
-  return tvisint(o) ? intV(o) : lj_num2bit(numV(o));
-}
-
 /* Initialize expression. */
 static LJ_AINLINE void expr_init(ExpDesc *e, ExpKind k, uint32_t info)
 {
@@ -1175,9 +1169,16 @@ static void bcemit_unop(FuncState *fs, BCOp op, ExpDesc *e)
 	  }
 	}
       } else if (op == BC_BNOT && expr_isnumk(e)) {
-	/* Constant-fold bitwise not. */
-	setintV(&e->u.nval, (int32_t)~(uint32_t)expr_bitV(e));
-	return;
+	/* 5.4 constant-fold of bitwise not: exact integer operand only (like
+	** foldbitop), result folded only when it fits int32; otherwise the
+	** runtime BC_BNOT gives the exact int64 or raises "number has no
+	** integer representation". (lj_num2bit here wrapped modulo 2^32 and
+	** folded ~(2^40) to -1, ~2.5 to -3.) */
+	int64_t k;
+	if (fold_numint(e, &k) && (int64_t)(int32_t)~k == ~k) {
+	  setintV(&e->u.nval, (int32_t)~k);
+	  return;
+	}
       }
     }
     if (op == BC_BNOT) fs->flags |= PROTO_BITOP;

@@ -74,7 +74,7 @@ LJLIB_PUSH("number")
 /* Lua 5.4 type(): a boxed 64-bit integer is a number (ADR-001b). The asm fast
 ** function would report 'userdata' for the private udtype, and fixing that in
 ** seven backends is unnecessary -- the C form is correct everywhere. */
-LJLIB_CF(type)
+LJLIB_CF(type)			LJLIB_REC(.)
 {
   cTValue *o = lj_lib_checkany(L, 1);
   const char *tname = tvisi64(o) ? "number" : lj_typename(o);
@@ -236,7 +236,7 @@ LJLIB_CF(rawequal)		LJLIB_REC(.)
 }
 
 /* Lua 5.4: rawlen bypasses __len (tables and strings only). */
-LJLIB_CF(rawlen)
+LJLIB_CF(rawlen)		LJLIB_REC(.)
 {
   TValue *o = lj_lib_checkany(L, 1);
   if (tvisstr(o)) {

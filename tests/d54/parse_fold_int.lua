@@ -72,3 +72,13 @@ assert(2147483647 + 1.0 == 2147483648.0 and
 assert(2147483648 + 0 == 2147483648 and ty(2147483648 + 0) == "integer")
 assert(2 ^ 31 == 2147483648.0 and ty(2 ^ 31) == "float")
 assert(2 ^ 0 == 1.0 and ty(2 ^ 0) == "float")
+
+-- Unary ~ on float constants (5.4: exact integer operand or an error; the
+-- fold must not wrap modulo 2^32).
+p("bnot-float", ~(2^40), ~(2^31), ~(2.0^0), ~(-(2^31)), ~(2^53))
+p("bnot-float-types", ty(~(2^40)), ty(~(2^31)), ty(~(2.0^0)))
+p("bnot-2.5", pcall(load("return ~2.5")))
+p("bnot-2^63", pcall(load("return ~(2^63)")))
+p("bnot-inf", pcall(load("return ~(1/0)")))
+local x = 2^40
+p("bnot-runtime", ~x, ty(~x), ~(x + 0))

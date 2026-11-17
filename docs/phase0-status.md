@@ -1515,3 +1515,15 @@ language/VM and stdlib/C-API surface, getfenv/setfenv kept, jit/bit/FFI/bcsave
 kept, strict ASCII identifiers, FFI cdata semantics reference. Implemented
 parity features are deliberately not listed. Sources: MISSION.md,
 docs/phase0-status.md, tests/known-bad.tsv, docs/ffi-int-semantics.md.
+
+## Session 51 — Fable bug dossiers: arm64 bit shifts and x64 math.random JIT
+
+Prepared handovers only; no VM fix. `docs/bug-bit-shift-arm64.md`: arm64
+`bit.lshift/rshift/arshift/rol/ror` return 0 for native and cdata in `-joff`
+and `-jon` (all opt levels); first bad commit `cb2f6da` (checkint widened-range
+test clobbers TMP0, which `.ffunc_bit_sh` uses for x); traced hot-loop BSHL is
+correct, so `-jdump` shows no bad trace. `docs/bug-math-random-jit.md`: x64
+`-jon` math.random stats SIGSEGV/hang, 13/20, first logical bad `ad283709`,
+core RIP `lj_tab_newkey:519`, jdump trace included. Repros:
+`tests/lib/bit-shift-repro.lua`, `tests/lib/bit-shift-trace.lua`,
+`tests/lib/math-jit-repro.lua`.

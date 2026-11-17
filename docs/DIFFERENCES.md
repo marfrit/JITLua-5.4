@@ -45,6 +45,10 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   are not supported (GC layout / GCRef-slot limitation; C API notes).
 
 ### Known JIT/performance rows (not semantic divergences)
+- `PENDING` arm64 `bit.lshift/rshift/arshift/rol/ror` return 0 for native and
+  cdata (`-joff`/`-jon`, all opt levels); x64 correct, see
+  `docs/bug-bit-shift-arm64.md`.
+
 - `PENDING` `math.lua` mode B on x64: intermittent SIGSEGV/hang in the
   `math.random` statistics loops; first logical change `ad283709`; minimal repro
   `tests/lib/math-jit-repro.lua`; crash RIP `lj_tab_newkey:519`.

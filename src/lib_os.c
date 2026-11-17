@@ -183,33 +183,6 @@ static int getfield(lua_State *L, const char *key, int d, int delta)
 #define LJ_STRFTIMEOPT1 "aAbBcCdDeFgGhHIjmMnprRStTuUVwWxXyYzZ%"
 #define LJ_STRFTIMEOPT2 "EcECExEXEyEY" "OdOeOHOIOmOMOSOuOUOVOwOWOy"
 
-static void os_checkdatefmt(lua_State *L, const char *s)
-{
-  const char *p;
-  for (p = s; *p; p++) {
-    char spec[4];
-    if (*p != '%') continue;
-    p++;
-    spec[0] = '%';
-    if (*p == '\0') {
-      spec[1] = '\0';
-      lj_err_argv(L, 1, LJ_ERR_OSDATEFMT, spec);
-    }
-    if (strchr(LJ_STRFTIMEOPT1, *p)) continue;
-    spec[1] = *p;
-    if ((*p == 'E' || *p == 'O') && p[1] != '\0') {
-      char two[3];
-      two[0] = p[0]; two[1] = p[1]; two[2] = '\0';
-      if (strstr(LJ_STRFTIMEOPT2, two)) { p++; continue; }
-      spec[2] = p[1];
-      spec[3] = '\0';
-      lj_err_argv(L, 1, LJ_ERR_OSDATEFMT, spec);
-    }
-    spec[2] = '\0';
-    lj_err_argv(L, 1, LJ_ERR_OSDATEFMT, spec);
-  }
-}
-
 LJLIB_CF(os_date)
 {
   size_t slen;

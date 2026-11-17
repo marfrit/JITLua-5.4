@@ -1697,3 +1697,22 @@ arm64 deltablue 3664.4 / 4399.9 ms (0.83x), k-nucleotide 17.8 / 19.4 ms
 (0.92x, within the bimodal-box band); x86_64 deltablue 20534.1 / 24142.8 ms
 (0.85x), k-nucleotide 66.3 / 73.1 ms (0.91x). deltablue -jv NOMM 0 on both
 (arm ours 180 traces / stock 174, x64 181 / 173).
+
+Review fixes (Fable, REQUEST CHANGES on one point): `783d5000` -- the same
+IR_KINT64-key hole in `snap_unsink()` (lj_snap.c): a sunk store with a widened
+int64 constant key was restored with lj_ir_kvalue, i.e. keyed by an FFI cdata;
+`t[1099511627776] = i` under -O3 returned a cdata from next(t) and a full GC
+without ffi loaded segfaulted. Decoded with lj_i64_toTValue like the slot
+restore; `tests/d54/jit_03_sunk_i64key.lua` (positive, negative, TDUP) was
+FAIL at B@3 before and passes A/B/opt 0-3 after. `efd5209e` hardens the
+getline() reader (ENOMEM -> lj_err_mem, LJ_MAX_STR guard, string built from
+the libc buffer and freed before the GC step). Merged origin/main d09eb089
+(1352ab01); gate = ci-box + ci-local.sh --sanitizers-only, both boxes, numbers
+below.
+Gate on 1352ab01 (merge with main d09eb089), both boxes identical: ci-box A+B
+121/0/5 XFAIL (66 tests), opt 0..3 264/0, R 66/0, bit-checkint ok,
+math-random-jit OK, GC stress 59+1X, jitutil smoke 30 ok, corpus-ext 15
+SAME/0, capi 112/0, i64 14/0, fuzz 160/0; `ci-local.sh --sanitizers-only`
+187 PASS/0 FAIL/5 XFAIL (A,B,R), ci-local OK. Bench (REPS=5): arm64 deltablue
+3662.9 / 4492.6 ms (0.82x), k-nucleotide 18.0 / 19.9 ms (0.90x); x86_64
+deltablue 19885.6 / 24063.7 ms (0.83x), k-nucleotide 65.8 / 74.0 ms (0.89x).

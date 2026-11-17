@@ -103,6 +103,9 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   does not promote. `-joff` and `-jon` agree (pure calls compile, mixed calls
   with native int64 operands run in the interpreter). Details and mechanism in
   `docs/ffi-int-semantics.md`; test `tests/lib/bit-checkint.lua`.
+- `EXTENSION` FFI source-literal suffixes `LL`, `ULL`/`LLU` and imaginary `i`
+  (`1LL`, `1ULL`, `0x10ULL`, `12.5i`) are accepted when FFI is compiled;
+  PUC 5.4 rejects them (`lex_03_ffi_suffix`).
 - `EXTENSION` LuaJIT's pattern-matching implementation and its string-buffer
   optimizations remain; 5.4 pattern behaviors are covered by `str_03_patterns`.
 - `EXTENSION` `string.dump` bytecode format and `-b`/`bcsave` are

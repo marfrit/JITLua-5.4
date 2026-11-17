@@ -49,7 +49,6 @@ T_HOOK_RE = re.compile(r"\bT\s*[.\[]")
 def canon(s):
     s = s.replace("\r\n", "\n").replace("\r", "\n")
     s = ADDR_RE.sub("0xADDR", s)
-    s = re.sub(r"==\d+==", "==PID==", s)  # sanitizer report PID
     lines = [re.sub(r"[ \t]+", " ", ln).strip() for ln in s.split("\n")]
     while lines and not lines[-1]:
         lines.pop()
@@ -164,6 +163,26 @@ def kb_reason(kb, rel, mode):
     return None
 
 
+# A sanitizer report or a death by signal is a failure on its own, whatever
+# the other arm did: with the same instrumented binary in both arms of modes
+# B and R, identical reports would otherwise compare equal and pass.
+SANITIZER_RE = re.compile(r"ERROR: AddressSanitizer|AddressSanitizer:DEADLYSIGNAL|"
+                          r"runtime error:|==\d+==ERROR|ERROR: LeakSanitizer")
+
+
+def hard_failure(res, label):
+    """res = (rc, out, err, timeout). Returns a detail string or None."""
+    rc, _out, err, to = res
+    m = SANITIZER_RE.search(err)
+    if m:
+        i = err.rfind("\n", 0, m.start()) + 1
+        return "sanitizer report in %s: %s" % (label, err[i:i + 300].strip())
+    if not to and rc < 0 and rc != -1:
+        return "%s died: %s" % (label, "cannot execute" if rc == -2 else
+                                "signal %d" % -rc)
+    return None
+
+
 def compare(a, b, label_a, label_b):
     """a, b = (rc, out, err, timeout).  Returns (mismatch, detail)."""
     rc_a, out_a, err_a, to_a = a
@@ -246,6 +265,11 @@ class Job:
         if scratch:
             import shutil
             shutil.rmtree(scratch, ignore_errors=True)
+        hard = hard_failure(a, "arm 1") or hard_failure(b, "arm 2")
+        if hard:
+            # Never XFAIL: known-bad entries cover semantic gaps, not crashes.
+            self.status, self.detail = "FAIL", hard
+            return self
         if detail.startswith("TIMEOUT"):
             self.status, self.detail = "TIMEOUT", detail
             return self
@@ -438,7 +462,8 @@ def main():
         Path(opts.known_bad).write_text("\n".join(lines) + "\n")
         print("  wrote %s (%d entries)" % (opts.known_bad, len(fails)))
 
-    bad_n = counts.get("FAIL", 0) + counts.get("BAD", 0) + (counts.get("XPASS", 0) if opts.strict else 0)
+    bad_n = (counts.get("FAIL", 0) + counts.get("BAD", 0) + counts.get("TIMEOUT", 0)
+             + (counts.get("XPASS", 0) if opts.strict else 0))
     return 1 if bad_n else 0
 
 

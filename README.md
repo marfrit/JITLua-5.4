@@ -9,7 +9,7 @@ LuaJIT 2.1 README is kept as [README.LuaJIT](README.LuaJIT).
 
 ## Status
 
-Honest status, not a compatibility claim:
+Status as measured, not a compatibility claim:
 
 - Differential gates against PUC Lua 5.4.9 pass on the tested platforms.
   Measured on Linux arm64 and x86_64, identical on both, on the `tests/d54`

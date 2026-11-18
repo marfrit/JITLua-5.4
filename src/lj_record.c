@@ -603,9 +603,6 @@ void lj_record_stop(jit_State *J, TraceLink linktype, TraceNo lnk)
   }
 nocanon:
   /* Note: all loop ops must set J->pc to the following instruction! */
-  if ((J->flags & JIT_F_WEAKTRACE) && J->pt &&
-      bc_op(*J->pc) < BC_FUNCF)
-    lj_snap_purge_loop(J);
   lj_snap_add(J);  /* Add loop snapshot. */
   J->needsnap = 0;
   J->mergesnap = 1;  /* In case recording continues. */
@@ -1886,11 +1883,11 @@ static TRef rec_idx(jit_State *J, RecordIndex *ix, int tabguard);
 **
 ** A trace is shaped by the weakness of its tables at record time: a trace
 ** that read a weak table keeps its allocations and clears dead stack slots
-** (JIT_F_WEAKTRACE), any other trace does neither. So guard the metatable
-** and the value of its __mode field. The field is looked up like any other
-** constant key, with the metatable as a constant: one invariant check per
-** metatable and trace. Do not use the negative metamethod cache (nomm) for
-** this: every string-keyed store to the metatable clears it.
+** at the loop's GC check (GCtrace.weak), any other trace does neither. So
+** guard the metatable and the value of its __mode field. The field is looked
+** up like any other constant key, with the metatable as a constant: one
+** invariant check per metatable and trace. Do not use the negative metamethod
+** cache (nomm) for this: every string-keyed store to the metatable clears it.
 */
 static void rec_tabguard(jit_State *J, TRef tab, GCtab *t)
 {
@@ -1916,7 +1913,7 @@ static void rec_tabguard(jit_State *J, TRef tab, GCtab *t)
       GCstr *str = strV(mode);
       emitir(IRTG(IR_EQ, IRT_STR), trmode, lj_ir_kstr(J, str));
       if (strchr(strdata(str), 'k') || strchr(strdata(str), 'v'))
-	J->flags |= JIT_F_WEAKTRACE;
+	J->cur.weak = 1;
     }
   }
 }
@@ -2109,6 +2106,7 @@ int lj_record_next(jit_State *J, RecordIndex *ix)
 {
   IRType t, tkey, tval;
   TRef trvk;
+  rec_tabguard(J, ix->tab, tabV(&ix->tabv));
   t = rec_next_types(tabV(&ix->tabv), ix->keyv.u32.lo);
   tkey = (t & 0xff); tval = (t >> 8);
   trvk = lj_ir_call(J, IRCALL_lj_vm_next, ix->tab, ix->key);
@@ -3387,7 +3385,6 @@ void lj_record_setup(jit_State *J)
   J->loopunroll = J->param[JIT_P_loopunroll];
   J->tailcalled = 0;
   J->loopref = 0;
-  J->flags &= ~JIT_F_WEAKTRACE;
 
   J->bc_min = NULL;  /* Means no limit. */
   J->bc_extent = ~(MSize)0;
@@ -3409,6 +3406,7 @@ void lj_record_setup(jit_State *J)
     GCtrace *T = traceref(J, J->parent);
     TraceNo root = T->root ? T->root : J->parent;
     J->cur.root = (uint16_t)root;
+    J->cur.weak = T->weak;  /* Keep allocations in side traces, too. */
     J->cur.startins = BCINS_AD(BC_JMP, 0, 0);
     /* Check whether we could at least potentially form an extra loop. */
     if (J->exitno == 0 && T->snap[0].nent == 0) {

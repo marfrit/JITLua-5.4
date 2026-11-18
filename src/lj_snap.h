@@ -12,7 +12,6 @@
 #if LJ_HASJIT
 LJ_FUNC void lj_snap_add(jit_State *J);
 LJ_FUNC void lj_snap_purge(jit_State *J);
-LJ_FUNC void lj_snap_purge_loop(jit_State *J);
 LJ_FUNC void lj_snap_shrink(jit_State *J);
 LJ_FUNC IRIns *lj_snap_regspmap(jit_State *J, GCtrace *T, SnapNo snapno,
 				IRIns *ir);

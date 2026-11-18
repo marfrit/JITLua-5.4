@@ -2595,9 +2595,9 @@ static void asm_stack_restore(ASMState *as, SnapShot *snap)
 #define MIPS_NOPATCH_GC_CHECK	MIPSI_OR
 
 /* Check GC threshold and do one or more GC steps. */
-static void asm_gc_check(ASMState *as, SnapNo snapno)
+static void asm_gc_check(ASMState *as, int loophead)
 {
-  UNUSED(snapno);  /* 32-bit targets keep the old 2-arg GC-step call. */
+  UNUSED(loophead);  /* 32-bit targets keep the 2-argument GC step call. */
   const CCallInfo *ci = &lj_ir_callinfo[IRCALL_lj_gc_step_jit];
   IRRef args[2];
   MCLabel l_end;

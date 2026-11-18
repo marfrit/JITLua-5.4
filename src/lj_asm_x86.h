@@ -3006,22 +3006,19 @@ static void asm_stack_restore(ASMState *as, SnapShot *snap)
 /* -- GC handling --------------------------------------------------------- */
 
 /* Check GC threshold and do one or more GC steps. */
-static void asm_gc_check(ASMState *as, SnapNo snapno)
+static void asm_gc_check(ASMState *as, int loophead)
 {
   const CCallInfo *ci = &lj_ir_callinfo[IRCALL_lj_gc_step_jit];
   IRRef args[2];
   MCLabel l_end;
   Reg tmp;
-  SnapShot *snap = &as->T->snap[snapno];
-  SnapEntry *map = &as->T->snapmap[snap->mapofs];
-  MSize n, nent = snap->nent;
   ra_evictset(as, RSET_SCRATCH);
   l_end = emit_label(as);
   /* Exit trace if in GCSatomic or GCSfinalize. Avoids syncing GC objects. */
   asm_guardcc(as, CC_NE);  /* Assumes asm_snap_prep() already done. */
   emit_rr(as, XO_TEST, RID_RET, RID_RET);
   args[0] = ASMREF_TMP1;  /* global_State *g */
-  args[1] = ASMREF_TMP2;  /* MSize steps     */
+  args[1] = ASMREF_TMP2;  /* MSize steps or uint64_t pak (GC64) */
   /* Insert nop to simplify GC exit recognition in lj_asm_patchexit. */
   if (!jmprel_ok(as->mcp, (MCode *)(void *)ci->func)) *--as->mcp = XI_NOP;
 #if LJ_GC64
@@ -3033,7 +3030,7 @@ static void asm_gc_check(ASMState *as, SnapNo snapno)
     tmp2ir->t = savedt;
   }
   emit_loadu64(as, ra_releasetmp(as, ASMREF_TMP2),
-	       GCSTEP_ARG64(as->T->traceno, snapno, as->gcsteps));
+	       GCSTEP_ARG64(as->T->traceno, loophead, as->gcsteps));
 #else
   asm_gencall(as, ci, args);
 #endif

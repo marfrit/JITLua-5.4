@@ -14,7 +14,6 @@
 
 /* General JIT engine flags. 4 bits. */
 #define JIT_F_ON		0x00000001
-#define JIT_F_WEAKTRACE		0x10000000	/* Internal: trace indexes a weak table. */
 
 /* CPU-specific JIT engine flags. 12 bits. Flags and strings must match. */
 #define JIT_F_CPU		0x00000010
@@ -198,17 +197,19 @@ typedef uint32_t SnapEntry;
 #define SNAP_NORESTORE		0x040000	/* No need to restore slot. */
 #define SNAP_SOFTFPNUM		0x080000	/* Soft-float number. */
 #define SNAP_KEYINDEX		0x100000	/* Traversal key index. */
-#define SNAP_NIL		0x400000	/* Purged dead slot: restore nil. */
 LJ_STATIC_ASSERT(SNAP_FRAME == TREF_FRAME);
 LJ_STATIC_ASSERT(SNAP_CONT == TREF_CONT);
 LJ_STATIC_ASSERT(SNAP_KEYINDEX == TREF_KEYINDEX);
 
-/* Packed 64-bit argument for lj_gc_step_jit on GC64 targets: full traceno
-** (16 bits), full exit snapshot (16 bits) and full step count (32 bits).
+/* Packed 64-bit argument for lj_gc_step_jit on GC64 targets: trace number
+** (16 bits), loop-head flag (16 bits) and step count (32 bits). The flag is
+** set by a GC check that runs at the start bytecode of the root trace (LOOP,
+** head of a root trace, head of a looping side trace). If that bytecode is a
+** loop, the stack slots above the loop's variables are dead there.
 ** Loaded as an immediate into the existing ASMREF_TMP2 register: no
 ** allocator action may happen in the asm GC-check slow path. */
-#define GCSTEP_ARG64(tno, snapno, steps) \
-  (((uint64_t)(uint16_t)(tno)) | (((uint64_t)(uint16_t)(snapno)) << 16) | \
+#define GCSTEP_ARG64(tno, loophead, steps) \
+  (((uint64_t)(uint16_t)(tno)) | (((uint64_t)((loophead) != 0)) << 16) | \
    (((uint64_t)(uint32_t)(steps)) << 32))
 
 #define SNAP(slot, flags, ref)	(((SnapEntry)(slot) << 24) + (flags) + (ref))
@@ -289,7 +290,7 @@ typedef struct GCtrace {
   uint8_t sinktags;	/* Trace has SINK tags. */
   uint8_t topslot;	/* Top stack slot already checked to be allocated. */
   uint8_t linktype;	/* Type of link. */
-  uint8_t unused1;
+  uint8_t weak;		/* Trace reads a weak table (or its parent does). */
 #ifdef LUAJIT_USE_GDBJIT
   void *gdbjit_entry;	/* GDB JIT entry. */
 #endif
@@ -487,6 +488,7 @@ typedef struct jit_State {
 
   IRRef1 chain[IR__MAX];  /* IR instruction skip-list chain anchors. */
   TRef slot[LJ_MAX_JSLOTS+LJ_STACK_EXTRA];  /* Stack slot map. */
+
   int32_t param[JIT_P__MAX];  /* JIT engine parameters. */
 
   MCode *exitstubgroup[LJ_MAX_EXITSTUBGR];  /* Exit stub group addresses. */

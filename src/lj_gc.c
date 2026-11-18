@@ -21,6 +21,7 @@
 #include "lj_meta.h"
 #include "lj_state.h"
 #include "lj_frame.h"
+#include "lj_bc.h"
 #if LJ_HASFFI
 #include "lj_ctype.h"
 #include "lj_cdata.h"
@@ -786,47 +787,66 @@ void LJ_FASTCALL lj_gc_step_fixtop(lua_State *L)
 #if LJ_HASJIT
 /* Perform multiple GC steps. Called from JIT-compiled code. */
 #if LJ_TARGET_ARM64 || (LJ_TARGET_X86ORX64 && LJ_GC64)
-/* GC64 targets pass a 64-bit pak: traceno(16), snapno(16), steps(32). */
+/* GC64 targets pass a 64-bit pak: traceno(16), loop-head flag(16), steps(32). */
+
+/* A weak trace runs with stale values in the stack slots above its live
+** range: the interpreter left them there and the trace never writes them.
+** They are below L->top, so they are GC roots, and a compiled loop that
+** waits for a weak entry to be collected would wait forever. This is called
+** for a GC check at the start bytecode of the root trace. If that is a loop
+** bytecode, every slot above the loop's own variables is dead at that point,
+** so clear them before the step.
+*/
+static void gc_jit_cleardead(global_State *g, lua_State *L, TraceNo traceno)
+{
+  jit_State *J = G2J(g);
+  GCtrace *T;
+  lj_assertG(traceno > 0 && traceno < J->sizetrace,
+	     "bad trace number %d in GC step", (int)traceno);
+  if (!(traceno > 0 && traceno < J->sizetrace))
+    return;
+  T = traceref(J, traceno);
+  lj_assertG(T != NULL, "no trace %d in GC step", (int)traceno);
+  if (T != NULL && T->weak) {
+    BCIns ins;
+    BCReg nlive;  /* Number of live slots at the loop head. */
+    TValue *o;
+    if (T->root != 0 && (T = traceref(J, T->root)) == NULL)
+      return;
+    ins = T->startins;
+    switch (bc_op(ins)) {
+    case BC_LOOP: case BC_ITERN:
+      nlive = bc_a(ins);
+      break;
+    case BC_FORL:
+      nlive = bc_a(ins) + FORL_EXT + 1;
+      break;
+    case BC_ITERL:  /* The preceding ITERC/ITERN has the result count. */
+      nlive = bc_a(ins) + bc_b(mref(T->startpc, const BCIns)[-1]) - 1;
+      break;
+    default:  /* Function, return or stitched start: no bound known. */
+      return;
+    }
+    for (o = L->base + nlive; o < L->top; o++)
+      setnilV(o);
+  }
+}
+
 int LJ_FASTCALL lj_gc_step_jit(global_State *g, uint64_t pak)
 {
   lua_State *L = gco2th(gcref(g->cur_L));
-  TraceNo tno = (TraceNo)(pak & 0xffff);
-  SnapNo snapno = (SnapNo)((pak >> 16) & 0xffff);
-  MSize nsteps = (MSize)(pak >> 32);
-  jit_State *J = G2J(g);
-  if (tno > 0 && (MSize)tno < J->sizetrace) {
-    GCtrace *T = traceref(J, tno);
-    lj_assertG(T != NULL, "gc_step_jit: no trace %d", (int)tno);
-    if (T && snapno < T->nsnap) {
-      SnapShot *snap = &T->snap[snapno];
-      SnapEntry *map = &T->snapmap[snap->mapofs];
-      MSize n, nent = snap->nent;
-      TValue *frame;
-      int hasnil = 0;
-      /* Early out: no SNAP_NIL entries is the common case. */
-      for (n = 0; n < nent; n++)
-	if (map[n] & SNAP_NIL) { hasnil = 1; break; }
-      frame = tvref(g->jit_base) - 1 - LJ_FR2;
-      if (hasnil)
-	for (n = 0; n < nent; n++)
-	  if (map[n] & SNAP_NIL)
-	    setnilV(&frame[snap_slot(map[n])]);
-    } else {
-      lj_assertG(snapno < T->nsnap, "gc_step_jit: bad snapno %d", (int)snapno);
-    }
-  } else {
-    lj_assertG(tno > 0 && (MSize)tno < J->sizetrace,
-	       "gc_step_jit: bad traceno %d", (int)tno);
-  }
+  MSize steps = (MSize)(pak >> 32);
   L->base = tvref(G(L)->jit_base);
   L->top = curr_topL(L);
-  while (nsteps-- > 0 && lj_gc_step(L) == 0)
+  if (((pak >> 16) & 0xffff))  /* GC check at the start bytecode. */
+    gc_jit_cleardead(g, L, (TraceNo)(pak & 0xffff));
+  while (steps-- > 0 && lj_gc_step(L) == 0)
     ;
   /* Return 1 to force a trace exit. */
   return (G(L)->gc.state == GCSatomic || G(L)->gc.state == GCSfinalize);
 }
 #else
-/* 32-bit targets keep the old call and do not clear SNAP_NIL slots. */
+/* 32-bit targets keep the 2-argument call and do not clear dead slots. */
 int LJ_FASTCALL lj_gc_step_jit(global_State *g, MSize steps)
 {
   lua_State *L = gco2th(gcref(g->cur_L));

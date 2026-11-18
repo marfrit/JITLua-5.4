@@ -2,6 +2,7 @@
 --! The trace must exit on the metatable change and re-specialize. Bounded and
 --! observable, default options and -dce. RED on 7b85747e and 32068a54,
 --! GREEN with the runtime metatable/__mode guard.
+--! modes: B,R  (PUC keeps the pre-__mode value alive in a temp slot)
 
 local function spin(x, LIMIT)
   local A, n = 0, 0
@@ -13,8 +14,10 @@ local function spin(x, LIMIT)
   return n
 end
 
+local jit = rawget(_G, "jit")
+
 local function run(label)
-  jit.flush()
+  if jit then jit.flush() end
   local x = {[1] = {}}
   spin(x, 2000)  -- compile while x has no metatable
   setmetatable(x, {__mode = "kv"})
@@ -24,7 +27,7 @@ local function run(label)
 end
 
 run("default")
-jit.opt.start("-dce")
+if jit then jit.opt.start("-dce") end
 run("dce")
-jit.opt.start()
+if jit then jit.opt.start() end
 print("ok")

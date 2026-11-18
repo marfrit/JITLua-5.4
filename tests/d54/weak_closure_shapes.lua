@@ -25,8 +25,10 @@ local function bound(x, LIMIT)
   return n
 end
 
+local jit = rawget(_G, "jit")
+
 local function run(label)
-  jit.flush()
+  if jit then jit.flush() end
   local LIMIT = 20000
   local x = setmetatable({[1] = {}}, {__mode = "kv"})
   local n1 = exact(x, LIMIT)
@@ -38,7 +40,7 @@ local function run(label)
 end
 
 run("default")
-jit.opt.start("-dce")
+if jit then jit.opt.start("-dce") end
 run("dce")
-jit.opt.start()
+if jit then jit.opt.start() end
 print("ok")

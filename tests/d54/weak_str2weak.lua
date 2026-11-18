@@ -13,8 +13,10 @@ local function spin(x, LIMIT)
   return n
 end
 
+local jit = rawget(_G, "jit")
+
 local function run(label)
-  jit.flush()
+  if jit then jit.flush() end
   local strong = {[1] = {}}
   local weak = setmetatable({[1] = {}}, {__mode = "kv"})
   spin(strong, 2000)  -- compile the loop against a strong table
@@ -24,7 +26,7 @@ local function run(label)
 end
 
 run("default")
-jit.opt.start("-dce")
+if jit then jit.opt.start("-dce") end
 run("dce")
-jit.opt.start()
+if jit then jit.opt.start() end
 print("ok")

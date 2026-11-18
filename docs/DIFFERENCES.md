@@ -71,16 +71,16 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   offsets; not done. Modules using it need a portable side area instead.
 
 - `FIXED` Weak-table JIT loop hang (`closure.lua:37`; stock LuaJIT 2.1 hangs
-  there too). A compiled loop that indexes a weak table keeps its allocations
-  (no DCE) so the loop's GC check drives collection, and purged loop-head temp
-  slots are restored as nil so a stale interpreter value is not a GC root. A
-  runtime guard on the metatable pointer and the `__mode` negative-cache bit
-  exits the trace when a table becomes weak after it was compiled
-  (setmetatable, `rawset(mt,"__mode")`, `mt.__mode = ...` via TSETS).
-  Same as PUC 5.4: a loop that allocates nothing never runs the GC, so a weak
-  entry it only reads (`while x[1] do A = A+1 end`) is never collected; -joff
-  behaves the same. `tests/d54/weak_*.lua` cover the shapes that allocate;
-  `weak_noalloc_boundary.lua` records the parity boundary.
+  there too). A trace that reads from a weak table keeps its allocations, so
+  the loop's GC check drives the collector, and the GC step at the loop head
+  clears the dead stack slots, so a value the interpreter left there is not a
+  GC root. A guard on the metatable and on its `__mode` field exits the trace
+  when a table becomes weak (or strong) after the trace was compiled. Cause,
+  fix and limits: `docs/bug-weak-table-jit-loop.md`; tests:
+  `tests/d54/weak_*.lua`.
+  Not a difference: a loop that allocates nothing never runs the collector, so
+  a weak entry it only reads (`while x[1] do A = A+1 end`) stays. PUC 5.4 and
+  `-joff` behave the same (`weak_noalloc_boundary.lua`).
 
 ### Known JIT/performance rows (not semantic divergences)
 - `FIXED` arm64 `bit.lshift/rshift/arshift/rol/ror` returned 0 for native and

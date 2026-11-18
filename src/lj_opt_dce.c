@@ -44,7 +44,7 @@ static void dce_propagate(jit_State *J)
     IRIns *ir = IR(ins);
     if (irt_ismarked(ir->t)) {
       irt_clearmark(ir->t);
-    } else if (!ir_sideeff(ir)) {
+    } else if (!ir_sideeff(ir) && !(J->flags & JIT_F_WEAKTRACE && ir_isalloc(ir->o))) {
       *pchain[ir->o] = ir->prev;  /* Reroute original instruction chain. */
       lj_ir_nop(ir);
       continue;
@@ -60,6 +60,11 @@ static void dce_propagate(jit_State *J)
 ** First backpropagate marks for all used instructions. Then replace
 ** the unused ones with a NOP. Note that compressing the IR to eliminate
 ** the NOPs does not pay off.
+**
+** A trace that indexes a table which is weak at record time (JIT_F_WEAKTRACE)
+** keeps its GC allocations (ir_isalloc) alive: they grow the heap, so the
+** loop's existing GC check makes progress and the weak entry can be cleared.
+** Traces without weak tables keep full DCE.
 */
 void lj_opt_dce(jit_State *J)
 {

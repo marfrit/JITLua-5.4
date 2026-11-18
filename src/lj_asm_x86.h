@@ -3006,12 +3006,15 @@ static void asm_stack_restore(ASMState *as, SnapShot *snap)
 /* -- GC handling --------------------------------------------------------- */
 
 /* Check GC threshold and do one or more GC steps. */
-static void asm_gc_check(ASMState *as)
+static void asm_gc_check(ASMState *as, SnapNo snapno)
 {
   const CCallInfo *ci = &lj_ir_callinfo[IRCALL_lj_gc_step_jit];
   IRRef args[2];
   MCLabel l_end;
   Reg tmp;
+  SnapShot *snap = &as->T->snap[snapno];
+  SnapEntry *map = &as->T->snapmap[snap->mapofs];
+  MSize n, nent = snap->nent;
   ra_evictset(as, RSET_SCRATCH);
   l_end = emit_label(as);
   /* Exit trace if in GCSatomic or GCSfinalize. Avoids syncing GC objects. */
@@ -3022,6 +3025,25 @@ static void asm_gc_check(ASMState *as)
   /* Insert nop to simplify GC exit recognition in lj_asm_patchexit. */
   if (!jmprel_ok(as->mcp, (MCode *)(void *)ci->func)) *--as->mcp = XI_NOP;
   asm_gencall(as, ci, args);
+  /* Purged dead slots are SNAP_NIL entries: clear them in the Lua stack so a
+  ** stale interpreter value is not a GC root during the step. Use the trace's
+  ** REF_BASE register: RID_BASE is only valid in exit stubs. */
+  {
+    Reg base = ra_alloc1(as, REF_BASE, RSET_GPR);
+    for (n = 0; n < nent; n++) {
+      SnapEntry sn = map[n];
+      if (sn & SNAP_NIL) {
+	int32_t ofs = 8*((int32_t)snap_slot(sn)-1-LJ_FR2);
+#if LJ_GC64
+	emit_i32(as, -1);
+	emit_rmro(as, XO_MOVmi, REX_64, base, ofs);
+#else
+	emit_movmroi(as, base, ofs+4, (int32_t)LJ_TNIL);
+	emit_movmroi(as, base, ofs, 0);
+#endif
+      }
+    }
+  }
   tmp = ra_releasetmp(as, ASMREF_TMP1);
 #if LJ_GC64
   emit_rmro(as, XO_LEA, tmp|REX_64, RID_DISPATCH, GG_DISP2G);

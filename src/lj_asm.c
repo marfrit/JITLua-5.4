@@ -1207,7 +1207,7 @@ static void asm_tdup(ASMState *as, IRIns *ir)
   asm_gencall(as, ci, args);
 }
 
-static void asm_gc_check(ASMState *as);
+static void asm_gc_check(ASMState *as, SnapNo snapno);
 
 /* Explicit GC step. */
 static void asm_gcstep(ASMState *as, IRIns *ir)
@@ -1219,7 +1219,7 @@ static void asm_gcstep(ASMState *as, IRIns *ir)
 	ra_used(ira))
       as->gcsteps++;
   if (as->gcsteps)
-    asm_gc_check(as);
+    asm_gc_check(as, as->snapno);
   as->gcsteps = 0x80000000;  /* Prevent implicit GC check further up. */
 }
 
@@ -1733,7 +1733,7 @@ static void asm_loop(ASMState *as)
   /* LOOP is a guard, so the snapno is up to date. */
   as->loopsnapno = as->snapno;
   if (as->gcsteps)
-    asm_gc_check(as);
+    asm_gc_check(as, as->snapno);
   /* LOOP marks the transition from the variant to the invariant part. */
   as->flagmcp = as->invmcp = NULL;
   as->sectref = 0;
@@ -2613,7 +2613,8 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
 		 "IR %04d has unsplit 64 bit type",
 		 (int)(ir - as->ir) - REF_BIAS);
       asm_snap_prev(as);
-      if (!ra_used(ir) && !ir_sideeff(ir) && (as->flags & JIT_F_OPT_DCE))
+      if (!ra_used(ir) && !ir_sideeff(ir) && (as->flags & JIT_F_OPT_DCE) &&
+	  !(J->flags & JIT_F_WEAKTRACE && ir_isalloc(ir->o)))
 	continue;  /* Dead-code elimination can be soooo easy. */
       if (irt_isguard(ir->t))
 	asm_snap_prep(as);
@@ -2631,7 +2632,7 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
     if (as->gcsteps > 0) {
       as->curins = as->T->snap[0].ref;
       asm_snap_prep(as);  /* The GC check is a guard. */
-      asm_gc_check(as);
+      asm_gc_check(as, 0);
       as->curins = as->stopins;
     }
     ra_evictk(as);

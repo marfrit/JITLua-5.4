@@ -2134,8 +2134,9 @@ static void asm_stack_restore(ASMState *as, SnapShot *snap)
 #define ARM_NOPATCH_GC_CHECK	(ARMI_BIC|ARMI_K12)
 
 /* Check GC threshold and do one or more GC steps. */
-static void asm_gc_check(ASMState *as)
+static void asm_gc_check(ASMState *as, SnapNo snapno)
 {
+  UNUSED(snapno);  /* SNAP_NIL clearing is currently done on arm64/x64. */
   const CCallInfo *ci = &lj_ir_callinfo[IRCALL_lj_gc_step_jit];
   IRRef args[2];
   MCLabel l_end;

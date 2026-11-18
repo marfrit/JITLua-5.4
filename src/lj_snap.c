@@ -61,7 +61,8 @@ void lj_snap_grow_map_(jit_State *J, MSize need)
 /* -- Snapshot generation ------------------------------------------------- */
 
 /* Add all modified slots to the snapshot. */
-static MSize snapshot_slots(jit_State *J, SnapEntry *map, BCReg nslots)
+static MSize snapshot_slots(jit_State *J, SnapEntry *map, BCReg nslots,
+			     BCReg lim)
 {
   IRRef retf = J->chain[IR_RETF];  /* Limits SLOAD restore elimination. */
   BCReg s;
@@ -102,8 +103,17 @@ static MSize snapshot_slots(jit_State *J, SnapEntry *map, BCReg nslots)
       if (LJ_SOFTFP32 && irt_isnum(ir->t))
 	sn |= SNAP_SOFTFPNUM;
       map[n++] = sn;
+    } else if (tr & TREF_PURGED) {
+      /* Dead slot purged at the snapshot PC: restore it as nil, so it does
+      ** not stay a stale GC root on a trace exit. */
+      map[n++] = SNAP(s, SNAP_NIL, REF_NIL);
     }
   }
+  /* A purged temp can sit above the snapshot's live range (e.g. the TGETB
+  ** temp right above the loop's maxslot). Emit those as well. */
+  for (; s < lim; s++)
+    if (J->slot[s] & TREF_PURGED)
+      map[n++] = SNAP(s, SNAP_NIL, REF_NIL);
   return n;
 }
 
@@ -162,12 +172,23 @@ static MSize snapshot_framelinks(jit_State *J, SnapEntry *map, uint8_t *topslot)
 static void snapshot_stack(jit_State *J, SnapShot *snap, MSize nsnapmap)
 {
   BCReg nslots = J->baseslot + J->maxslot;
+  BCReg lim = nslots;
+  BCReg s;
   MSize nent;
   SnapEntry *p;
-  /* Conservative estimate. */
-  lj_snap_grow_map(J, nsnapmap + nslots + (MSize)(LJ_FR2?2:J->framedepth+1));
+  if (J->pt) {  /* Include purged loop-head temps that sit above nslots. */
+    BCReg end = (BCReg)(J->baseslot + J->pt->framesize);
+    if (end > LJ_MAX_JSLOTS) end = LJ_MAX_JSLOTS;
+    for (s = nslots; s < end; s++)
+      if (J->slot[s] & TREF_PURGED) lim = s+1;
+  }
+  /* Conservative estimate (covers the extra purged slots above nslots). */
+  lj_snap_grow_map(J, nsnapmap + lim + (MSize)(LJ_FR2?2:J->framedepth+1));
   p = &J->cur.snapmap[nsnapmap];
-  nent = snapshot_slots(J, p, nslots);
+  nent = snapshot_slots(J, p, nslots, lim);
+  /* The purge sentinel was captured; a purged slot is dead from here on. */
+  for (s = 0; s < lim; s++)
+    if (J->slot[s] & TREF_PURGED) J->slot[s] = 0;
   snap->nent = (uint8_t)nent;
   nent += snapshot_framelinks(J, p + nent, &snap->topslot);
   snap->mapofs = (uint32_t)nsnapmap;
@@ -230,6 +251,7 @@ static BCReg snap_usedef(jit_State *J, uint8_t *udf,
 
 #define USE_SLOT(s)		udf[(s)] &= ~1
 #define DEF_SLOT(s)		udf[(s)] *= 3
+/* Explicitly-named destination slot (not the conservative top cleanup). */
 
   /* Scan through following bytecode and check for uses/defs. */
   lj_assertJ(pc >= proto_bc(J->pt) && pc < proto_bc(J->pt) + J->pt->sizebc,
@@ -339,7 +361,7 @@ static void snap_useuv(GCproto *pt, uint8_t *udf)
 }
 
 /* Purge dead slots before the next snapshot. */
-void lj_snap_purge(jit_State *J)
+static void snap_purge_impl(jit_State *J, int loop)
 {
   uint8_t udf[SNAP_USEDEF_SLOTS];
   BCReg s, maxslot = J->maxslot;
@@ -350,8 +372,37 @@ void lj_snap_purge(jit_State *J)
     snap_useuv(J->pt, udf);
     for (; s < maxslot; s++)
       if (udf[s] != 0)
-	J->base[s] = 0;  /* Purge dead slots. */
+	J->base[s] = TREF_PURGED;  /* Purge dead slots, captured as SNAP_NIL. */
   }
+  if (loop && J->pt) {
+    /* Slots above the loop's live top (LOOP A) that the recorder assigned a
+    ** non-SLOAD value are temps written by the recorded body. They are dead
+    ** at the loop head, but a usedef scan that starts at the backward JMP may
+    ** never see their def. A stale weak value there is otherwise a GC root;
+    ** SLOAD slots are live locals and are left untouched. */
+    BCReg end = (BCReg)(J->baseslot + J->pt->framesize);
+    if (end > LJ_MAX_JSLOTS) end = LJ_MAX_JSLOTS;
+    for (s = (BCReg)(J->baseslot + maxslot); s < end; s++) {
+      TRef tr = J->slot[s];
+      IRRef ref = tref_ref(tr);
+      if (!ref || ref >= J->cur.nins ||
+	  J->cur.ir[ref].o == IR_SLOAD || J->cur.ir[ref].o == IR_NOP ||
+	  J->cur.ir[ref].o == IR_RENAME)
+	continue;
+      J->slot[s] = TREF_PURGED;
+    }
+  }
+}
+
+void lj_snap_purge(jit_State *J)
+{
+  snap_purge_impl(J, 0);
+}
+
+/* Loop-head purge: also catches dead temps just above the loop's live top. */
+void lj_snap_purge_loop(jit_State *J)
+{
+  snap_purge_impl(J, 1);
 }
 
 /* Shrink last snapshot. */
@@ -370,8 +421,9 @@ void lj_snap_shrink(jit_State *J)
   snap->nslots = (uint8_t)maxslot;
   for (n = m = 0; n < nent; n++) {  /* Remove unused slots from snapshot. */
     BCReg s = snap_slot(map[n]);
-    if (s < minslot || (s < maxslot && udf[s-baseslot] == 0))
-      map[m++] = map[n];  /* Only copy used slots. */
+    if ((map[n] & SNAP_NIL) || s < minslot ||
+	(s < maxslot && udf[s-baseslot] == 0))
+      map[m++] = map[n];  /* Only copy used slots (and purged nil entries). */
   }
   snap->nent = (uint8_t)m;
   nlim = J->cur.nsnapmap - snap->mapofs - 1;
@@ -521,6 +573,10 @@ void lj_snap_replay(jit_State *J, GCtrace *T)
     IRRef ref = snap_ref(sn);
     IRIns *ir = &T->ir[ref];
     TRef tr;
+    if (sn & SNAP_NIL) {
+      J->slot[s] = 0;  /* Purged slot: dead in the parent, no inherited value. */
+      continue;
+    }
     /* The bloom filter avoids O(nent^2) overhead for de-duping slots. */
     if (bloomtest(seen, ref) && (tr = snap_dedup(J, map, n, ref)) != 0)
       goto setslot;
@@ -995,6 +1051,10 @@ const BCIns *lj_snap_restore(jit_State *J, void *exptr)
     SnapEntry sn = map[n];
     if (!(sn & SNAP_NORESTORE)) {
       TValue *o = &frame[snap_slot(sn)];
+      if (sn & SNAP_NIL) {
+	setnilV(o);  /* Purged slot: clear the stale interpreter value. */
+	continue;
+      }
       IRRef ref = snap_ref(sn);
       IRIns *ir = &T->ir[ref];
       if (ir->r == RID_SUNK) {

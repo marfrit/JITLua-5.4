@@ -603,6 +603,7 @@ void lj_record_stop(jit_State *J, TraceLink linktype, TraceNo lnk)
   }
 nocanon:
   /* Note: all loop ops must set J->pc to the following instruction! */
+  if (J->pt && bc_op(*J->pc) < BC_FUNCF) lj_snap_purge_loop(J);
   lj_snap_add(J);  /* Add loop snapshot. */
   J->needsnap = 0;
   J->mergesnap = 1;  /* In case recording continues. */
@@ -1877,6 +1878,58 @@ static int nommstr(jit_State *J, TRef key)
   return 1;  /* CANNOT be a metamethod name. */
 }
 
+/* Determine whether a table is weak at record time. Uses the metatable's
+** __mode string (the GC marked bits are stale: they are set during a GC
+** cycle and never cleared when __mode is removed). For a table that is not
+** weak, force the MM_mode absence bit in nomm: the runtime guard requires it
+** to be set, which is what makes a later __mode write detectable. */
+static int rec_tab_weak(jit_State *J, GCtab *t)
+{
+  GCtab *mt = tabref(t->metatable);
+  cTValue *mode;
+  int weak = 0;
+  if (!mt) return 0;
+  mode = lj_meta_fast(J->L, mt, MM_mode);
+  if (mode && tvisstr(mode)) {
+    const char *p = strVdata(mode);
+    int c;
+    while ((c = *p++))
+      if (c == 'k' || c == 'v') { weak = 1; break; }
+  }
+  if (!weak)
+    mt->nomm |= (uint8_t)(1u << MM_mode);  /* Cache "no __mode" for weakness. */
+  return weak;
+}
+
+/* Runtime guard for a table operand of an indexed op. Identical guards are
+** CSE'd by the folder. Guards the metatable pointer and, when a metatable
+** exists, the MM_mode absence bit in nomm. A mismatch exits the trace, so a
+** table that becomes weak later (setmetatable, rawset(mt,"__mode"),
+** mt.__mode=... via TSETS) never runs a trace shaped for a strong table. */
+static void rec_tabguard(jit_State *J, RecordIndex *ix)
+{
+  TRef tab = ix->tab;
+  IRRef1 ref = tref_ref(tab);
+  GCtab *t = tabV(&ix->tabv);
+  GCtab *mt = tabref(t->metatable);
+  uint8_t bit = (uint8_t)(1u << MM_mode);
+  int weak = rec_tab_weak(J, t);
+  if (weak) J->flags |= JIT_F_WEAKTRACE;
+  if (!ref) return;
+  {
+    TRef mtref = emitir(IRT(IR_FLOAD, IRT_TAB), tab, IRFL_TAB_META);
+    if (mt)
+      emitir(IRTG(IR_EQ, IRT_TAB), mtref, lj_ir_kgc(J, obj2gco(mt), IRT_TAB));
+    else
+      emitir(IRTG(IR_EQ, IRT_TAB), mtref, lj_ir_knull(J, IRT_TAB));
+    if (mt) {
+      TRef nm = emitir(IRT(IR_FLOAD, IRT_U8), mtref, IRFL_TAB_NOMM);
+      TRef b = emitir(IRTI(IR_BAND), nm, lj_ir_kint(J, bit));
+      emitir(IRTGI(IR_EQ), b, lj_ir_kint(J, weak ? 0 : bit));
+    }
+  }
+}
+
 /* Record indexed load/store. */
 TRef lj_record_idx(jit_State *J, RecordIndex *ix)
 {
@@ -1926,6 +1979,9 @@ TRef lj_record_idx(jit_State *J, RecordIndex *ix)
     if (--ix->idxchain == 0)
       lj_trace_err(J, LJ_TRERR_IDXLOOP);
   }
+
+  /* Runtime weak/metatable guard for this table operand. */
+  rec_tabguard(J, ix);
 
   /* First catch nil and NaN keys for tables. */
   if (tvisnil(&ix->keyv) || (tvisnum(&ix->keyv) && tvisnan(&ix->keyv))) {
@@ -3334,6 +3390,7 @@ void lj_record_setup(jit_State *J)
   J->loopunroll = J->param[JIT_P_loopunroll];
   J->tailcalled = 0;
   J->loopref = 0;
+  J->flags &= ~JIT_F_WEAKTRACE;
 
   J->bc_min = NULL;  /* Means no limit. */
   J->bc_extent = ~(MSize)0;
@@ -3388,6 +3445,7 @@ void lj_record_setup(jit_State *J)
     ** at the start! So snapshot #0 needs to point to the *next* instruction.
     ** The one exception is BC_ITERN, which sets LJ_TRACE_RECORD_1ST.
     */
+    if (J->pt && bc_op(*J->pc) < BC_FUNCF) lj_snap_purge_loop(J);
     lj_snap_add(J);
     if (bc_op(J->cur.startins) == BC_FORL)
       rec_for_loop(J, J->pc-1, &J->scev, 1);

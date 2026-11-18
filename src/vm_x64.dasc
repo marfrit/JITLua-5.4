@@ -1379,7 +1379,12 @@ static void build_subroutines(BuildCtx *ctx)
   |  jmp ->fff_res1
   |
   |6:
-  |  cmp ITYPEd, LJ_TUDATA; je <1
+  |  cmp ITYPEd, LJ_TUDATA; jne >8
+  |  cmp byte UDATA:RB->udtype, UDTYPE_I64BOX
+  |  jne <1
+  |  mov TAB:RB, [DISPATCH+DISPATCH_GL(gcroot[GCROOT_BASEMT_NUM])]
+  |  jmp <2
+  |8:
   |  cmp ITYPEd, LJ_TISNUM; ja >7
   |  mov ITYPEd, LJ_TISNUM
   |7:

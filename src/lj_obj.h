@@ -875,12 +875,14 @@ typedef union GCobj {
 #define tvispone(o)	((o)->u64 == U64x(3ff00000,00000000))
 #define rawnumequal(o1, o2)	((o1)->u64 == (o2)->u64)
 
-/* Macros to convert type ids. */
+/* Macros to convert type ids. ADR-001b: a boxed int64 is a number for the
+** base metatable and the type name, although it carries the userdata tag. */
 #if LJ_64 && !LJ_GC64
 #define itypemap(o) \
-  (tvisnumber(o) ? ~LJ_TNUMX : tvislightud(o) ? ~LJ_TLIGHTUD : ~itype(o))
+  (tvisnumber(o) || tvisi64(o) ? ~LJ_TNUMX : \
+   tvislightud(o) ? ~LJ_TLIGHTUD : ~itype(o))
 #else
-#define itypemap(o)	(tvisnumber(o) ? ~LJ_TNUMX : ~itype(o))
+#define itypemap(o)	(tvisnumber(o) || tvisi64(o) ? ~LJ_TNUMX : ~itype(o))
 #endif
 
 /* Macros to get tagged values. */

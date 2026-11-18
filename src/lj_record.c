@@ -1383,14 +1383,7 @@ int lj_record_mm_lookup(jit_State *J, RecordIndex *ix, MMS mm)
   if (tref_istab(ix->tab)) {
     mt = tabref(tabV(&ix->tabv)->metatable);
     mix.tab = emitir(IRT(IR_FLOAD, IRT_TAB), ix->tab, IRFL_TAB_META);
-  } else if (tvisi64(&ix->tabv)) {
-    /* ADR-001b step 4: a boxed int64 is an immutable number -- it has no
-    ** metatable, and taking the "special userdata" branch below dereferenced
-    ** the NULL metatable (segfault measured on a traced tostring). */
-    ix->mt = TREF_NIL;
-    ix->mtv = NULL;  /* no metatable */
-    return 0;  /* No metamethod. */
-  } else if (tref_isudata(ix->tab)) {
+  } else if (tref_isudata(ix->tab) && !tvisi64(&ix->tabv)) {
     int udtype = udataV(&ix->tabv)->udtype;
     mt = tabref(udataV(&ix->tabv)->metatable);
     mix.tab = emitir(IRT(IR_FLOAD, IRT_TAB), ix->tab, IRFL_UDATA_META);

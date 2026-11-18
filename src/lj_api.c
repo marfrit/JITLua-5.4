@@ -360,7 +360,7 @@ LUA_API int lua_isstring(lua_State *L, int idx)
 LUA_API int lua_isuserdata(lua_State *L, int idx)
 {
   cTValue *o = index2adr(L, idx);
-  return (tvisudata(o) || tvislightud(o));
+  return (tvisudata(o) && !tvisi64(o)) || tvislightud(o);
 }
 
 LUA_API int lua_rawequal(lua_State *L, int idx1, int idx2)
@@ -565,6 +565,8 @@ LUA_API void lua_len(lua_State *L, int idx)
     } else {
       if (tvistab(o))
 	setint64V(L->top, (int64_t)lj_tab_len(tabV(o)));
+      else if (tvisi64(o))  /* 5.4: a number without __len has no length */
+	lj_err_optype(L, o, LJ_ERR_OPLEN);
       else
 	setint64V(L->top, (int64_t)udataV(o)->len);
       incr_top(L);
@@ -921,9 +923,9 @@ LUA_API size_t lua_objlen(lua_State *L, int idx)
     return strV(o)->len;
   } else if (tvistab(o)) {
     return (size_t)lj_tab_len(tabV(o));
-  } else if (tvisudata(o)) {
+  } else if (tvisudata(o) && !tvisi64(o)) {
     return udataV(o)->len;
-  } else if (tvisnumber(o)) {
+  } else if (tvisnumber(o) || tvisi64(o)) {
     GCstr *s = lj_strfmt_number(L, o);
     setstrV(L, o, s);
     return s->len;
@@ -1327,7 +1329,7 @@ LUA_API int lua_getmetatable(lua_State *L, int idx)
   GCtab *mt = NULL;
   if (tvistab(o))
     mt = tabref(tabV(o)->metatable);
-  else if (tvisudata(o))
+  else if (tvisudata(o) && !tvisi64(o))  /* boxed int64 is a number */
     mt = tabref(udataV(o)->metatable);
   else
     mt = tabref(basemt_obj(G(L), o));
@@ -1363,7 +1365,7 @@ LUA_API void lua_getfenv(lua_State *L, int idx)
   cTValue *o = index2adr_check(L, idx);
   if (tvisfunc(o)) {
     settabV(L, L->top, tabref(funcV(o)->c.env));
-  } else if (tvisudata(o)) {
+  } else if (tvisudata(o) && !tvisi64(o)) {  /* boxed int64 is a number */
     GCudata *ud = udataV(o);
     if (ud->udtype == UDTYPE_USERDATA) {
       {  /* The 5.1 fenv view: a table env if any (user values are 5.4's). */
@@ -1456,7 +1458,7 @@ LUA_API void lua_upvaluejoin(lua_State *L, int idx1, int n1, int idx2, int n2)
 LUALIB_API void *luaL_testudata(lua_State *L, int idx, const char *tname)
 {
   cTValue *o = index2adr(L, idx);
-  if (tvisudata(o)) {
+  if (tvisudata(o) && !tvisi64(o)) {  /* boxed int64 is a number */
     GCudata *ud = udataV(o);
     cTValue *tv = lj_tab_getstr(tabV(registry(L)), lj_str_newz(L, tname));
     if (tv && tvistab(tv) && tabV(tv) == tabref(ud->metatable))
@@ -1577,7 +1579,7 @@ LUA_API int lua_setmetatable(lua_State *L, int idx)
     setgcref(tabV(o)->metatable, obj2gco(mt));
     if (mt)
       lj_gc_objbarriert(L, tabV(o), mt);
-  } else if (tvisudata(o)) {
+  } else if (tvisudata(o) && !tvisi64(o)) {  /* boxed int64 is a number */
     setgcref(udataV(o)->metatable, obj2gco(mt));
     if (mt)
       lj_gc_objbarrier(L, udataV(o), mt);
@@ -1614,7 +1616,7 @@ LUA_API int lua_setfenv(lua_State *L, int idx)
   t = tabV(L->top-1);
   if (tvisfunc(o)) {
     setgcref(funcV(o)->c.env, obj2gco(t));
-  } else if (tvisudata(o)) {
+  } else if (tvisudata(o) && !tvisi64(o)) {  /* boxed int64 is a number */
     GCudata *ud = udataV(o);
     setgcref(ud->env, obj2gco(t));
   } else if (tvisthread(o)) {
@@ -1633,7 +1635,7 @@ LUA_API int lua_getiuservalue(lua_State *L, int idx, int n)
   cTValue *o = index2adr(L, idx);
   lj_checkapi_slot(1);
   GCudata *ud;
-  lj_checkapi(tvisudata(o), "stack slot %d is not a userdata", idx);
+  lj_checkapi(tvisudata(o) && !tvisi64(o), "stack slot %d is not a userdata", idx);
   ud = udataV(o);
   if (n <= 0 || (MSize)n > ud->nuvalue) {
     setnilV(L->top);
@@ -1651,7 +1653,7 @@ LUA_API int lua_setiuservalue(lua_State *L, int idx, int n)
   GCudata *ud;
   int res = 0;
   lj_checkapi_slot(1);
-  lj_checkapi(tvisudata(o), "stack slot %d is not a userdata", idx);
+  lj_checkapi(tvisudata(o) && !tvisi64(o), "stack slot %d is not a userdata", idx);
   ud = udataV(o);
   if (n > 0 && (MSize)n <= ud->nuvalue) {
     TValue *uv = &uduvs(ud)[n-1];

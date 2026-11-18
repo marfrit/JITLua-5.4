@@ -77,10 +77,10 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   runtime guard on the metatable pointer and the `__mode` negative-cache bit
   exits the trace when a table becomes weak after it was compiled
   (setmetatable, `rawset(mt,"__mode")`, `mt.__mode = ...` via TSETS).
-  Remaining boundary: a compiled loop with no allocation at all and only a
-  weak-table read (`while x[1] do A = A+1 end`) still spins without making GC
-  progress; PUC 5.4 hangs on the same shape, so this is out of scope.
-  `tests/d54/weak_*.lua` bound the shapes that allocate.
+  Same as PUC 5.4: a loop that allocates nothing never runs the GC, so a weak
+  entry it only reads (`while x[1] do A = A+1 end`) is never collected; -joff
+  behaves the same. `tests/d54/weak_*.lua` cover the shapes that allocate;
+  `weak_noalloc_boundary.lua` records the parity boundary.
 
 ### Known JIT/performance rows (not semantic divergences)
 - `FIXED` arm64 `bit.lshift/rshift/arshift/rol/ror` returned 0 for native and

@@ -30,3 +30,24 @@ read cannot make GC progress; PUC 5.4 hangs on that shape too. Documented in
 Measurement note: the earlier session read the debug slot as bytecode slot 3
 and concluded it was below `nslots=5`. In snapshot coordinates it is the first
 slot above the live range (J slot `nslots`); both arches agree.
+
+## Round 3: C-side GC clearing, 64-bit pak, regression test
+
+The GC-check clearing moved out of asm entirely. The asm slow path is skipped
+when gc.total < gc.threshold, so no allocator action may be emitted there; the
+old code called ra_alloc1(REF_BASE) inside it (a remat load at jit_base). The
+observable regression was arm `i64_02_jit.lua [B@2]` (deterministic wrong int64
+values), red on the asm variants and green after.
+
+`lj_gc_step_jit` now takes a 64-bit pak on GC64 targets (traceno 16 b, exit
+snapshot 16 b, step count 32 b), loaded as one emit_loadu64 into the existing
+ASMREF_TMP2 register. The C side finds the trace by traceno (not g->vmstate:
+arm64 stores 0 on trace), clears the SNAP_NIL slots of T->snap[snapno] relative
+to jit_base, and returns early when the snapshot has no SNAP_NIL. 32-bit
+backends keep the old 2-arg call with no clearing; snapshot_slots asserts that
+such a target never emits SNAP_NIL. Built/gated targets: x64 and arm64.
+
+A weak shape with SNAP_NIL under register pressure does not go red: in the
+inspected -jdump=+rs the remat and its uses both sit inside the slow path, and
+the body does not need REF_BASE after the check. `weak_maxsnap.lua` sets
+maxsnap/maxtrace above the defaults and forces a loop snapshot index > 511.

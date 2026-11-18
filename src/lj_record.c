@@ -1880,60 +1880,49 @@ static int nommstr(jit_State *J, TRef key)
   return 1;  /* CANNOT be a metamethod name. */
 }
 
-/* Determine whether a table is weak at record time. Uses the metatable's
-** __mode string (the GC marked bits are stale: they are set during a GC
-** cycle and never cleared when __mode is removed). For a table that is not
-** weak, force the MM_mode absence bit in nomm: the runtime guard requires it
-** to be set, which is what makes a later __mode write detectable. */
-static int rec_tab_weak(jit_State *J, GCtab *t)
-{
-  GCtab *mt = tabref(t->metatable);
-  cTValue *mode;
-  int weak = 0;
-  if (!mt) return 0;
-  mode = lj_meta_fast(J->L, mt, MM_mode);
-  if (mode && tvisstr(mode)) {
-    const char *p = strVdata(mode);
-    int c;
-    while ((c = *p++))
-      if (c == 'k' || c == 'v') { weak = 1; break; }
-  }
-  if (!weak)
-    mt->nomm |= (uint8_t)(1u << MM_mode);  /* Cache "no __mode" for weakness. */
-  return weak;
-}
+static TRef rec_idx(jit_State *J, RecordIndex *ix, int tabguard);
 
-/* Runtime guard for a table operand of an indexed op. Identical guards are
-** CSE'd by the folder. Guards the metatable pointer and, when a metatable
-** exists, the MM_mode absence bit in nomm. A mismatch exits the trace, so a
-** table that becomes weak later (setmetatable, rawset(mt,"__mode"),
-** mt.__mode=... via TSETS) never runs a trace shaped for a strong table. */
-static void rec_tabguard(jit_State *J, RecordIndex *ix)
+/* Runtime guard for a table that a trace reads entries from.
+**
+** A trace is shaped by the weakness of its tables at record time: a trace
+** that read a weak table keeps its allocations and clears dead stack slots
+** (JIT_F_WEAKTRACE), any other trace does neither. So guard the metatable
+** and the value of its __mode field. The field is looked up like any other
+** constant key, with the metatable as a constant: one invariant check per
+** metatable and trace. Do not use the negative metamethod cache (nomm) for
+** this: every string-keyed store to the metatable clears it.
+*/
+static void rec_tabguard(jit_State *J, TRef tab, GCtab *t)
 {
-  TRef tab = ix->tab;
-  IRRef1 ref = tref_ref(tab);
-  GCtab *t = tabV(&ix->tabv);
   GCtab *mt = tabref(t->metatable);
-  uint8_t bit = (uint8_t)(1u << MM_mode);
-  int weak = rec_tab_weak(J, t);
-  if (weak) J->flags |= JIT_F_WEAKTRACE;
-  if (!ref) return;
-  {
-    TRef mtref = emitir(IRT(IR_FLOAD, IRT_TAB), tab, IRFL_TAB_META);
-    if (mt)
-      emitir(IRTG(IR_EQ, IRT_TAB), mtref, lj_ir_kgc(J, obj2gco(mt), IRT_TAB));
-    else
-      emitir(IRTG(IR_EQ, IRT_TAB), mtref, lj_ir_knull(J, IRT_TAB));
-    if (mt) {
-      TRef nm = emitir(IRT(IR_FLOAD, IRT_U8), mtref, IRFL_TAB_NOMM);
-      TRef b = emitir(IRTI(IR_BAND), nm, lj_ir_kint(J, bit));
-      emitir(IRTGI(IR_EQ), b, lj_ir_kint(J, weak ? 0 : bit));
+  TRef mtref = emitir(IRT(IR_FLOAD, IRT_TAB), tab, IRFL_TAB_META);
+  if (mt == NULL) {
+    emitir(IRTG(IR_EQ, IRT_TAB), mtref, lj_ir_knull(J, IRT_TAB));
+  } else {
+    GCstr *mmstr = mmname_str(J2G(J), MM_mode);
+    cTValue *mode = lj_tab_getstr(mt, mmstr);
+    TRef kmt = lj_ir_ktab(J, mt);
+    RecordIndex mix;
+    TRef trmode;
+    emitir(IRTG(IR_EQ, IRT_TAB), mtref, kmt);
+    mix.tab = kmt;
+    settabV(J->L, &mix.tabv, mt);
+    mix.key = lj_ir_kstr(J, mmstr);
+    setstrV(J->L, &mix.keyv, mmstr);
+    mix.val = 0;
+    mix.idxchain = 0;
+    trmode = rec_idx(J, &mix, 0);  /* Guards the type or the absence. */
+    if (mode && tvisstr(mode)) {
+      GCstr *str = strV(mode);
+      emitir(IRTG(IR_EQ, IRT_STR), trmode, lj_ir_kstr(J, str));
+      if (strchr(strdata(str), 'k') || strchr(strdata(str), 'v'))
+	J->flags |= JIT_F_WEAKTRACE;
     }
   }
 }
 
 /* Record indexed load/store. */
-TRef lj_record_idx(jit_State *J, RecordIndex *ix)
+static TRef rec_idx(jit_State *J, RecordIndex *ix, int tabguard)
 {
   TRef xref;
   IROp xrefop, loadop;
@@ -1982,8 +1971,9 @@ TRef lj_record_idx(jit_State *J, RecordIndex *ix)
       lj_trace_err(J, LJ_TRERR_IDXLOOP);
   }
 
-  /* Runtime weak/metatable guard for this table operand. */
-  rec_tabguard(J, ix);
+  /* Guard the weakness of this table operand (not for the guard's lookup). */
+  if (tabguard)
+    rec_tabguard(J, ix->tab, tabV(&ix->tabv));
 
   /* First catch nil and NaN keys for tables. */
   if (tvisnil(&ix->keyv) || (tvisnum(&ix->keyv) && tvisnan(&ix->keyv))) {
@@ -2107,6 +2097,11 @@ static IRType rec_next_types(GCtab *t, uint32_t idx)
       return itype2irt_i64(&n->key) + (itype2irt_i64(&n->val) << 8);
   }
   return IRT_NIL + (IRT_NIL << 8);
+}
+
+TRef lj_record_idx(jit_State *J, RecordIndex *ix)
+{
+  return rec_idx(J, ix, 1);
 }
 
 /* Record a table traversal step aka next(). */

@@ -24,7 +24,9 @@ import fnmatch
 import json
 import os
 import re
+import resource
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -88,12 +90,43 @@ def child_env():
 
 ENV = child_env()
 
+# Address-space limiting for the memory-heavy corpus files (puc54/heavy.lua).
+# prlimit is preferred because a preexec_fn is unsafe with the job thread pool.
+HAVE_PRLIMIT = shutil.which("prlimit") is not None
 
-def run(argv, cwd, timeout):
-    """Run a child in its own process group; return (rc, out, err, timed_out)."""
+
+def parse_size(s):
+    """'4G' -> 4294967296; a bare number is bytes."""
+    s = str(s).strip().upper()
+    mult = {"K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40}
+    if s and s[-1] in mult:
+        return int(s[:-1]) * mult[s[-1]]
+    return int(s)
+
+
+def _as_limit(n):
+    def _set():
+        resource.setrlimit(resource.RLIMIT_AS, (n, n))
+    return _set
+
+
+def run(argv, cwd, timeout, mem_limit=None):
+    """Run a child in its own process group; return (rc, out, err, timed_out).
+
+    mem_limit caps RLIMIT_AS for both arms of puc54/heavy.lua: the reference
+    and our binary then end in an allowed "not enough memory"/table-overflow
+    error instead of OOM-killing the box.
+    """
+    preexec = None
+    if mem_limit:
+        if HAVE_PRLIMIT:
+            argv = ["prlimit", "--as=%d" % mem_limit, "--"] + list(argv)
+        else:
+            preexec = _as_limit(mem_limit)
     try:
         p = subprocess.Popen(argv, cwd=str(cwd), env=ENV, stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE, start_new_session=True)
+                             stderr=subprocess.PIPE, start_new_session=True,
+                             preexec_fn=preexec)
     except OSError as e:
         return (-2, "", "cannot execute %s: %s" % (argv[0], e), False)
     try:
@@ -128,7 +161,7 @@ def discover(corpus_dirs, filters, include_heavy=False):
             if "/libs/" in rel or "/packtests/" in rel:
                 continue
             if rel.endswith("/puc54/heavy.lua") and not include_heavy:
-                continue  # OOMs the 8G boxes; explicit --include-heavy stage only.
+                continue  # RLIMIT_AS-capped, explicit --include-heavy stage only.
             if filters and not any(fnmatch.fnmatch(rel, f) or f in rel for f in filters):
                 continue
             tests.append(p)
@@ -244,6 +277,9 @@ class Job:
         ref = ctx["ref"]
         extra = self.args
         to = self.timeout
+        # Both arms of the heavy file run under an address-space cap; the
+        # resulting memory error is an allowed outcome (Lua manual 3.4.7).
+        ml = o.heavy_mem_limit if self.rel.endswith("puc54/heavy.lua") else None
         if ctx.get("gc_stress"):
             # GC stress: the collector runs on every allocation (pause 0), in
             # every arm, so a value that is kept alive only by luck (a box
@@ -253,19 +289,19 @@ class Job:
         else:
             extra_pre = []
         if self.mode == "A":
-            a = run([ref] + extra_pre + [name] + extra, cwd, to)
-            b = run([jit, "-joff"] + extra_pre + [name] + extra, cwd, to)
+            a = run([ref] + extra_pre + [name] + extra, cwd, to, ml)
+            b = run([jit, "-joff"] + extra_pre + [name] + extra, cwd, to, ml)
             mismatch, detail = compare(a, b, "puc54", "luajit-jitoff")
         elif self.mode.startswith("B"):
             on = [jit, "-jon"]
             if "@" in self.mode:
                 on += ["-O" + self.mode.split("@", 1)[1]]
-            a = run(on + extra_pre + [name] + extra, cwd, to)
-            b = run([jit, "-joff"] + extra_pre + [name] + extra, cwd, to)
+            a = run(on + extra_pre + [name] + extra, cwd, to, ml)
+            b = run([jit, "-joff"] + extra_pre + [name] + extra, cwd, to, ml)
             mismatch, detail = compare(a, b, "luajit-jiton", "luajit-jitoff")
         elif self.mode == "R":
-            a = run([jit, "-joff"] + extra_pre + [name] + extra, cwd, to)
-            b = run([jit, "-joff"] + extra_pre + [str(DUMP_RELOAD), name] + extra, cwd, to)
+            a = run([jit, "-joff"] + extra_pre + [name] + extra, cwd, to, ml)
+            b = run([jit, "-joff"] + extra_pre + [str(DUMP_RELOAD), name] + extra, cwd, to, ml)
             mismatch, detail = compare(a, b, "direct", "dump-reload")
         else:
             raise ValueError(self.mode)
@@ -354,9 +390,12 @@ def main():
     ap.add_argument("--gc-stress", action="store_true",
                     help="run every arm with collectgarbage('setpause', 0)")
     ap.add_argument("--include-heavy", action="store_true",
-                    help="include puc54/heavy.lua (needs >8G; run alone, not in the default corpus)")
+                    help="include puc54/heavy.lua; both arms run under --heavy-mem-limit. Run alone, not in the default corpus")
+    ap.add_argument("--heavy-mem-limit", default="4G",
+                    help="RLIMIT_AS for every puc54/heavy.lua arm (bytes or K/M/G/T suffix; default 4G)")
     ap.add_argument("--list", action="store_true")
     opts = ap.parse_args()
+    opts.heavy_mem_limit = parse_size(opts.heavy_mem_limit)
 
     modes = {"A": ["A"], "B": ["B"], "R": ["R"], "both": ["A", "B"],
              "all": ["A", "B", "R"]}[opts.mode]

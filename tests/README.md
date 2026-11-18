@@ -40,6 +40,19 @@ tests/harness.sh --list
 LUAJIT=tests/ref/sanbuild/src/luajit tests/harness.sh --corpus tests/d54
 ```
 
+### Memory-heavy files
+`tests/corpus/puc54/heavy.lua` is excluded from the default corpus. Run it
+explicitly with a generous timeout (`--timeout 120` or more):
+```sh
+tests/harness.sh --include-heavy --timeout 300 --corpus tests/corpus/puc54 \
+  --filter heavy --mode all --verbose
+```
+Both arms then run under a 4 GiB address-space cap (`RLIMIT_AS`, applied with
+`prlimit` when available, otherwise a `preexec_fn`); `--heavy-mem-limit` changes
+it (`K`/`M`/`G`/`T` suffix or bytes). The resulting "not enough memory" /
+"table overflow" error is an allowed outcome, so the file is an `XFAIL` entry
+in `known-bad.tsv`, not a `FAIL`.
+
 ## Statuses
 `PASS` / `FAIL` (unexpected, exit 1) / `XFAIL` (listed in `known-bad.tsv`) /
 `XPASS` (listed but now passing — remove the entry) / `SKIP` (directive, or PUC

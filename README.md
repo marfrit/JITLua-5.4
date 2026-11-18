@@ -30,9 +30,9 @@ Status as measured, not a compatibility claim:
   JIT-on is slow on arm64; classic benchmark runs show remaining gaps in
   deltablue, x64 spectral-norm and x64 k-nucleotide
   ([docs/perf-regression-2026-11-17.md](docs/perf-regression-2026-11-17.md)).
-- **Not yet covered:** arbitrary `_ENV` values, `lua_getextraspace`, the
-  no-op `lua_setcstacklimit`, and the remaining pcall/`__call` VM work. See
-  the two files above for the exact list.
+- **Not yet covered:** arbitrary `_ENV` values, the no-op
+  `lua_setcstacklimit`, and the remaining pcall/`__call` VM work. See the
+  two files above for the exact list.
 
 ## Build
 

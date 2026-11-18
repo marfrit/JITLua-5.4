@@ -65,10 +65,13 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   `(1):floor()` works but `((1 << 50) + 3):floor()` raises, and
   `getmetatable` of such an integer returns nil (PUC returns the number
   metatable). Interpreter and JIT agree; found in the release review.
-- `PENDING` `lua_getextraspace`: there is no reserved pointer-sized area before
-  `lua_State`. Adding one would need a layout change in `GG_State` and in every
-  per-thread allocation, moving the GC object/interior pointer and the assembler
-  offsets; not done. Modules using it need a portable side area instead.
+- `FIXED` `lua_getextraspace`: implemented with PUC 5.4 semantics (a
+  `LUA_EXTRASPACE` raw area per thread, `lua_getextraspace` returns it, a new
+  thread copies the main thread's area, freed with the thread). The area is
+  appended to the end of `struct lua_State` instead of sitting before it, so
+  the GC object pointer and every assembler offset stay put; only
+  `sizeof(lua_State)` grows. Kept for traceability (`tests/capi`
+  `test_extraspace`).
 
 ### Known JIT/performance rows (not semantic divergences)
 - `FIXED` arm64 `bit.lshift/rshift/arshift/rol/ror` returned 0 for native and

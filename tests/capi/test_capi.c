@@ -7,8 +7,10 @@
 #include <math.h>
 #include <stdlib.h>
 #include "lua.h"
+#define LUAJIT_NUMMODE 2  /* only for the internal lj_obj.h stack-room probe */
 #include "lauxlib.h"
 #include "lualib.h"
+#include "lj_obj.h"  /* test-only: stack room for the buffer close case */
 
 static int failures = 0, checks = 0;
 
@@ -910,20 +912,32 @@ static int grow_buffer_c(lua_State *L)
 {
   luaL_Buffer b;
   char *p;
+  TValue *stack_before;
   size_t i, total = 3*LUAL_BUFFERSIZE + 123;
-  int j;
+  char last = (char)('a' + (int)((total-1) % 26));
+  int nfill = 0, moved;
   lua_settop(L, 0);
-  /* Fill BEFORE buffinit: the fillers stay below the buffer's placeholder /
-  ** box, so luaL_pushresult sees the box at -2 and lua_closeslot can close it
-  ** on an exhausted stack. */
-  for (j = 0; j < LUA_MINSTACK; j++) lua_pushinteger(L, j);
+  /* Leave exactly 22 free slots before buffinit: placeholder 21, box swap
+  ** 21, pushlstring 20, error anchor 19; the closer's checkstack(20) must
+  ** grow the stack. Fill BEFORE buffinit so the fillers stay below the box. */
+  while (tvref(L->maxstack) - L->top > 22) {
+    lua_pushinteger(L, nfill);
+    nfill++;
+  }
   luaL_buffinit(L, &b);
   p = luaL_prepbuffsize(&b, total);
   for (i = 0; i < total; i++) p[i] = (char)('a' + (int)(i % 26));
   luaL_addsize(&b, total);
-  luaL_pushresultsize(&b, 0);  /* closes the box on a full stack */
-  ok(lua_gettop(L) == LUA_MINSTACK+1,
+  stack_before = tvref(L->stack);
+  luaL_pushresultsize(&b, 0);  /* closes the box on an exhausted stack */
+  moved = tvref(L->stack) != stack_before;
+  ok(moved, "box close moved the Lua stack");
+  ok(lua_gettop(L) == nfill+1,
      "pushresult leaves exactly the string above the fillers");
+  ok(lua_rawlen(L, -1) == total &&
+     lua_tolstring(L, -1, NULL)[0] == 'a' &&
+     lua_tolstring(L, -1, NULL)[total-1] == last,
+     "pushresult returns the gathered buffer string");
   lua_pushinteger(L, (lua_Integer)lua_rawlen(L, -1));
   return 2;
 }
@@ -1057,20 +1071,19 @@ static void test_toclose(void)
      "lua_settop keeps the __close error string");
   lua_pop(L, 1);
 
-  /* Deep __close recursion inside a buffer close: the stack must be able to
-  ** grow while lua_closeslot runs. */
-  luaL_dostring(L,
-    "local function deep(n) if n == 0 then return 0 end return 1 + deep(n-1) end\n"
-    "close_obj = setmetatable({}, {__close=function() data.depth = data.depth + 1; deep(300) end})\n"
-    "data = {depth=0}\n"
-    "local s, n = grow_buffer_c()\n"
-    "assert(#s == 3*LUAL_BUFFERSIZE + 123 and n == #s, n)\n"
-    "local m = addvalue_boxed_c()\n"
-    "assert(m == LUAL_BUFFERSIZE + 14, m)");
-  lua_getglobal(L, "data");
-  lua_getfield(L, -1, "depth");
-  ok(lua_tointeger(L, -1) >= 0, "buffer growth/addvalue survive stack moves");
-  lua_pop(L, 2);
+  /* LUAL_BUFFERSIZE is a C macro; expose it to the Lua chunk. */
+  lua_pushinteger(L, LUAL_BUFFERSIZE);
+  lua_setglobal(L, "LUAL_BUFFERSIZE");
+  {
+    int st = luaL_dostring(L,
+      "local s, n = grow_buffer_c()\n"
+      "assert(#s == 3*LUAL_BUFFERSIZE + 123 and n == #s, n)\n"
+      "local t, m = addvalue_boxed_c()\n"
+      "assert(m == LUAL_BUFFERSIZE + 14 and t:sub(-4) == 'tail', m)");
+    ok(st == LUA_OK, st == LUA_OK ? "buffer growth and boxed addvalue checks ran"
+                                  : lua_tostring(L, -1));
+    if (st != LUA_OK) lua_pop(L, 1);
+  }
 
   luaL_dostring(L, "ok, msg = pcall(argexpected_c, {})");
   lua_getglobal(L, "ok");
@@ -1170,8 +1183,7 @@ static void test_closethread(void)
 
   {
     int top = lua_gettop(L);
-    lua_pushcfunction(L, luaopen_coroutine);
-    lua_call(L, 0, 1);
+    luaopen_coroutine(L);  /* direct call: lua_call would normalize to one */
     ok(lua_gettop(L) == top+1, "luaopen_coroutine leaves one value");
   }
   ok(lua_istable(L, -1), "luaopen_coroutine returns a table");
@@ -1181,8 +1193,7 @@ static void test_closethread(void)
   lua_close(L);
   {
     lua_State *L2 = luaL_newstate();  /* no luaL_openlibs: fallback path */
-    lua_pushcfunction(L2, luaopen_coroutine);
-    lua_call(L2, 0, 1);
+    luaopen_coroutine(L2);  /* direct call on a fresh state */
     ok(lua_gettop(L2) == 1, "luaopen_coroutine leaves one value on a fresh state");
     ok(lua_istable(L2, -1), "luaopen_coroutine installs base on demand");
     lua_getfield(L2, -1, "resume");

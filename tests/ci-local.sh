@@ -57,6 +57,8 @@ ASAN_OPTIONS=detect_leaks=0:abort_on_error=1 \
 # C API checks also under -DLUA_USE_ASSERT -DLUA_USE_APICHECK: the ordinary
 # sanitizer build does not enable LuaJIT's API assertions, so a broken buffer
 # stack discipline or an invalid rotation would pass unnoticed.
+# Only --sanitizers-only rebuilds this; a normal ci-local run reuses an
+# existing assert build when present.
 ASSERTBUILD="$ROOT/tests/ref/assertbuild"
 if [ ! -f "$ASSERTBUILD/src/libluajit.a" ] || [ "$SAN" = 1 ]; then
   rm -rf "$ASSERTBUILD"

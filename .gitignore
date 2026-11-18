@@ -15,6 +15,7 @@
 tests/ref/bin/
 tests/ref/src/
 tests/ref/sanbuild/
+tests/ref/assertbuild/
 tests/report/
 tests/fuzz/out/
 tests/fuzz/failures/

@@ -374,22 +374,22 @@ static void snap_purge_impl(jit_State *J, int loop)
       if (udf[s] != 0)
 	J->base[s] = TREF_PURGED;  /* Purge dead slots, captured as SNAP_NIL. */
   }
-  if (loop && J->pt) {
-    /* Slots above the loop's live top (LOOP A) that the recorder assigned a
-    ** non-SLOAD value are temps written by the recorded body. They are dead
-    ** at the loop head, but a usedef scan that starts at the backward JMP may
-    ** never see their def. A stale weak value there is otherwise a GC root;
-    ** SLOAD slots are live locals and are left untouched. */
-    BCReg end = (BCReg)(J->baseslot + J->pt->framesize);
-    if (end > LJ_MAX_JSLOTS) end = LJ_MAX_JSLOTS;
-    for (s = (BCReg)(J->baseslot + maxslot); s < end; s++) {
-      TRef tr = J->slot[s];
-      IRRef ref = tref_ref(tr);
-      if (!ref || ref >= J->cur.nins ||
-	  J->cur.ir[ref].o == IR_SLOAD || J->cur.ir[ref].o == IR_NOP ||
-	  J->cur.ir[ref].o == IR_RENAME)
-	continue;
-      J->slot[s] = TREF_PURGED;
+  if (loop && J->pt && (J->flags & JIT_F_WEAKTRACE)) {
+    /* Only a trace that indexes a weak table needs this: the loop-head
+    ** instruction writes its result into the first slot above the loop's live
+    ** top (LOOP A). That temp is dead at the loop head, but a usedef scan that
+    ** starts at the backward JMP may never see its def; a stale weak value
+    ** there would stay a GC root. Require the head bytecode to write exactly
+    ** that slot. Slots above the live top can otherwise be live locals. */
+    /* The trace starts at BC_LOOP (root) or at the exit PC (side trace). In
+    ** both cases the loop-head instruction writes the first slot above the
+    ** loop's live top, i.e. maxslot (LOOP A == maxslot for while loops). */
+    const BCIns *sp = J->startpc;
+    if (sp) {
+      BCOp op = bc_op(*sp);
+      if ((op == BC_LOOP && bc_a(*sp) == maxslot) ||
+	  (bcmode_a(op) == BCMdst && bc_a(*sp) == maxslot))
+	J->base[maxslot] = TREF_PURGED;
     }
   }
 }

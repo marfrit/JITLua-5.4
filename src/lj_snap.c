@@ -106,14 +106,21 @@ static MSize snapshot_slots(jit_State *J, SnapEntry *map, BCReg nslots,
     } else if (tr & TREF_PURGED) {
       /* Dead slot purged at the snapshot PC: restore it as nil, so it does
       ** not stay a stale GC root on a trace exit. */
+#if !(LJ_TARGET_ARM64 || (LJ_TARGET_X86ORX64 && LJ_GC64))
+      lj_assertJ(0, "SNAP_NIL on a non-GC64 target");
+#endif
       map[n++] = SNAP(s, SNAP_NIL, REF_NIL);
     }
   }
   /* A purged temp can sit above the snapshot's live range (e.g. the TGETB
   ** temp right above the loop's maxslot). Emit those as well. */
   for (; s < lim; s++)
-    if (J->slot[s] & TREF_PURGED)
+    if (J->slot[s] & TREF_PURGED) {
+#if !(LJ_TARGET_ARM64 || (LJ_TARGET_X86ORX64 && LJ_GC64))
+      lj_assertJ(0, "SNAP_NIL on a non-GC64 target");
+#endif
       map[n++] = SNAP(s, SNAP_NIL, REF_NIL);
+    }
   return n;
 }
 
@@ -372,7 +379,7 @@ static void snap_purge_impl(jit_State *J, int loop)
     snap_useuv(J->pt, udf);
     for (; s < maxslot; s++)
       if (udf[s] != 0)
-	J->base[s] = TREF_PURGED;  /* Purge dead slots, captured as SNAP_NIL. */
+	J->base[s] = 0;  /* Purge dead slots. */
   }
   if (loop && J->pt && (J->flags & JIT_F_WEAKTRACE)) {
     /* Only a trace that indexes a weak table needs this: the loop-head

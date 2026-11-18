@@ -2005,25 +2005,17 @@ static void asm_gc_check(ASMState *as, SnapNo snapno)
   asm_guardcnb(as, A64I_CBNZ, RID_RET); /* Assumes asm_snap_prep() is done. */
   *--as->mcp = ARM64_NOPATCH_GC_CHECK;
   args[0] = ASMREF_TMP1;  /* global_State *g */
-  args[1] = ASMREF_TMP2;  /* MSize steps     */
-  asm_gencall(as, ci, args);
-  /* Purged dead slots are SNAP_NIL entries: clear them in the Lua stack so a
-  ** stale interpreter value is not a GC root during the step. Use the trace's
-  ** REF_BASE register: RID_BASE is only valid in exit stubs. */
+  args[1] = ASMREF_TMP2;  /* uint64_t pak: traceno | snapno | steps */
   {
-    Reg base = ra_alloc1(as, REF_BASE, RSET_GPR);
-    for (n = 0; n < nent; n++) {
-      SnapEntry sn = map[n];
-      if (sn & SNAP_NIL) {
-	int32_t ofs = 8*((int32_t)snap_slot(sn)-1-LJ_FR2);
-	emit_loadu64(as, RID_TMP, (uint64_t)-1);
-	emit_lso(as, A64I_STRx, RID_TMP, base, ofs);
-      }
-    }
+    IRIns *tmp2ir = IR(ASMREF_TMP2);
+    IRType1 savedt = tmp2ir->t;
+    tmp2ir->t.irt = IRT_I64;  /* Make the arg move 64-bit. */
+    asm_gencall(as, ci, args);
+    tmp2ir->t = savedt;
   }
-  emit_dm(as, A64I_MOVx, ra_releasetmp(as, ASMREF_TMP1), RID_GL);
   tmp2 = ra_releasetmp(as, ASMREF_TMP2);
-  emit_loadi(as, tmp2, as->gcsteps);
+  emit_loadu64(as, tmp2, GCSTEP_ARG64(as->T->traceno, snapno, as->gcsteps));
+  emit_dm(as, A64I_MOVx, ra_releasetmp(as, ASMREF_TMP1), RID_GL);
   /* Jump around GC step if GC total < GC threshold. */
   emit_cond_branch(as, CC_LS, l_end);
   emit_nm(as, A64I_CMPx, RID_TMP, tmp2);

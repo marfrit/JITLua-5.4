@@ -3024,33 +3024,28 @@ static void asm_gc_check(ASMState *as, SnapNo snapno)
   args[1] = ASMREF_TMP2;  /* MSize steps     */
   /* Insert nop to simplify GC exit recognition in lj_asm_patchexit. */
   if (!jmprel_ok(as->mcp, (MCode *)(void *)ci->func)) *--as->mcp = XI_NOP;
-  asm_gencall(as, ci, args);
-  /* Purged dead slots are SNAP_NIL entries: clear them in the Lua stack so a
-  ** stale interpreter value is not a GC root during the step. Use the trace's
-  ** REF_BASE register: RID_BASE is only valid in exit stubs. */
-  {
-    Reg base = ra_alloc1(as, REF_BASE, RSET_GPR);
-    for (n = 0; n < nent; n++) {
-      SnapEntry sn = map[n];
-      if (sn & SNAP_NIL) {
-	int32_t ofs = 8*((int32_t)snap_slot(sn)-1-LJ_FR2);
 #if LJ_GC64
-	emit_i32(as, -1);
-	emit_rmro(as, XO_MOVmi, REX_64, base, ofs);
-#else
-	emit_movmroi(as, base, ofs+4, (int32_t)LJ_TNIL);
-	emit_movmroi(as, base, ofs, 0);
-#endif
-      }
-    }
+  {
+    IRIns *tmp2ir = IR(ASMREF_TMP2);
+    IRType1 savedt = tmp2ir->t;
+    tmp2ir->t.irt = IRT_I64;  /* Make the arg move 64-bit. */
+    asm_gencall(as, ci, args);
+    tmp2ir->t = savedt;
   }
+  emit_loadu64(as, ra_releasetmp(as, ASMREF_TMP2),
+	       GCSTEP_ARG64(as->T->traceno, snapno, as->gcsteps));
+#else
+  asm_gencall(as, ci, args);
+#endif
   tmp = ra_releasetmp(as, ASMREF_TMP1);
 #if LJ_GC64
   emit_rmro(as, XO_LEA, tmp|REX_64, RID_DISPATCH, GG_DISP2G);
 #else
   emit_loada(as, tmp, J2G(as->J));
 #endif
+#if !LJ_GC64
   emit_loadi(as, ra_releasetmp(as, ASMREF_TMP2), as->gcsteps);
+#endif
   /* Jump around GC step if GC total < GC threshold. */
   emit_sjcc(as, CC_B, l_end);
   emit_opgl(as, XO_ARITH(XOg_CMP), tmp|REX_GC64, gc.threshold);

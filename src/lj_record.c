@@ -603,7 +603,9 @@ void lj_record_stop(jit_State *J, TraceLink linktype, TraceNo lnk)
   }
 nocanon:
   /* Note: all loop ops must set J->pc to the following instruction! */
-  if (J->pt && bc_op(*J->pc) < BC_FUNCF) lj_snap_purge_loop(J);
+  if ((J->flags & JIT_F_WEAKTRACE) && J->pt &&
+      bc_op(*J->pc) < BC_FUNCF)
+    lj_snap_purge_loop(J);
   lj_snap_add(J);  /* Add loop snapshot. */
   J->needsnap = 0;
   J->mergesnap = 1;  /* In case recording continues. */
@@ -3445,7 +3447,6 @@ void lj_record_setup(jit_State *J)
     ** at the start! So snapshot #0 needs to point to the *next* instruction.
     ** The one exception is BC_ITERN, which sets LJ_TRACE_RECORD_1ST.
     */
-    if (J->pt && bc_op(*J->pc) < BC_FUNCF) lj_snap_purge_loop(J);
     lj_snap_add(J);
     if (bc_op(J->cur.startins) == BC_FORL)
       rec_for_loop(J, J->pc-1, &J->scev, 1);

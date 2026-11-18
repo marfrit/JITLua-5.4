@@ -203,6 +203,14 @@ LJ_STATIC_ASSERT(SNAP_FRAME == TREF_FRAME);
 LJ_STATIC_ASSERT(SNAP_CONT == TREF_CONT);
 LJ_STATIC_ASSERT(SNAP_KEYINDEX == TREF_KEYINDEX);
 
+/* Packed 64-bit argument for lj_gc_step_jit on GC64 targets: full traceno
+** (16 bits), full exit snapshot (16 bits) and full step count (32 bits).
+** Loaded as an immediate into the existing ASMREF_TMP2 register: no
+** allocator action may happen in the asm GC-check slow path. */
+#define GCSTEP_ARG64(tno, snapno, steps) \
+  (((uint64_t)(uint16_t)(tno)) | (((uint64_t)(uint16_t)(snapno)) << 16) | \
+   (((uint64_t)(uint32_t)(steps)) << 32))
+
 #define SNAP(slot, flags, ref)	(((SnapEntry)(slot) << 24) + (flags) + (ref))
 #define SNAP_TR(slot, tr) \
   (((SnapEntry)(slot) << 24) + \

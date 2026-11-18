@@ -785,6 +785,48 @@ void LJ_FASTCALL lj_gc_step_fixtop(lua_State *L)
 
 #if LJ_HASJIT
 /* Perform multiple GC steps. Called from JIT-compiled code. */
+#if LJ_TARGET_ARM64 || (LJ_TARGET_X86ORX64 && LJ_GC64)
+/* GC64 targets pass a 64-bit pak: traceno(16), snapno(16), steps(32). */
+int LJ_FASTCALL lj_gc_step_jit(global_State *g, uint64_t pak)
+{
+  lua_State *L = gco2th(gcref(g->cur_L));
+  TraceNo tno = (TraceNo)(pak & 0xffff);
+  SnapNo snapno = (SnapNo)((pak >> 16) & 0xffff);
+  MSize nsteps = (MSize)(pak >> 32);
+  jit_State *J = G2J(g);
+  if (tno > 0 && (MSize)tno < J->sizetrace) {
+    GCtrace *T = traceref(J, tno);
+    lj_assertG(T != NULL, "gc_step_jit: no trace %d", (int)tno);
+    if (T && snapno < T->nsnap) {
+      SnapShot *snap = &T->snap[snapno];
+      SnapEntry *map = &T->snapmap[snap->mapofs];
+      MSize n, nent = snap->nent;
+      TValue *frame;
+      int hasnil = 0;
+      /* Early out: no SNAP_NIL entries is the common case. */
+      for (n = 0; n < nent; n++)
+	if (map[n] & SNAP_NIL) { hasnil = 1; break; }
+      frame = tvref(g->jit_base) - 1 - LJ_FR2;
+      if (hasnil)
+	for (n = 0; n < nent; n++)
+	  if (map[n] & SNAP_NIL)
+	    setnilV(&frame[snap_slot(map[n])]);
+    } else {
+      lj_assertG(snapno < T->nsnap, "gc_step_jit: bad snapno %d", (int)snapno);
+    }
+  } else {
+    lj_assertG(tno > 0 && (MSize)tno < J->sizetrace,
+	       "gc_step_jit: bad traceno %d", (int)tno);
+  }
+  L->base = tvref(G(L)->jit_base);
+  L->top = curr_topL(L);
+  while (nsteps-- > 0 && lj_gc_step(L) == 0)
+    ;
+  /* Return 1 to force a trace exit. */
+  return (G(L)->gc.state == GCSatomic || G(L)->gc.state == GCSfinalize);
+}
+#else
+/* 32-bit targets keep the old call and do not clear SNAP_NIL slots. */
 int LJ_FASTCALL lj_gc_step_jit(global_State *g, MSize steps)
 {
   lua_State *L = gco2th(gcref(g->cur_L));
@@ -795,6 +837,7 @@ int LJ_FASTCALL lj_gc_step_jit(global_State *g, MSize steps)
   /* Return 1 to force a trace exit. */
   return (G(L)->gc.state == GCSatomic || G(L)->gc.state == GCSfinalize);
 }
+#endif
 #endif
 
 /* Perform a full GC cycle. */

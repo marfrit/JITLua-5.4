@@ -201,8 +201,9 @@ LUA_API void lua_rotate(lua_State *L, int idx, int n)
   ptrdiff_t count = t - p + 1;
   ptrdiff_t k, i;
   if (count <= 1) return;
+  /* PUC allows |n| <= count: a full rotation is a legal no-op. */
+  lj_checkapi((n >= 0 ? n : -n) <= (int)count, "invalid rotation %d", n);
   if (n < 0) n += (int)count;
-  lj_checkapi(n >= 0 && n < (int)count, "invalid rotation %d", n);
   k = count - n;  /* rotate toward the top == left-rotate by count-n */
   for (i = 0; i < k/2; i++) {
     TValue tmp;

@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/logo/jitlua-dark.svg">
+    <img src="docs/logo/jitlua-light.svg" alt="JITLua-5.4 logo: a crescent moon with three gears" width="440">
+  </picture>
+</p>
+
 # JITLua-5.4
 
 A fork of **LuaJIT 2.1** that brings the **Lua 5.4 language and C API** to

@@ -33,7 +33,6 @@ TREDEF(STORENN,	"store with nil or NaN key")
 TREDEF(NOMM,	"missing metamethod")
 TREDEF(IDXLOOP,	"looping index lookup")
 TREDEF(NYITMIX,	"NYI: mixed sparse/dense table")
-TREDEF(WEAKT,	"NYI: weak table access")
 
 /* Recording C data operations. */
 TREDEF(NOCACHE,	"symbol not in cache")

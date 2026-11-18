@@ -12,7 +12,6 @@
 
 #include "lj_err.h"
 #include "lj_str.h"
-#include "lj_gc.h"
 #include "lj_tab.h"
 #include "lj_meta.h"
 #include "lj_frame.h"
@@ -1878,28 +1877,6 @@ static int nommstr(jit_State *J, TRef key)
   return 1;  /* CANNOT be a metamethod name. */
 }
 
-/* LuaJIT's upstream JIT hoists table loads out of loops and DCEs dead
-** allocations. A load from a weak table can be cleared by a later GC and must
-** be re-evaluated every iteration; a loop whose only GC drive is a dead
-** allocation then never makes progress (stock 2.1 hangs on closure.lua:37).
-** Do not compile weak-table accesses: the interpreter allocates, runs the GC
-** step and rechecks the weak load. */
-static int rec_weaktab(jit_State *J, GCtab *t)
-{
-  int weak = 0;
-  GCtab *mt = tabref(t->metatable);
-  cTValue *mode = lj_meta_fastg(J2G(J), mt, MM_mode);
-  if (mode && tvisstr(mode)) {
-    const char *modestr = strVdata(mode);
-    int c;
-    while ((c = *modestr++)) {
-      if (c == 'k') weak |= LJ_GC_WEAKKEY;
-      else if (c == 'v') weak |= LJ_GC_WEAKVAL;
-    }
-  }
-  return weak || (t->marked & LJ_GC_WEAK);
-}
-
 /* Record indexed load/store. */
 TRef lj_record_idx(jit_State *J, RecordIndex *ix)
 {
@@ -1949,9 +1926,6 @@ TRef lj_record_idx(jit_State *J, RecordIndex *ix)
     if (--ix->idxchain == 0)
       lj_trace_err(J, LJ_TRERR_IDXLOOP);
   }
-
-  if (rec_weaktab(J, tabV(&ix->tabv)))
-    lj_trace_err(J, LJ_TRERR_WEAKT);
 
   /* First catch nil and NaN keys for tables. */
   if (tvisnil(&ix->keyv) || (tvisnum(&ix->keyv) && tvisnan(&ix->keyv))) {

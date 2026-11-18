@@ -11,6 +11,15 @@ tests/harness.sh              # modes A + B over the whole corpus
 tests/harness.sh --mode all   # + mode R (string.dump -> load -> re-run)
 ```
 
+`make check` is the short gate: it builds `src/luajit` if needed, then runs the
+same differential invocation as the A+B stage of `tests/ci-box.sh` --
+`tests/harness.sh --strict --mode both --corpus tests/d54 --timeout 120` -- and
+exits non-zero on any unexpected failure. The PUC 5.4.9 reference is built only
+from a locally available tarball (`tests/ref/dist` or the download cache); a
+package build without one prints
+`check: PUC 5.4.9 reference unavailable (...); running mode B only` and falls
+back to mode B (JIT against interpreter) rather than failing on a download.
+
 ## Modes
 | mode | comparison | proves |
 |---|---|---|

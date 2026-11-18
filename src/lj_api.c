@@ -21,9 +21,9 @@
 #include "lj_tab.h"
 #include "lj_func.h"
 #include "lj_udata.h"
-#include "lj_meta.h"
 #include "lj_state.h"
 #include "lj_bc.h"
+#include "lj_meta.h"
 #include "lj_frame.h"
 #include "lj_trace.h"
 #include "lj_vm.h"
@@ -146,19 +146,36 @@ LUA_API int lua_gettop(lua_State *L)
 
 LUA_API void lua_settop(lua_State *L, int idx)
 {
+  TValue *newtop;
+  ptrdiff_t nofs;
   if (idx >= 0) {
     lj_checkapi(idx <= tvref(L->maxstack) - L->base, "bad stack slot %d", idx);
-    if (L->base + idx > L->top) {
-      if (L->base + idx >= tvref(L->maxstack))
+    newtop = L->base + idx;
+    if (newtop > L->top) {
+      if (newtop >= tvref(L->maxstack)) {
 	lj_state_growstack(L, (MSize)idx - (MSize)(L->top - L->base));
-      do { setnilV(L->top++); } while (L->top < L->base + idx);
-    } else {
-      L->top = L->base + idx;
+	newtop = L->base + idx;  /* stack may have moved */
+      }
+      do { setnilV(L->top++); } while (L->top < newtop);
     }
   } else {
     lj_checkapi(-(idx+1) <= (L->top - L->base), "bad stack slot %d", idx);
-    L->top += idx+1;  /* Shrinks top (idx < 0). */
+    newtop = L->top + idx+1;
   }
+  nofs = savestack(L, newtop);
+  if (newtop < L->top && L->tbcn > 0 &&
+      restorestack(L, mref(L->tbclist, int32_t)[L->tbcn-1]) >= newtop) {
+    TValue *eslot = L->top++;
+    int st;
+    setnilV(eslot);
+    st = lj_meta_tbccloseall(L, newtop, eslot);
+    if (st != LUA_OK) {
+      L->top = eslot+1;
+      lj_err_throw(L, st);
+    }
+    L->top = eslot;
+  }
+  L->top = restorestack(L, nofs);
 }
 
 LUA_API void lua_remove(lua_State *L, int idx)
@@ -226,6 +243,38 @@ LUA_API void lua_replace(lua_State *L, int idx)
   lj_checkapi_slot(1);
   copy_slot(L, L->top - 1, idx);
   L->top--;
+}
+
+LUA_API void lua_toclose(lua_State *L, int idx)
+{
+  TValue *o = index2adr_stack(L, idx);
+  int32_t *list = mref(L->tbclist, int32_t);
+  lj_checkapi(L->tbcn == 0 || restorestack(L, list[L->tbcn-1]) < o,
+	      "given index below or equal a marked one");
+  UNUSED(list);
+  lj_meta_tbcmark(L, o);
+}
+
+LUA_API void lua_closeslot(lua_State *L, int idx)
+{
+  TValue *o = index2adr_stack(L, idx);
+  int32_t *list = mref(L->tbclist, int32_t);
+  ptrdiff_t oofs = savestack(L, o);
+  TValue *eslot;
+  int st;
+  lj_checkapi(L->tbcn > 0 && list[L->tbcn-1] == (int32_t)oofs,
+	      "no variable to close at given level");
+  UNUSED(list);
+  eslot = L->top++;
+  setnilV(eslot);
+  st = lj_meta_tbccloseall(L, o, eslot);
+  if (st != LUA_OK) {
+    L->top = eslot+1;  /* error object for the throw */
+    lj_err_throw(L, st);
+  }
+  L->top = eslot;
+  o = restorestack(L, oofs);
+  setnilV(o);
 }
 
 LUA_API void lua_copy(lua_State *L, int fromidx, int toidx)
@@ -543,6 +592,56 @@ LUA_API int lua_compare(lua_State *L, int idx1, int idx2, int op)
     lj_vm_call(L, base, 1+1);
     L->top -= 2+LJ_FR2;
     return tvistruecond(L->top+1+LJ_FR2);
+  }
+}
+
+LUA_API void lua_arith(lua_State *L, int op)
+{
+  TValue *ra, *rb, *rc, *base;
+  ptrdiff_t raofs;
+  BCOp bop;
+  int bit;
+  lj_checkapi(op >= LUA_OPADD && op <= LUA_OPBNOT, "invalid option");
+  if (op != LUA_OPUNM && op != LUA_OPBNOT) {
+    lj_checkapi_slot(2);
+    ra = L->top-2;
+  } else {  /* unary: duplicate the operand like PUC's fake second operand */
+    lj_checkapi_slot(1);
+    copyTV(L, L->top, L->top-1);
+    incr_top(L);
+    ra = L->top-2;
+  }
+  rb = ra; rc = L->top-1;
+  raofs = savestack(L, ra);
+  switch (op) {
+  case LUA_OPADD: bop = BC_ADDVV; bit = 0; break;
+  case LUA_OPSUB: bop = BC_SUBVV; bit = 0; break;
+  case LUA_OPMUL: bop = BC_MULVV; bit = 0; break;
+  case LUA_OPMOD: bop = BC_MODVV; bit = 0; break;
+  case LUA_OPPOW: bop = BC_POW; bit = 0; break;
+  case LUA_OPDIV: bop = BC_DIVVV; bit = 0; break;
+  case LUA_OPIDIV: bop = BC_IDIV; bit = 0; break;
+  case LUA_OPBAND: bop = BC_BAND; bit = 1; break;
+  case LUA_OPBOR: bop = BC_BOR; bit = 1; break;
+  case LUA_OPBXOR: bop = BC_BXOR; bit = 1; break;
+  case LUA_OPSHL: bop = BC_BSHL; bit = 1; break;
+  case LUA_OPSHR: bop = BC_BSHR; bit = 1; break;
+  case LUA_OPUNM: bop = BC_UNM; bit = 0; break;
+  case LUA_OPBNOT: bop = BC_BNOT; bit = 1; break;
+  default: lj_checkapi(0, "invalid option"); return;
+  }
+  base = bit ? lj_meta_bitop(L, rb, rb, rc, bop)
+             : lj_meta_arith(L, rb, rb, rc, bop);
+  if ((uintptr_t)base <= 1) {  /* finished; result is in the first slot */
+    ra = restorestack(L, raofs);
+    L->top = ra+1;
+  } else {  /* metamethod call, like lua_compare */
+    L->top = base+2;
+    lj_vm_call(L, base, 1+1);
+    L->top -= 2+LJ_FR2;
+    ra = restorestack(L, raofs);
+    copyTV(L, ra, L->top+1+LJ_FR2);
+    L->top = ra+1;
   }
 }
 
@@ -1777,6 +1876,42 @@ LUA_API int lua_resume(lua_State *L, lua_State *from, int nargs, int *nres)
   setstrV(L, L->top, lj_err_str(L, LJ_ERR_COSUSP));
   incr_top(L);
   return LUA_ERRRUN;
+}
+
+/* Lua 5.4 thread reset: close pending to-be-closed slots and upvalues, then
+** put the thread back to its fresh suspended state. The PUC 'from' argument
+** only feeds PUC's C-call counter; LuaJIT keeps no such per-thread counter. */
+LUA_API int lua_closethread(lua_State *L, lua_State *from)
+{
+  int status = L->status, st;
+  TValue *eslot;
+  UNUSED(from);
+  lj_checkapi(L->cframe == NULL, "thread is running");
+  if (status == LUA_YIELD) status = LUA_OK;
+  eslot = L->top++;
+  if (status != LUA_OK && L->top-1 > L->base)
+    copyTV(L, eslot, L->top-2);
+  else
+    setnilV(eslot);
+  L->status = LUA_OK;
+  st = lj_meta_tbccloseall(L, tvref(L->stack), eslot);
+  eslot = L->top-1;  /* close calls may grow the stack */
+  lj_func_closeuv(L, tvref(L->stack));
+  L->base = L->top = tvref(L->stack) + 1 + LJ_FR2;
+  L->cframe = NULL;
+  L->errnest = 0;
+  L->errnestofs = 0;
+  if (st != LUA_OK) {  /* keep the error object for the caller */
+    copyTV(L, L->base, eslot);
+    L->top = L->base+1;
+    return st;
+  }
+  return LUA_OK;
+}
+
+LUA_API int lua_resetthread(lua_State *L)
+{
+  return lua_closethread(L, NULL);
 }
 
 /* -- GC and memory management -------------------------------------------- */

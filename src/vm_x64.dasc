@@ -5205,6 +5205,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
       |  call aword [DISPATCH+DISPATCH_GL(wrapf)]
     }
     |  // nresults returned in eax (RD).
+    |  cmp dword L:RB->tbcn, 0	// to-be-closed slots marked by lua_toclose?
+    |  jne >8
     |  test byte [DISPATCH+DISPATCH_GL(hookmask)], LUA_MASKRET
     |  jnz >8				// 5.4: return hook for C functions.
     |7:

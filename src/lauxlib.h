@@ -22,6 +22,8 @@
 LUALIB_API void (luaL_checkversion_) (lua_State *L, lua_Number ver, size_t sz);
 #define luaL_checkversion(L)	luaL_checkversion_(L, LUA_VERSION_NUM, LUAL_BUFFERSIZE)
 
+typedef struct luaL_Buffer luaL_Buffer;
+
 typedef struct luaL_Reg {
   const char *name;
   lua_CFunction func;
@@ -132,6 +134,8 @@ LUALIB_API void (luaL_setmetatable) (lua_State *L, const char *tname);
 #define luaL_optlong(L,n,d)	((long)luaL_optinteger(L, (n), (d)))
 
 #define luaL_typename(L,i)	lua_typename(L, lua_type(L,(i)))
+#define luaL_argexpected(L,cond,arg,tname)	\
+	((void)((cond) || luaL_typeerror(L, (arg), (tname))))
 
 #define luaL_dofile(L, fn) \
 	(luaL_loadfile(L, fn) || lua_pcall(L, 0, LUA_MULTRET, 0))
@@ -156,32 +160,40 @@ LUALIB_API void (luaL_setmetatable) (lua_State *L, const char *tname);
 
 
 
-typedef struct luaL_Buffer {
-  char *p;			/* current position in buffer */
-  int lvl;  /* number of strings in the stack (level) */
+struct luaL_Buffer {
+  char *b;  /* buffer address */
+  size_t size;  /* buffer size */
+  size_t n;  /* number of characters in buffer */
   lua_State *L;
-  char buffer[LUAL_BUFFERSIZE];
-} luaL_Buffer;
+  union {
+    union { double d; void *p; long l; } align;
+    char b[LUAL_BUFFERSIZE];  /* initial buffer */
+  } init;
+};
+
+#define luaL_bufflen(bf)	((bf)->n)
+#define luaL_buffaddr(bf)	((bf)->b)
 
 #define luaL_addchar(B,c) \
-  ((void)((B)->p < ((B)->buffer+LUAL_BUFFERSIZE) || luaL_prepbuffer(B)), \
-   (*(B)->p++ = (char)(c)))
+  ((void)((B)->n < (B)->size || luaL_prepbuffsize((B), 1)), \
+   ((B)->b[(B)->n++] = (c)))
 
-/* compatibility only */
-#define luaL_putchar(B,c)	luaL_addchar(B,c)
-
-#define luaL_addsize(B,n)	((B)->p += (n))
+#define luaL_addsize(B,s)	((B)->n += (s))
+#define luaL_buffsub(B,s)	((B)->n -= (s))
+#define luaL_pushfail(L)	lua_pushnil(L)
 
 LUALIB_API void (luaL_buffinit) (lua_State *L, luaL_Buffer *B);
-LUALIB_API char *(luaL_prepbuffer) (luaL_Buffer *B);
+LUALIB_API char *(luaL_prepbuffsize) (luaL_Buffer *B, size_t sz);
 LUALIB_API void (luaL_addlstring) (luaL_Buffer *B, const char *s, size_t l);
 LUALIB_API void (luaL_addstring) (luaL_Buffer *B, const char *s);
 LUALIB_API void (luaL_addvalue) (luaL_Buffer *B);
 LUALIB_API void (luaL_pushresult) (luaL_Buffer *B);
+LUALIB_API void (luaL_pushresultsize) (luaL_Buffer *B, size_t sz);
+LUALIB_API char *(luaL_buffinitsize) (lua_State *L, luaL_Buffer *B, size_t sz);
 LUALIB_API void (luaL_addgsub) (luaL_Buffer *B, const char *s,
                                   const char *p, const char *r);
-#define luaL_buffsub(B,s)	((B)->p -= (s))
-#define luaL_pushfail(L)	lua_pushnil(L)
+
+#define luaL_prepbuffer(B)	luaL_prepbuffsize(B, LUAL_BUFFERSIZE)
 
 
 /* }====================================================== */

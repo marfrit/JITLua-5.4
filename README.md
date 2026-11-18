@@ -15,7 +15,7 @@ Honest status, not a compatibility claim:
   Measured on Linux arm64 and x86_64, identical on both, on the `tests/d54`
   edge-case corpus: A+B **129 PASS / 0 FAIL / 5 XFAIL**, JIT optimization
   levels 0–3 **280**, R (dump/reload round-trip) **70**; the ASan/UBSan run
-  of A+B+R is **199 PASS / 0 FAIL / 5 XFAIL**; C API checks **128 + 14**.
+  of A+B+R is **199 PASS / 0 FAIL / 5 XFAIL**; C API checks **180 + 14**.
 - Full corpus (PUC 5.4.9 test suite plus `tests/d54`) with `--strict`, the
   exact command of the public CI: **254 PASS / 0 FAIL / 10 XFAIL / 12 SKIP /
   0 TIMEOUT**. Every XFAIL is a known-bad entry with its reason in
@@ -30,9 +30,9 @@ Honest status, not a compatibility claim:
   JIT-on is slow on arm64; classic benchmark runs show remaining gaps in
   deltablue, x64 spectral-norm and x64 k-nucleotide
   ([docs/perf-regression-2026-11-17.md](docs/perf-regression-2026-11-17.md)).
-- **Not yet covered:** arbitrary `_ENV` values, >1 userdata values, a few C API
-  limits, and the remaining pcall/`__call` VM work. See the two files above for
-  the exact list.
+- **Not yet covered:** arbitrary `_ENV` values, `lua_getextraspace`, the
+  no-op `lua_setcstacklimit`, and the remaining pcall/`__call` VM work. See
+  the two files above for the exact list.
 
 ## Build
 

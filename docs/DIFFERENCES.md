@@ -54,8 +54,10 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   `(1):floor()` works but `((1 << 50) + 3):floor()` raises, and
   `getmetatable` of such an integer returns nil (PUC returns the number
   metatable). Interpreter and JIT agree; found in the release review.
-- `PENDING` Userdata arrays with more than one user value and non-GC user values
-  are not supported (GC layout / GCRef-slot limitation; C API notes).
+- `PENDING` `lua_getextraspace`: there is no reserved pointer-sized area before
+  `lua_State`. Adding one would need a layout change in `GG_State` and in every
+  per-thread allocation, moving the GC object/interior pointer and the assembler
+  offsets; not done. Modules using it need a portable side area instead.
 
 ### Known JIT/performance rows (not semantic divergences)
 - `FIXED` arm64 `bit.lshift/rshift/arshift/rol/ror` returned 0 for native and
@@ -98,9 +100,15 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   tointeger/ult`, `package.searchers` two-result protocol and `require(name,data)`,
   `io` 5.4 read/seek/lines rules, `os.date/time` 5.4 field rules.
 - `EXTENSION` 5.4 C API: `lua_newuserdatauv`, `lua_get/setiuservalue`,
-  `lua_warning`/`warn`, `lua_setwarnf`, `lua_resume` 5.4 signature, integer
-  checks/return types, `luaL_addgsub/buffsub/pushfail`, `luaL_tolstring/
-  requiref/typeerror`.
+  `lua_warning`/`warn`, `lua_setwarnf`, `lua_resume` 5.4 signature,
+  `lua_closethread`/`lua_resetthread`, `lua_arith` with the `LUA_OP*`
+  constants, `lua_toclose`/`lua_closeslot` (including closing on C return,
+  error, and `lua_settop`), the PUC 5.4 `luaL_Buffer` layout with
+  `luaL_buffinitsize`/`luaL_prepbuffsize`/`luaL_pushresultsize` and
+  `luaL_buffaddr`/`luaL_bufflen`, `luaL_argexpected`, `luaopen_coroutine`,
+  integer checks/return types, `luaL_addgsub/buffsub/pushfail`, and
+  `luaL_tolstring/requiref/typeerror`. `luaconf.h` includes `<limits.h>` like
+  PUC.
 - `EXTENSION` `lua_getfenv`/`setfenv` remain present as LuaJIT extensions;
   PUC 5.4 removed them.
 

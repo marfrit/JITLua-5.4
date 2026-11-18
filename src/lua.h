@@ -167,6 +167,23 @@ LUA_API int             (lua_isinteger) (lua_State *L, int idx);
 LUA_API size_t          (lua_stringtonumber) (lua_State *L, const char *s);
 LUA_API int             (lua_compare) (lua_State *L, int idx1, int idx2, int op);
 
+/* Arithmetic operations for lua_arith. Values follow PUC lua.h. */
+#define LUA_OPADD	0
+#define LUA_OPSUB	1
+#define LUA_OPMUL	2
+#define LUA_OPMOD	3
+#define LUA_OPPOW	4
+#define LUA_OPDIV	5
+#define LUA_OPIDIV	6
+#define LUA_OPBAND	7
+#define LUA_OPBOR	8
+#define LUA_OPBXOR	9
+#define LUA_OPSHL	10
+#define LUA_OPSHR	11
+#define LUA_OPUNM	12
+#define LUA_OPBNOT	13
+LUA_API void            (lua_arith) (lua_State *L, int op);
+
 /* Comparison operations for lua_compare. ORDER LUA_OP. */
 #define LUA_OPEQ	0
 #define LUA_OPLT	1
@@ -248,6 +265,8 @@ LUA_API int  (lua_yieldk) (lua_State *L, int nresults, lua_KContext ctx,
                            lua_KFunction k);
 LUA_API int  (lua_resume) (lua_State *L, lua_State *from, int narg, int *nres);
 LUA_API int  (lua_status) (lua_State *L);
+LUA_API int  (lua_closethread) (lua_State *L, lua_State *from);
+LUA_API int  (lua_resetthread) (lua_State *L);  /* Deprecated since 5.4.6. */
 
 /*
 ** garbage-collection function and options
@@ -395,6 +414,8 @@ LUA_API int lua_isyieldable (lua_State *L);
 LUA_API void *lua_newuserdatauv (lua_State *L, size_t sz, int nuvalue);
 LUA_API int lua_getiuservalue (lua_State *L, int idx, int n);
 LUA_API int lua_setiuservalue (lua_State *L, int idx, int n);
+LUA_API void lua_toclose (lua_State *L, int idx);
+LUA_API void lua_closeslot (lua_State *L, int idx);
 LUA_API void lua_warning (lua_State *L, const char *msg, int tocont);
 typedef void (*lua_WarnFunction) (void *ud, const char *msg, int tocont);
 LUA_API void (lua_setwarnf) (lua_State *L, lua_WarnFunction f, void *ud);

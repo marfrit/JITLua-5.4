@@ -42,6 +42,8 @@ LJ_FUNCA void LJ_FASTCALL lj_meta_for(lua_State *L, TValue *o);
 LJ_FUNCA void LJ_FASTCALL lj_meta_tbcmark(lua_State *L, TValue *o);
 LJ_FUNCA TValue *lj_meta_tbcclose(lua_State *L, TValue *level, MSize multres);
 LJ_FUNC int lj_meta_tbccloseall(lua_State *L, TValue *level, TValue *err);
+LJ_FUNCA int LJ_FASTCALL lj_meta_tbcclose_cfunc(lua_State *L, TValue *base,
+						int nresults);
 LJ_FUNC void lj_meta_tbcfree(global_State *g, lua_State *L);
 
 #endif

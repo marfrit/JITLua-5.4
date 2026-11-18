@@ -4,6 +4,7 @@
 */
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 #include "lua.h"
 #include "lauxlib.h"
 #include "lualib.h"
@@ -59,6 +60,7 @@ static void test_getseti(void)
   /* int64 keys outside the inline forms: boxed exact, not a float. */
   {
     lua_Integer big = (lua_Integer)0x7fffffffffffffffLL;
+  lua_Integer min = (lua_Integer)0x8000000000000000LL;
     lua_settop(L, 0); lua_getglobal(L, "p");  /* fresh stack */
     lua_pushinteger(L, big); lua_seti(L, -2, big);
     lua_geti(L, -1, big);
@@ -119,6 +121,7 @@ static void test_api54_surface(void)
   lua_newtable(L);
   {
     lua_Integer big = (lua_Integer)0x7fffffffffffffffLL;
+  lua_Integer min = (lua_Integer)0x8000000000000000LL;
     int anchor;
     lua_pushinteger(L, 7); lua_rawseti(L, -2, big);
     ok(lua_rawgeti(L, -1, big) == LUA_TNUMBER &&
@@ -628,6 +631,331 @@ static void test_continuations(void)
   lua_close(L);
 }
 
+static int close_calls;
+static int arith_c(lua_State *L)
+{
+  int op = (int)lua_tointeger(L, 1);
+  lua_pushvalue(L, 2);
+  lua_pushvalue(L, 3);
+  lua_arith(L, op);
+  return 1;
+}
+
+static void test_arith(void)
+{
+  lua_State *L = newL();
+  int top;
+  lua_Integer big = (lua_Integer)0x7fffffffffffffffLL;
+  lua_Integer min = (lua_Integer)0x8000000000000000LL;
+
+  top = lua_gettop(L);
+  lua_pushinteger(L, 2); lua_pushinteger(L, 3);
+  lua_arith(L, LUA_OPADD);
+  ok(lua_gettop(L) == top+1 && lua_isinteger(L, -1) &&
+     lua_tointeger(L, -1) == 5, "lua_arith ADD int + stack effect");
+  lua_pop(L, 1);
+
+  lua_pushinteger(L, 2); lua_pushnumber(L, 3.5);
+  lua_arith(L, LUA_OPADD);
+  ok(lua_isnumber(L, -1) && !lua_isinteger(L, -1) && lua_tonumber(L, -1) == 5.5,
+     "lua_arith ADD mixed -> float");
+  lua_pop(L, 1);
+
+  lua_pushinteger(L, 2147483647); lua_pushinteger(L, 1);
+  lua_arith(L, LUA_OPADD);
+  ok(lua_isinteger(L, -1) && lua_tointeger(L, -1) == 2147483648LL,
+     "lua_arith ADD int boundary -> integer");
+  lua_pop(L, 1);
+
+  lua_pushinteger(L, -2147483648); lua_pushinteger(L, 1);
+  lua_arith(L, LUA_OPSUB);
+  ok(lua_isinteger(L, -1) && lua_tointeger(L, -1) == -2147483649LL,
+     "lua_arith SUB int boundary -> integer");
+  lua_pop(L, 1);
+
+  lua_pushinteger(L, 2147483647); lua_pushinteger(L, 2147483647);
+  lua_arith(L, LUA_OPMUL);
+  ok(lua_isinteger(L, -1) &&
+     lua_tointeger(L, -1) == 4611686014132420609LL,
+     "lua_arith MUL >2^53 exact");
+  lua_pop(L, 1);
+
+  lua_pushinteger(L, big); lua_pushinteger(L, 1);
+  lua_arith(L, LUA_OPADD);
+  ok(lua_isinteger(L, -1) && lua_tointeger(L, -1) == (lua_Integer)0x8000000000000000LL,
+     "lua_arith integer overflow wraps");
+  lua_pop(L, 1);
+
+  lua_pushinteger(L, 7); lua_pushinteger(L, 2);
+  lua_arith(L, LUA_OPDIV);
+  ok(!lua_isinteger(L, -1) && lua_tonumber(L, -1) == 3.5,
+     "lua_arith / always float");
+  lua_pop(L, 1);
+  lua_pushinteger(L, 1); lua_pushinteger(L, 0);
+  lua_arith(L, LUA_OPDIV);
+  ok(!lua_isinteger(L, -1) && lua_tonumber(L, -1) == (lua_Number)INFINITY,
+     "lua_arith 1/0 is float inf");
+  lua_pop(L, 1);
+
+  lua_pushinteger(L, -7); lua_pushinteger(L, 3);
+  lua_arith(L, LUA_OPIDIV);
+  ok(lua_isinteger(L, -1) && lua_tointeger(L, -1) == -3,
+     "lua_arith // floor division");
+  lua_pop(L, 1);
+  lua_pushinteger(L, min); lua_pushinteger(L, -1);
+  lua_arith(L, LUA_OPIDIV);
+  ok(lua_isinteger(L, -1) && lua_tointeger(L, -1) == (lua_Integer)0x8000000000000000LL,
+     "lua_arith mininteger // -1");
+  lua_pop(L, 1);
+
+  lua_pushinteger(L, -7); lua_pushinteger(L, 3);
+  lua_arith(L, LUA_OPMOD);
+  ok(lua_isinteger(L, -1) && lua_tointeger(L, -1) == 2,
+     "lua_arith % takes divisor sign");
+  lua_pop(L, 1);
+  lua_pushinteger(L, min); lua_pushinteger(L, -1);
+  lua_arith(L, LUA_OPMOD);
+  ok(lua_isinteger(L, -1) && lua_tointeger(L, -1) == 0,
+     "lua_arith mininteger % -1");
+  lua_pop(L, 1);
+
+  lua_pushinteger(L, 2); lua_pushinteger(L, 3);
+  lua_arith(L, LUA_OPPOW);
+  ok(!lua_isinteger(L, -1) && lua_tonumber(L, -1) == 8.0,
+     "lua_arith ^ is float");
+  lua_pop(L, 1);
+
+  lua_pushinteger(L, 12); lua_pushinteger(L, 10);
+  lua_arith(L, LUA_OPBAND);
+  ok(lua_isinteger(L, -1) && lua_tointeger(L, -1) == 8, "lua_arith &");
+  lua_pop(L, 1);
+  lua_pushinteger(L, 12); lua_pushinteger(L, 10);
+  lua_arith(L, LUA_OPBOR);
+  ok(lua_isinteger(L, -1) && lua_tointeger(L, -1) == 14, "lua_arith |");
+  lua_pop(L, 1);
+  lua_pushinteger(L, 12); lua_pushinteger(L, 10);
+  lua_arith(L, LUA_OPBXOR);
+  ok(lua_isinteger(L, -1) && lua_tointeger(L, -1) == 6, "lua_arith ~ binary");
+  lua_pop(L, 1);
+  lua_pushinteger(L, 1); lua_pushinteger(L, 40);
+  lua_arith(L, LUA_OPSHL);
+  ok(lua_isinteger(L, -1) && lua_tointeger(L, -1) == 1099511627776LL,
+     "lua_arith << 40 exact");
+  lua_pop(L, 1);
+  lua_pushinteger(L, -1); lua_pushinteger(L, 1);
+  lua_arith(L, LUA_OPSHR);
+  ok(lua_isinteger(L, -1) && lua_tointeger(L, -1) == big,
+     "lua_arith >> is logical");
+  lua_pop(L, 1);
+
+  top = lua_gettop(L);
+  lua_pushinteger(L, -2147483648);
+  lua_arith(L, LUA_OPUNM);
+  ok(lua_gettop(L) == top+1 && lua_isinteger(L, -1) &&
+     lua_tointeger(L, -1) == 2147483648LL, "lua_arith unary - boundary");
+  lua_pop(L, 1);
+  lua_pushinteger(L, 2147483648LL);  /* boxed literal value */
+  lua_arith(L, LUA_OPBNOT);
+  ok(lua_isinteger(L, -1) && lua_tointeger(L, -1) == -2147483649LL,
+     "lua_arith unary ~ beyond int32");
+  lua_pop(L, 1);
+
+  lua_pushnumber(L, 3.0); lua_pushinteger(L, 1);
+  lua_arith(L, LUA_OPBAND);
+  ok(lua_isinteger(L, -1) && lua_tointeger(L, -1) == 1,
+     "lua_arith exact float bit operand");
+  lua_pop(L, 1);
+
+  luaL_dostring(L, "mt = setmetatable({}, {__add=function(a,b) return 42 end})");
+  lua_getglobal(L, "mt");
+  lua_pushinteger(L, 5);
+  lua_arith(L, LUA_OPADD);
+  ok(lua_isinteger(L, -1) && lua_tointeger(L, -1) == 42,
+     "lua_arith invokes __add");
+  lua_pop(L, 1);
+
+  lua_pushcfunction(L, arith_c);
+  lua_setglobal(L, "arith_c");
+  luaL_dostring(L,
+    "ok1, msg1 = pcall(arith_c, 6, 1, 0)\n"
+    "ok2, msg2 = pcall(arith_c, 3, 3, 0)\n"
+    "ok3, msg3 = pcall(arith_c, 7, 3.5, 1)");
+  lua_getglobal(L, "ok1"); ok(!lua_toboolean(L, -1), "lua_arith 1//0 errors"); lua_pop(L,1);
+  lua_getglobal(L, "msg1"); ok(lua_isstring(L,-1) && strstr(lua_tostring(L,-1), "divide by zero"), "lua_arith // error wording"); lua_pop(L,1);
+  lua_getglobal(L, "ok2"); ok(!lua_toboolean(L, -1), "lua_arith 3%0 errors"); lua_pop(L,1);
+  lua_getglobal(L, "ok3"); ok(!lua_toboolean(L, -1), "lua_arith inexact float bit errors"); lua_pop(L,1);
+  lua_close(L);
+}
+
+static void test_buffer_api(void)
+{
+  lua_State *L = newL();
+  int top = lua_gettop(L);
+  luaL_Buffer b;
+  char *p;
+  luaL_buffinit(L, &b);
+  ok(lua_gettop(L) == top+1, "luaL_buffinit keeps one placeholder slot");
+  ok(luaL_bufflen(&b) == 0 && luaL_buffaddr(&b) == b.init.b,
+     "luaL_bufflen/addr at init");
+  luaL_addstring(&b, "abc");
+  ok(luaL_bufflen(&b) == 3 && memcmp(luaL_buffaddr(&b), "abc", 3) == 0,
+     "luaL_addstring updates len/addr");
+  p = luaL_prepbuffsize(&b, 20000);
+  ok(p != NULL, "luaL_prepbuffsize large");
+  memset(p, 'x', 20000);
+  luaL_addsize(&b, 20000);
+  ok(luaL_bufflen(&b) == 20003 && luaL_buffaddr(&b) != b.init.b,
+     "large buffer moved out of the inline box");
+  luaL_pushresult(&b);
+  ok(lua_gettop(L) == top+1 && lua_rawlen(L, -1) == 20003 &&
+     lua_tolstring(L, -1, NULL)[0] == 'a' &&
+     lua_tolstring(L, -1, NULL)[3] == 'x',
+     "luaL_pushresult returns the gathered string");
+  lua_pop(L, 1);
+
+  luaL_buffinit(L, &b);
+  p = luaL_buffinitsize(L, &b, 100);
+  ok(p != NULL && luaL_bufflen(&b) == 0, "luaL_buffinitsize returns space");
+  memset(p, 'y', 100);
+  luaL_pushresultsize(&b, 100);
+  ok(lua_rawlen(L, -1) == 100 && lua_tolstring(L, -1, NULL)[0] == 'y',
+     "luaL_pushresultsize commits size");
+  lua_pop(L, 1);
+
+  luaL_buffinit(L, &b);
+  luaL_addstring(&b, "ab");
+  lua_pushliteral(L, "cd");
+  luaL_addvalue(&b);
+  luaL_pushresult(&b);
+  ok(lua_isstring(L, -1) && strcmp(lua_tostring(L, -1), "abcd") == 0,
+     "luaL_addvalue appends the top string");
+  lua_pop(L, 1);
+  lua_close(L);
+}
+
+static int mark_return_c(lua_State *L)
+{
+  lua_getglobal(L, "close_obj");
+  lua_toclose(L, -1);
+  return 1;
+}
+static int close_now_c(lua_State *L)
+{
+  lua_getglobal(L, "close_obj");
+  lua_toclose(L, -1);
+  lua_closeslot(L, -1);
+  return 0;
+}
+static int close_settop_c(lua_State *L)
+{
+  lua_getglobal(L, "close_obj");
+  lua_toclose(L, -1);
+  lua_settop(L, 0);
+  return 0;
+}
+static int mark_error_c(lua_State *L)
+{
+  lua_getglobal(L, "close_err_obj");
+  lua_toclose(L, -1);
+  return 0;
+}
+static int argexpected_c(lua_State *L)
+{
+  luaL_argexpected(L, lua_isinteger(L, 1), 1, "integer");
+  return 0;
+}
+
+static void test_toclose(void)
+{
+  lua_State *L = newL();
+  lua_pushcfunction(L, mark_return_c); lua_setglobal(L, "mark_return_c");
+  lua_pushcfunction(L, close_now_c); lua_setglobal(L, "close_now_c");
+  lua_pushcfunction(L, close_settop_c); lua_setglobal(L, "close_settop_c");
+  lua_pushcfunction(L, mark_error_c); lua_setglobal(L, "mark_error_c");
+  lua_pushcfunction(L, argexpected_c); lua_setglobal(L, "argexpected_c");
+  close_calls = 0;
+  luaL_dostring(L,
+    "close_calls = 0\n"
+    "close_obj = setmetatable({}, {__close=function() close_calls=close_calls+1 end})\n"
+    "local r = mark_return_c()\n"
+    "assert(r == close_obj)");
+  lua_getglobal(L, "close_calls");
+  ok(lua_tointeger(L, -1) == 1, "lua_toclose closes on C return");
+  lua_pop(L, 1);
+
+  close_calls = 0;
+  luaL_dostring(L, "close_calls=0; close_obj = setmetatable({}, {__close=function() close_calls=close_calls+1 end}); close_now_c()");
+  lua_getglobal(L, "close_calls");
+  ok(lua_tointeger(L, -1) == 1, "lua_closeslot closes immediately");
+  lua_pop(L, 1);
+
+  close_calls = 0;
+  luaL_dostring(L, "close_calls=0; close_obj = setmetatable({}, {__close=function() close_calls=close_calls+1 end}); close_settop_c()");
+  lua_getglobal(L, "close_calls");
+  ok(lua_tointeger(L, -1) == 1, "lua_settop closes a removed tbc slot");
+  lua_pop(L, 1);
+
+  luaL_dostring(L,
+    "close_err_obj = setmetatable({}, {__close=function() error('boom') end})\n"
+    "okerr, errmsg = pcall(mark_error_c)");
+  lua_getglobal(L, "okerr");
+  ok(!lua_toboolean(L, -1), "lua_toclose propagates a __close error");
+  lua_pop(L, 1);
+  lua_getglobal(L, "errmsg");
+  ok(lua_isstring(L, -1) && strstr(lua_tostring(L, -1), "boom"), "lua_toclose __close error object");
+  lua_pop(L, 1);
+
+  luaL_dostring(L, "ok, msg = pcall(argexpected_c, {})");
+  lua_getglobal(L, "ok");
+  ok(!lua_toboolean(L, -1), "luaL_argexpected rejects wrong type");
+  lua_pop(L, 1);
+  ok(luaL_dostring(L, "argexpected_c(42)") == LUA_OK,
+     "luaL_argexpected accepts expected type");
+  ok(INT_MAX == 2147483647, "<limits.h> reachable through lua.h");
+  lua_close(L);
+}
+
+static void test_closethread(void)
+{
+  lua_State *L = newL();
+  lua_State *co;
+  luaL_dostring(L,
+    "closed = 0\n"
+    "co = coroutine.create(function()\n"
+    "  local x <close> = setmetatable({}, {__close=function() closed=closed+1 end})\n"
+    "  coroutine.yield(1)\n"
+    "end)\n"
+    "assert(coroutine.resume(co))");
+  lua_getglobal(L, "co");
+  co = lua_tothread(L, -1);
+  ok(co != NULL && lua_status(co) == LUA_YIELD, "closethread: suspended thread");
+  ok(lua_closethread(co, L) == LUA_OK, "lua_closethread returns LUA_OK");
+  ok(lua_status(co) == LUA_OK && lua_gettop(co) == 0,
+     "lua_closethread resets status and stack");
+  lua_getglobal(L, "closed");
+  ok(lua_tointeger(L, -1) == 1, "lua_closethread closes pending tbc slots");
+  lua_pop(L, 1);
+  ok(lua_resetthread(co) == LUA_OK, "lua_resetthread delegates to closethread");
+  lua_pop(L, 1);
+
+  lua_pushcfunction(L, luaopen_coroutine);
+  lua_call(L, 0, 1);
+  ok(lua_istable(L, -1), "luaopen_coroutine returns a table");
+  lua_getfield(L, -1, "create");
+  ok(lua_isfunction(L, -1), "luaopen_coroutine table has create");
+  lua_pop(L, 2);
+  lua_close(L);
+  {
+    lua_State *L2 = luaL_newstate();  /* no luaL_openlibs: fallback path */
+    lua_pushcfunction(L2, luaopen_coroutine);
+    lua_call(L2, 0, 1);
+    ok(lua_istable(L2, -1), "luaopen_coroutine installs base on demand");
+    lua_getfield(L2, -1, "resume");
+    ok(lua_isfunction(L2, -1), "on-demand coroutine table has resume");
+    lua_close(L2);
+  }
+}
+
 static void test_lauxlib54(void)
 {
   lua_State *L = newL();
@@ -688,7 +1016,7 @@ int main(void)
   test_absindex(); test_getseti(); test_stream_abi(); test_api54_surface(); test_len(); test_compare();
   test_stringtonumber(); test_getsubtable(); test_isinteger(); test_rotate();
   test_newuserdatauv(); test_iuservalue(); test_warning(); test_warnf(); test_resume54();
-  test_continuations(); test_lauxlib54();
+  test_continuations(); test_arith(); test_buffer_api(); test_toclose(); test_closethread(); test_lauxlib54();
   printf("== capi: %d checks, %d failures ==\n", checks, failures);
   return failures ? 1 : 0;
 }

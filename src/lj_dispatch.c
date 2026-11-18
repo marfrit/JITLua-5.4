@@ -31,6 +31,7 @@
 #include "lj_profile.h"
 #endif
 #include "lj_vm.h"
+#include "lj_meta.h"
 #include "luajit.h"
 
 /* Bump GG_NUM_ASMFF in lj_dispatch.h as needed. Ugly. */
@@ -583,6 +584,8 @@ TValue * LJ_FASTCALL lj_dispatch_pret(lua_State *L, TValue *res, int n,
 
 int LJ_FASTCALL lj_dispatch_cret(lua_State *L, int n)
 {
+  if (L->tbcn)  /* C function marked slots with lua_toclose? */
+    n = lj_meta_tbcclose_cfunc(L, L->base, n);
   if (n >= 0 && (G(L)->hookmask & LUA_MASKRET)) {  /* Not a yield. */
     ERRNO_SAVE
     MSize ftransfer = n ? (MSize)((L->top - n) - L->base) + 1 : 0;

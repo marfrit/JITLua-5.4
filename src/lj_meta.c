@@ -879,3 +879,27 @@ int lj_meta_tbccloseall(lua_State *L, TValue *level, TValue *err)
   }
   return status;
 }
+
+/* Close to-be-closed slots marked by lua_toclose when a C function returns.
+** The VM calls this only on the slow path when L->tbcn != 0. Slots below the
+** C function base belong to outer frames and stay pending. */
+int LJ_FASTCALL lj_meta_tbcclose_cfunc(lua_State *L, TValue *base, int nresults)
+{
+  int32_t *list = mref(L->tbclist, int32_t);
+  ptrdiff_t bofs = savestack(L, base), tofs = savestack(L, L->top);
+  TValue *eslot;
+  int st;
+  if (L->tbcn == 0 || restorestack(L, list[L->tbcn-1]) < base)
+    return nresults;
+  eslot = L->top++;
+  setnilV(eslot);
+  st = lj_meta_tbccloseall(L, base, eslot);
+  if (st != LUA_OK) {
+    eslot = L->top-1;
+    L->top = eslot+1;
+    lj_err_throw(L, st);
+  }
+  L->base = restorestack(L, bofs);
+  L->top = restorestack(L, tofs);
+  return nresults;
+}

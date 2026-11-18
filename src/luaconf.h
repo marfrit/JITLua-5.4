@@ -11,6 +11,7 @@
 #endif
 #include <stddef.h>
 #include <stdint.h>
+#include <limits.h>
 
 /* Default path for loading Lua and C modules with require(). */
 #if defined(_WIN32)

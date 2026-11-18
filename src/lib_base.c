@@ -819,6 +819,20 @@ LJLIB_CF(coroutine_wrap)
 
 #include "lj_libdef.h"
 
+/* PUC exposes coroutine as its own opener. In this fork the coroutine table
+** is installed by luaopen_base; this entry returns that table. */
+LUALIB_API int luaopen_coroutine(lua_State *L)
+{
+  lua_getglobal(L, LUA_COLIBNAME);
+  if (!lua_istable(L, -1)) {  /* base not opened yet: install it once */
+    lua_pop(L, 1);
+    luaopen_base(L);
+    lua_pop(L, 2);  /* _VERSION and the proxy weak table */
+    lua_getglobal(L, LUA_COLIBNAME);
+  }
+  return 1;
+}
+
 /* Fix the PC of wrap_aux. Really ugly workaround. */
 static void setpc_wrap_aux(lua_State *L, GCfunc *fn)
 {

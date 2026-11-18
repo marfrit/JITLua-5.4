@@ -60,11 +60,19 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   boundary" instead of silently skipping the continuation. Plain
   `lua_yield` from a C function still works, including a tail yield
   (`tests/capi` `test_continuations`).
-- `PENDING` The number metatable does not apply to integers outside the inline
+- `FIXED` The number metatable did not apply to integers outside the inline
   47-bit range (boxed int64): after `debug.setmetatable(0, {__index = math})`,
-  `(1):floor()` works but `((1 << 50) + 3):floor()` raises, and
-  `getmetatable` of such an integer returns nil (PUC returns the number
-  metatable). Interpreter and JIT agree; found in the release review.
+  `(1):floor()` worked but `((1 << 50) + 3):floor()` raised, and `getmetatable`
+  of such an integer returned nil (PUC returns the number metatable). The same
+  representation leak made the C API report a box as userdata, and `<`/`<=` on
+  a widened inline integer against a non-number skipped the metamethod
+  (`lj_i64_compare`). Fixed in the interpreter (`itypemap`, `lj_meta_lookup`,
+  `lj_obj_ptr`, `lua_getmetatable`/`lua_setmetatable`) and in the JIT
+  (`lj_record_mm_lookup` and the `ff_getmetatable` fast function in
+  `vm_x64.dasc`/`vm_arm64.dasc`). `lua_isuserdata`, `lua_touserdata`,
+  `lua_topointer`, `luaL_testudata`/`luaL_checkudata`, `lua_rawlen` and
+  `lua_rawequal` now treat a box as a number. Regression tests
+  `tests/d54/i64_06_numbermt.lua` and `tests/capi/test_i64.c`.
 - `PENDING` `lua_getextraspace`: there is no reserved pointer-sized area before
   `lua_State`. Adding one would need a layout change in `GG_State` and in every
   per-thread allocation, moving the GC object/interior pointer and the assembler

@@ -70,13 +70,17 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   per-thread allocation, moving the GC object/interior pointer and the assembler
   offsets; not done. Modules using it need a portable side area instead.
 
-- `FORK` Weak-table accesses are never compiled: a trace recording an indexed
-  access to a table whose metatable `__mode` contains `k`/`v` aborts with
-  "NYI: weak table access". Upstream LuaJIT hoists a weak load out of a loop
-  and dead-code-eliminates allocations that only drive GC, so a loop like
-  `closure.lua:37` can spin without rechecking the weak entry or making GC
-  progress (stock 2.1 hangs there too). The interpreter path preserves PUC's
-  observable GC behaviour; `tests/d54/weak_jit.lua` bounds it.
+- `FIXED` Weak-table JIT loop hang (`closure.lua:37`; stock LuaJIT 2.1 hangs
+  there too). A compiled loop that indexes a weak table keeps its allocations
+  (no DCE) so the loop's GC check drives collection, and purged loop-head temp
+  slots are restored as nil so a stale interpreter value is not a GC root. A
+  runtime guard on the metatable pointer and the `__mode` negative-cache bit
+  exits the trace when a table becomes weak after it was compiled
+  (setmetatable, `rawset(mt,"__mode")`, `mt.__mode = ...` via TSETS).
+  Remaining boundary: a compiled loop with no allocation at all and only a
+  weak-table read (`while x[1] do A = A+1 end`) still spins without making GC
+  progress; PUC 5.4 hangs on the same shape, so this is out of scope.
+  `tests/d54/weak_*.lua` bound the shapes that allocate.
 
 ### Known JIT/performance rows (not semantic divergences)
 - `FIXED` arm64 `bit.lshift/rshift/arshift/rol/ror` returned 0 for native and

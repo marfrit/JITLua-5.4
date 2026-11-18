@@ -1091,6 +1091,11 @@ LUA_API int lua_pushthread(lua_State *L)
   return (mainthread(G(L)) == L);
 }
 
+LUA_API void *lua_getextraspace(lua_State *L)
+{
+  return (void *)&L->extraspace;
+}
+
 LUA_API lua_State *lua_newthread(lua_State *L)
 {
   lua_State *L1;

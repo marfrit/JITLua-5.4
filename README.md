@@ -15,7 +15,7 @@ Honest status, not a compatibility claim:
   Measured on Linux arm64 and x86_64, identical on both, on the `tests/d54`
   edge-case corpus: A+B **129 PASS / 0 FAIL / 5 XFAIL**, JIT optimization
   levels 0–3 **280**, R (dump/reload round-trip) **70**; the ASan/UBSan run
-  of A+B+R is **199 PASS / 0 FAIL / 5 XFAIL**; C API checks **195 + 14**.
+  of A+B+R is **199 PASS / 0 FAIL / 5 XFAIL**; C API checks **202 + 14**.
 - Full corpus (PUC 5.4.9 test suite plus `tests/d54`) with `--strict`, the
   exact command of the public CI: **254 PASS / 0 FAIL / 10 XFAIL / 12 SKIP /
   0 TIMEOUT**. Every XFAIL is a known-bad entry with its reason in

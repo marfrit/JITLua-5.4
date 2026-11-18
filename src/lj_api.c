@@ -1809,12 +1809,13 @@ LUA_API int lua_yield(lua_State *L, int nresults)
   if (cframe_canyield(cf)) {
     cf = cframe_raw(cf);
     if (!hook_active(g)) {  /* Regular yield: move results down if needed. */
+      cTValue *f;
       /* Close the slots this C function marked with lua_toclose before the
       ** results move over them and cframe is dropped: LuaJIT has no C
       ** continuation frame that could close them after the resume. */
       if (L->tbcn)
 	nresults = lj_meta_tbcclose_cfunc(L, L->base, nresults);
-      cTValue *f = L->top - nresults;
+      f = L->top - nresults;
       if (f > L->base) {
 	TValue *t = L->base;
 	while (--nresults >= 0) copyTV(L, t++, f++);

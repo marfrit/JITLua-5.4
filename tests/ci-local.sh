@@ -54,4 +54,21 @@ ASAN_OPTIONS=detect_leaks=0:abort_on_error=1 \
   CC="gcc -fsanitize=address,undefined -fno-sanitize=alignment -fno-omit-frame-pointer -g" \
   LDFLAGS="-fsanitize=address,undefined -fno-sanitize=alignment" \
   tests/capi/run.sh
+# C API checks also under -DLUA_USE_ASSERT -DLUA_USE_APICHECK: the ordinary
+# sanitizer build does not enable LuaJIT's API assertions, so a broken buffer
+# stack discipline or an invalid rotation would pass unnoticed.
+ASSERTBUILD="$ROOT/tests/ref/assertbuild"
+if [ ! -f "$ASSERTBUILD/src/libluajit.a" ] || [ "$SAN" = 1 ]; then
+  rm -rf "$ASSERTBUILD"
+  mkdir -p "$ASSERTBUILD"
+  cp -r "$ROOT/src" "$ROOT/dynasm" "$ROOT/Makefile" "$ROOT/etc" "$ASSERTBUILD/"
+  ( cd "$ASSERTBUILD/src" && make clean >/dev/null 2>&1 || true )
+  ( cd "$ASSERTBUILD" && ASAN_OPTIONS=detect_leaks=0 make -j"$(nproc)" \
+      CFLAGS="-DLUA_USE_ASSERT -DLUA_USE_APICHECK" HOST_CC="gcc" \
+      >/tmp/ci-local-assert-build.log 2>&1 ) || {
+    tail -30 /tmp/ci-local-assert-build.log; exit 1; }
+fi
+ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=0:halt_on_error=1 \
+  LUAJIT_LIB="$ASSERTBUILD/src/libluajit.a" LUAINC="$ASSERTBUILD/src" \
+  CAPI_OUT="$ASSERTBUILD/capi-build" tests/capi/run.sh
 echo "ci-local: OK"

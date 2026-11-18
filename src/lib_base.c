@@ -827,8 +827,9 @@ LUALIB_API int luaopen_coroutine(lua_State *L)
   if (!lua_istable(L, -1)) {
     /* Not open yet: register it through luaopen_base (the coroutine library
     ** lives there) and drop whatever that opener left on the stack. */
-    int top = lua_gettop(L);
+    int top;
     lua_pop(L, 1);
+    top = lua_gettop(L);
     luaopen_base(L);
     lua_settop(L, top);
     lua_getglobal(L, LUA_COLIBNAME);

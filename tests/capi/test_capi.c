@@ -911,16 +911,19 @@ static int grow_buffer_c(lua_State *L)
   luaL_Buffer b;
   char *p;
   size_t i, total = 3*LUAL_BUFFERSIZE + 123;
+  int j;
   lua_settop(L, 0);
+  /* Fill BEFORE buffinit: the fillers stay below the buffer's placeholder /
+  ** box, so luaL_pushresult sees the box at -2 and lua_closeslot can close it
+  ** on an exhausted stack. */
+  for (j = 0; j < LUA_MINSTACK; j++) lua_pushinteger(L, j);
   luaL_buffinit(L, &b);
   p = luaL_prepbuffsize(&b, total);
   for (i = 0; i < total; i++) p[i] = (char)('a' + (int)(i % 26));
   luaL_addsize(&b, total);
-  {  /* fill the remaining C stack slots so the close must grow the stack */
-    int j;
-    for (j = 0; j < LUA_MINSTACK; j++) lua_pushinteger(L, j);
-  }
-  luaL_pushresultsize(&b, 0);
+  luaL_pushresultsize(&b, 0);  /* closes the box on a full stack */
+  ok(lua_gettop(L) == LUA_MINSTACK+1,
+     "pushresult leaves exactly the string above the fillers");
   lua_pushinteger(L, (lua_Integer)lua_rawlen(L, -1));
   return 2;
 }
@@ -931,6 +934,22 @@ static int settop_err_c(lua_State *L)
   lua_toclose(L, -1);
   lua_settop(L, 0);  /* closes the slot, whose __close grows the stack and errors */
   return 0;
+}
+
+static int yield_err_c(lua_State *L)
+{
+  lua_getglobal(L, "yield_err_obj");
+  lua_toclose(L, -1);
+  lua_pushinteger(L, 7);
+  return lua_yield(L, 1);
+}
+
+static int yield_yield_c(lua_State *L)
+{
+  lua_getglobal(L, "yield_yield_obj");
+  lua_toclose(L, -1);
+  lua_pushinteger(L, 7);
+  return lua_yield(L, 1);
 }
 
 static int addvalue_boxed_c(lua_State *L)
@@ -981,6 +1000,8 @@ static void test_toclose(void)
   lua_pushcfunction(L, settop_err_c); lua_setglobal(L, "settop_err_c");
   lua_pushcfunction(L, closeslot_deep_c); lua_setglobal(L, "closeslot_deep_c");
   lua_pushcfunction(L, yield_tbc_c); lua_setglobal(L, "yield_tbc_c");
+  lua_pushcfunction(L, yield_err_c); lua_setglobal(L, "yield_err_c");
+  lua_pushcfunction(L, yield_yield_c); lua_setglobal(L, "yield_yield_c");
   lua_pushcfunction(L, argexpected_c); lua_setglobal(L, "argexpected_c");
   close_calls = 0;
   luaL_dostring(L,
@@ -1059,6 +1080,20 @@ static void test_toclose(void)
      "luaL_argexpected accepts expected type");
   ok(INT_MAX == 2147483647, "<limits.h> reachable through lua.h");
 
+  /* __close errors / yields at yield time: the coroutine gets that error on
+  ** the resume, instead of yielding the value and raising later (FORK row). */
+  luaL_dostring(L,
+    "yield_err_obj = setmetatable({}, {__close=function() error('boom') end})\n"
+    "yield_yield_obj = setmetatable({}, {__close=function() coroutine.yield('inside') end})\n"
+    "co_err = coroutine.create(function() local v = yield_err_c(); return v end)\n"
+    "ok_e, msg_e = coroutine.resume(co_err)\n"
+    "co_y = coroutine.create(function() local v = yield_yield_c(); return v end)\n"
+    "ok_y, msg_y = coroutine.resume(co_y)");
+  lua_getglobal(L, "ok_e"); ok(!lua_toboolean(L, -1), "yield + __close error resumes with an error"); lua_pop(L,1);
+  lua_getglobal(L, "msg_e"); ok(lua_isstring(L,-1) && strstr(lua_tostring(L,-1), "boom"), "yield + __close error keeps 'boom'"); lua_pop(L,1);
+  lua_getglobal(L, "ok_y"); ok(!lua_toboolean(L, -1), "yield + __close yield resumes with an error"); lua_pop(L,1);
+  lua_getglobal(L, "msg_y"); ok(lua_isstring(L,-1) && strstr(lua_tostring(L,-1), "across a C-call boundary"), "yield + __close yield wording"); lua_pop(L,1);
+
   /* Last: a yield needs the whole process to survive a panic on old code. */
 
   /* A yield from a C function with a pending lua_toclose slot: the slot is
@@ -1133,8 +1168,12 @@ static void test_closethread(void)
   ok(lua_tointeger(L, -1) == 1, "lua_closethread closes the dead thread's slots");
   lua_pop(L, 2);
 
-  lua_pushcfunction(L, luaopen_coroutine);
-  lua_call(L, 0, 1);
+  {
+    int top = lua_gettop(L);
+    lua_pushcfunction(L, luaopen_coroutine);
+    lua_call(L, 0, 1);
+    ok(lua_gettop(L) == top+1, "luaopen_coroutine leaves one value");
+  }
   ok(lua_istable(L, -1), "luaopen_coroutine returns a table");
   lua_getfield(L, -1, "create");
   ok(lua_isfunction(L, -1), "luaopen_coroutine table has create");
@@ -1144,6 +1183,7 @@ static void test_closethread(void)
     lua_State *L2 = luaL_newstate();  /* no luaL_openlibs: fallback path */
     lua_pushcfunction(L2, luaopen_coroutine);
     lua_call(L2, 0, 1);
+    ok(lua_gettop(L2) == 1, "luaopen_coroutine leaves one value on a fresh state");
     ok(lua_istable(L2, -1), "luaopen_coroutine installs base on demand");
     lua_getfield(L2, -1, "resume");
     ok(lua_isfunction(L2, -1), "on-demand coroutine table has resume");

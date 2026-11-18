@@ -46,7 +46,10 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   that slot at yield time, not when the frame "returns" after the resume: with
   no C continuation frame there is no later point to run `__close`. PUC keeps
   them pending across the resume. Observable in the order of `__close` calls
-  relative to `coroutine.resume` (`tests/capi` `test_toclose`).
+  relative to `coroutine.resume` (`tests/capi` `test_toclose`). An error (or
+  yield) inside such a `__close` is raised in the coroutine at the yield, not
+  after the resume; a yielding `__close` fails with "attempt to yield across a
+  C-call boundary" instead of PUC's yieldable continuation.
 - `EXTENSION` `luaL_Buffer` uses the PUC 5.4 layout and `luaL_prepbuffer` is a
   macro over `luaL_prepbuffsize`. This changes the auxlib ABI: C modules
   compiled against an older JITLua-5.4 auxlib must be recompiled.

@@ -584,7 +584,13 @@ TValue * LJ_FASTCALL lj_dispatch_pret(lua_State *L, TValue *res, int n,
 
 int LJ_FASTCALL lj_dispatch_cret(lua_State *L, int n)
 {
-  if (L->tbcn)  /* C function marked slots with lua_toclose? */
+  /* n >= 0: a negative count is a yield, whose pending slots lua_yield
+  ** already closed (it cannot leave them to a C continuation frame). The
+  ** check is thread-wide: any pending slot, including a Lua <close> local of
+  ** an outer frame, routes every later C return through here. That is
+  ** correct (the closer keeps slots below this C frame pending) and only
+  ** costs the one call while something is pending. */
+  if (n >= 0 && L->tbcn)
     n = lj_meta_tbcclose_cfunc(L, L->base, n);
   if (n >= 0 && (G(L)->hookmask & LUA_MASKRET)) {  /* Not a yield. */
     ERRNO_SAVE

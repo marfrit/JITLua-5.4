@@ -789,10 +789,13 @@ void LJ_FASTCALL lj_meta_tbcmark(lua_State *L, TValue *o)
 {
   if (tvisnil(o) || tvisfalse(o)) return;
   if (tvisnil(lj_meta_lookup(L, o, MM_close))) {
-    const BCIns *pc = cframe_pc(cframe_raw(L->cframe));
     const char *name = NULL;
-    if (curr_funcisL(L))
+    /* No current Lua frame (or no C frame at all, e.g. lua_toclose called
+    ** outside a call): report the value without a variable name. */
+    if (L->cframe != NULL && curr_funcisL(L)) {
+      const BCIns *pc = cframe_pc(cframe_raw(L->cframe));
       lj_debug_slotname(curr_proto(L), pc, (BCReg)(o - L->base), &name);
+    }
     lj_err_msgv(L, LJ_ERR_TBCVAL, name ? name : "?");
   }
   tbc_push(L, o);

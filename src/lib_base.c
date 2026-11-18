@@ -824,10 +824,13 @@ LJLIB_CF(coroutine_wrap)
 LUALIB_API int luaopen_coroutine(lua_State *L)
 {
   lua_getglobal(L, LUA_COLIBNAME);
-  if (!lua_istable(L, -1)) {  /* base not opened yet: install it once */
+  if (!lua_istable(L, -1)) {
+    /* Not open yet: register it through luaopen_base (the coroutine library
+    ** lives there) and drop whatever that opener left on the stack. */
+    int top = lua_gettop(L);
     lua_pop(L, 1);
     luaopen_base(L);
-    lua_pop(L, 2);  /* _VERSION and the proxy weak table */
+    lua_settop(L, top);
     lua_getglobal(L, LUA_COLIBNAME);
   }
   return 1;

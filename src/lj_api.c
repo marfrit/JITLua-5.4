@@ -168,12 +168,13 @@ LUA_API void lua_settop(lua_State *L, int idx)
     TValue *eslot = L->top++;
     int st;
     setnilV(eslot);
-    st = lj_meta_tbccloseall(L, newtop, eslot);
+    st = lj_meta_tbccloseall(L, restorestack(L, nofs), eslot);
+    eslot = L->top-1;  /* the __close call may have moved the stack */
     if (st != LUA_OK) {
-      L->top = eslot+1;
+      L->top = eslot+1;  /* error object for the throw */
       lj_err_throw(L, st);
     }
-    L->top = eslot;
+    L->top = eslot;  /* drop the nil error anchor */
   }
   L->top = restorestack(L, nofs);
 }
@@ -268,11 +269,14 @@ LUA_API void lua_closeslot(lua_State *L, int idx)
   eslot = L->top++;
   setnilV(eslot);
   st = lj_meta_tbccloseall(L, o, eslot);
+  /* The __close call and lj_state_checkstack inside it can reallocate the
+  ** stack, so eslot is stale here: re-derive it from L->top. */
+  eslot = L->top-1;
   if (st != LUA_OK) {
     L->top = eslot+1;  /* error object for the throw */
     lj_err_throw(L, st);
   }
-  L->top = eslot;
+  L->top = eslot;  /* drop the nil error anchor */
   o = restorestack(L, oofs);
   setnilV(o);
 }
@@ -1804,6 +1808,11 @@ LUA_API int lua_yield(lua_State *L, int nresults)
   if (cframe_canyield(cf)) {
     cf = cframe_raw(cf);
     if (!hook_active(g)) {  /* Regular yield: move results down if needed. */
+      /* Close the slots this C function marked with lua_toclose before the
+      ** results move over them and cframe is dropped: LuaJIT has no C
+      ** continuation frame that could close them after the resume. */
+      if (L->tbcn)
+	nresults = lj_meta_tbcclose_cfunc(L, L->base, nresults);
       cTValue *f = L->top - nresults;
       if (f > L->base) {
 	TValue *t = L->base;
@@ -1897,16 +1906,21 @@ LUA_API int lua_closethread(lua_State *L, lua_State *from)
   st = lj_meta_tbccloseall(L, tvref(L->stack), eslot);
   eslot = L->top-1;  /* close calls may grow the stack */
   lj_func_closeuv(L, tvref(L->stack));
-  L->base = L->top = tvref(L->stack) + 1 + LJ_FR2;
   L->cframe = NULL;
   L->errnest = 0;
   L->errnestofs = 0;
-  if (st != LUA_OK) {  /* keep the error object for the caller */
+  /* PUC luaE_resetthread returns the original status when the __close
+  ** handlers succeed, LUA_OK only if neither the original error nor a closing
+  ** method failed; the error object stays on the stack in both cases. */
+  if (st == LUA_OK) st = status;
+  L->base = tvref(L->stack) + 1 + LJ_FR2;
+  if (st != LUA_OK) {
     copyTV(L, L->base, eslot);
     L->top = L->base+1;
-    return st;
+  } else {
+    L->top = L->base;
   }
-  return LUA_OK;
+  return st;
 }
 
 LUA_API int lua_resetthread(lua_State *L)

@@ -42,6 +42,14 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   call; PUC resumes it (`close_04`; documented/accepted divergence).
 - `PENDING` `lua_setcstacklimit` is a no-op returning `LUAI_MAXCCALLS` (200);
   PUC sets a new C-stack limit and returns the previous one.
+- `FORK` C functions that marked a slot with `lua_toclose` and then yield close
+  that slot at yield time, not when the frame "returns" after the resume: with
+  no C continuation frame there is no later point to run `__close`. PUC keeps
+  them pending across the resume. Observable in the order of `__close` calls
+  relative to `coroutine.resume` (`tests/capi` `test_toclose`).
+- `EXTENSION` `luaL_Buffer` uses the PUC 5.4 layout and `luaL_prepbuffer` is a
+  macro over `luaL_prepbuffsize`. This changes the auxlib ABI: C modules
+  compiled against an older JITLua-5.4 auxlib must be recompiled.
 - `FORK` The 5.4 C continuation API (`lua_callk`, `lua_pcallk`, `lua_yieldk`)
   is present, but LuaJIT has no C-level continuation frames: `k` is never
   called and `ctx` is ignored. `lua_pcallk` never returns `LUA_YIELD`;

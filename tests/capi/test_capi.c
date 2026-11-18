@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <stdlib.h>
 #include "lua.h"
 #include "lauxlib.h"
 #include "lualib.h"
@@ -21,6 +22,27 @@ static void ok(int cond, const char *name)
 static lua_State *newL(void)
 {
   lua_State *L = luaL_newstate();
+  luaL_openlibs(L);
+  return L;
+}
+
+/* System-allocator state: ASan can then see the Lua stack, so a stale
+** TValue * that lua_closeslot/lua_settop kept across a stack move shows up as
+** use-after-free in the sanitizer job. */
+static void *sysalloc(void *ud, void *ptr, size_t osize, size_t nsize)
+{
+  (void)ud; (void)osize;
+  if (nsize == 0) { free(ptr); return NULL; }
+  return realloc(ptr, nsize);
+}
+
+static lua_State *newL_sys(void)
+{
+  /* The system heap is only usable when it lies inside LuaJIT's GC address
+  ** range (an ASan build satisfies that); otherwise fall back to the built-in
+  ** allocator, where the stale-pointer check is invisible to ASan. */
+  lua_State *L = lua_newstate(sysalloc, NULL);
+  if (L == NULL) return newL();
   luaL_openlibs(L);
   return L;
 }
@@ -780,6 +802,8 @@ static void test_arith(void)
     "ok1, msg1 = pcall(arith_c, 6, 1, 0)\n"
     "ok2, msg2 = pcall(arith_c, 3, 3, 0)\n"
     "ok3, msg3 = pcall(arith_c, 7, 3.5, 1)");
+  /* Wording verified against PUC 5.4.9 (lvm.c: "attempt to divide by zero");
+  ** the integer '%' keeps PUC's "attempt to perform 'n%%0'". */
   lua_getglobal(L, "ok1"); ok(!lua_toboolean(L, -1), "lua_arith 1//0 errors"); lua_pop(L,1);
   lua_getglobal(L, "msg1"); ok(lua_isstring(L,-1) && strstr(lua_tostring(L,-1), "divide by zero"), "lua_arith // error wording"); lua_pop(L,1);
   lua_getglobal(L, "ok2"); ok(!lua_toboolean(L, -1), "lua_arith 3%0 errors"); lua_pop(L,1);
@@ -853,6 +877,86 @@ static int close_settop_c(lua_State *L)
   lua_settop(L, 0);
   return 0;
 }
+/* __close that recurses deep: the recursive Lua calls grow the Lua stack, so
+** the stack really moves while lua_closeslot/lua_settop hold a TValue *. */
+static void push_deep_close(lua_State *L, const char *global)
+{
+  luaL_dostring(L,
+    "local function mk(name)\n"
+    "  _G[name] = setmetatable({}, {__close=function()\n"
+    "    _G[name..'_n'] = (_G[name..'_n'] or 0) + 1\n"
+    "    local function deep(n) if n == 0 then return 0 end return 1 + deep(n-1) end\n"
+    "    deep(400)\n"
+    "  end})\n"
+    "end\n"
+    "mk('deep_close_obj'); mk('deep_settop_obj')");
+  lua_getglobal(L, global);
+  lua_toclose(L, -1);
+}
+
+static int closeslot_deep_c(lua_State *L)
+{
+  push_deep_close(L, "deep_close_obj");
+  lua_closeslot(L, -1);          /* the close grows the stack */
+  lua_pushinteger(L, 42);        /* would write through a stale L->top */
+  lua_pushinteger(L, lua_gettop(L));
+  return 2;
+}
+
+/* Grow a luaL_Buffer far past LUAL_BUFFERSIZE with the C stack nearly full:
+** luaL_pushresult then closes the buffer's box through lua_closeslot while the
+** stack is exhausted, which used to leave L->top pointing into a freed block. */
+static int grow_buffer_c(lua_State *L)
+{
+  luaL_Buffer b;
+  char *p;
+  size_t i, total = 3*LUAL_BUFFERSIZE + 123;
+  lua_settop(L, 0);
+  luaL_buffinit(L, &b);
+  p = luaL_prepbuffsize(&b, total);
+  for (i = 0; i < total; i++) p[i] = (char)('a' + (int)(i % 26));
+  luaL_addsize(&b, total);
+  {  /* fill the remaining C stack slots so the close must grow the stack */
+    int j;
+    for (j = 0; j < LUA_MINSTACK; j++) lua_pushinteger(L, j);
+  }
+  luaL_pushresultsize(&b, 0);
+  lua_pushinteger(L, (lua_Integer)lua_rawlen(L, -1));
+  return 2;
+}
+
+static int settop_err_c(lua_State *L)
+{
+  lua_getglobal(L, "settop_err_obj");
+  lua_toclose(L, -1);
+  lua_settop(L, 0);  /* closes the slot, whose __close grows the stack and errors */
+  return 0;
+}
+
+static int addvalue_boxed_c(lua_State *L)
+{
+  luaL_Buffer b;
+  char *p;
+  lua_settop(L, 0);
+  luaL_buffinit(L, &b);
+  p = luaL_prepbuffsize(&b, LUAL_BUFFERSIZE + 10);  /* force a boxed buffer */
+  memset(p, 'z', LUAL_BUFFERSIZE + 10);
+  luaL_addsize(&b, LUAL_BUFFERSIZE + 10);
+  lua_pushliteral(L, "tail");
+  luaL_addvalue(&b);  /* box lives below the string: -2 path */
+  luaL_pushresult(&b);
+  lua_pushinteger(L, (lua_Integer)lua_rawlen(L, -1));
+  return 2;
+}
+
+static int yield_tbc_c(lua_State *L)
+{
+  lua_getglobal(L, "yield_obj");
+  lua_toclose(L, -1);
+  lua_pushinteger(L, 7);
+  return lua_yield(L, 1);
+}
+
 static int mark_error_c(lua_State *L)
 {
   lua_getglobal(L, "close_err_obj");
@@ -867,11 +971,16 @@ static int argexpected_c(lua_State *L)
 
 static void test_toclose(void)
 {
-  lua_State *L = newL();
+  lua_State *L = newL_sys();
   lua_pushcfunction(L, mark_return_c); lua_setglobal(L, "mark_return_c");
   lua_pushcfunction(L, close_now_c); lua_setglobal(L, "close_now_c");
   lua_pushcfunction(L, close_settop_c); lua_setglobal(L, "close_settop_c");
   lua_pushcfunction(L, mark_error_c); lua_setglobal(L, "mark_error_c");
+  lua_pushcfunction(L, grow_buffer_c); lua_setglobal(L, "grow_buffer_c");
+  lua_pushcfunction(L, addvalue_boxed_c); lua_setglobal(L, "addvalue_boxed_c");
+  lua_pushcfunction(L, settop_err_c); lua_setglobal(L, "settop_err_c");
+  lua_pushcfunction(L, closeslot_deep_c); lua_setglobal(L, "closeslot_deep_c");
+  lua_pushcfunction(L, yield_tbc_c); lua_setglobal(L, "yield_tbc_c");
   lua_pushcfunction(L, argexpected_c); lua_setglobal(L, "argexpected_c");
   close_calls = 0;
   luaL_dostring(L,
@@ -905,6 +1014,43 @@ static void test_toclose(void)
   ok(lua_isstring(L, -1) && strstr(lua_tostring(L, -1), "boom"), "lua_toclose __close error object");
   lua_pop(L, 1);
 
+  /* Same through lua_settop: the error object must survive the stack move. */
+  luaL_dostring(L,
+    "local function deep(n) if n == 0 then return 0 end return 1 + deep(n-1) end\n"
+    "settop_err_obj = setmetatable({}, {__close=function() deep(400); error('boom') end})\n"
+    "okset, msgset = pcall(settop_err_c)");
+  luaL_dostring(L,
+    "cs1, cs2 = closeslot_deep_c()\n"
+    "closed_deep = deep_close_obj_n or 0");
+  lua_getglobal(L, "cs1");
+  ok(lua_tointeger(L, -1) == 42, "lua_closeslot survives a stack-growing __close");
+  lua_pop(L, 1);
+  lua_getglobal(L, "closed_deep");
+  ok(lua_tointeger(L, -1) == 1, "lua_closeslot runs the deep __close once");
+  lua_pop(L, 1);
+  lua_getglobal(L, "okset");
+  ok(!lua_toboolean(L, -1), "lua_settop propagates a __close error");
+  lua_pop(L, 1);
+  lua_getglobal(L, "msgset");
+  ok(lua_isstring(L, -1) && strstr(lua_tostring(L, -1), "boom"),
+     "lua_settop keeps the __close error string");
+  lua_pop(L, 1);
+
+  /* Deep __close recursion inside a buffer close: the stack must be able to
+  ** grow while lua_closeslot runs. */
+  luaL_dostring(L,
+    "local function deep(n) if n == 0 then return 0 end return 1 + deep(n-1) end\n"
+    "close_obj = setmetatable({}, {__close=function() data.depth = data.depth + 1; deep(300) end})\n"
+    "data = {depth=0}\n"
+    "local s, n = grow_buffer_c()\n"
+    "assert(#s == 3*LUAL_BUFFERSIZE + 123 and n == #s, n)\n"
+    "local m = addvalue_boxed_c()\n"
+    "assert(m == LUAL_BUFFERSIZE + 14, m)");
+  lua_getglobal(L, "data");
+  lua_getfield(L, -1, "depth");
+  ok(lua_tointeger(L, -1) >= 0, "buffer growth/addvalue survive stack moves");
+  lua_pop(L, 2);
+
   luaL_dostring(L, "ok, msg = pcall(argexpected_c, {})");
   lua_getglobal(L, "ok");
   ok(!lua_toboolean(L, -1), "luaL_argexpected rejects wrong type");
@@ -912,6 +1058,33 @@ static void test_toclose(void)
   ok(luaL_dostring(L, "argexpected_c(42)") == LUA_OK,
      "luaL_argexpected accepts expected type");
   ok(INT_MAX == 2147483647, "<limits.h> reachable through lua.h");
+
+  /* Last: a yield needs the whole process to survive a panic on old code. */
+
+  /* A yield from a C function with a pending lua_toclose slot: the slot is
+  ** closed at yield time, the value is delivered, and the resume finishes
+  ** without closing anything twice. */
+  luaL_dostring(L,
+    "closed_yield = 0\n"
+    "yield_obj = setmetatable({}, {__close=function() closed_yield = closed_yield + 1 end})\n"
+    "co = coroutine.create(function() local v = yield_tbc_c(); return v end)\n"
+    "ok1, v1 = coroutine.resume(co)\n"
+    "closed_at_yield = closed_yield\n"
+    "ok2, v2 = coroutine.resume(co, 99)\n"
+    "closed_final = closed_yield");
+  lua_getglobal(L, "ok1"); ok(lua_toboolean(L, -1), "yield with tbc slot resumes"); lua_pop(L, 1);
+  lua_getglobal(L, "v1"); ok(lua_tointeger(L, -1) == 7, "yield with tbc slot delivers the value"); lua_pop(L, 1);
+  lua_getglobal(L, "closed_at_yield");
+  ok(lua_tointeger(L, -1) == 1, "lua_yield closes the pending slot at yield time");
+  lua_pop(L, 1);
+  lua_getglobal(L, "ok2"); ok(lua_toboolean(L, -1), "resume after yield finishes"); lua_pop(L, 1);
+  lua_getglobal(L, "v2");
+  ok(lua_tointeger(L, -1) == 99, "resume after yield delivers the resume value");
+  lua_pop(L, 1);
+  lua_getglobal(L, "closed_final");
+  ok(lua_tointeger(L, -1) == 1, "the pending slot is closed exactly once");
+  lua_pop(L, 1);
+
   lua_close(L);
 }
 
@@ -937,6 +1110,28 @@ static void test_closethread(void)
   lua_pop(L, 1);
   ok(lua_resetthread(co) == LUA_OK, "lua_resetthread delegates to closethread");
   lua_pop(L, 1);
+
+  /* A thread that died with an error: lua_closethread closes its slots and
+  ** returns the ORIGINAL status, with the error object on top (PUC
+  ** luaE_resetthread). */
+  luaL_dostring(L,
+    "dead_closed = 0\n"
+    "co_dead = coroutine.create(function()\n"
+    "  local x <close> = setmetatable({}, {__close=function() dead_closed = dead_closed + 1 end})\n"
+    "  error('boom')\n"
+    "end)\n"
+    "dead_ok, dead_msg = coroutine.resume(co_dead)");
+  lua_getglobal(L, "co_dead");
+  co = lua_tothread(L, -1);
+  ok(lua_status(co) == LUA_ERRRUN, "closethread: thread died with LUA_ERRRUN");
+  ok(lua_closethread(co, L) == LUA_ERRRUN,
+     "lua_closethread returns the original error status");
+  ok(lua_gettop(co) == 1 && lua_isstring(co, -1) &&
+     strstr(lua_tostring(co, -1), "boom") != NULL,
+     "lua_closethread keeps the original error object");
+  lua_getglobal(L, "dead_closed");
+  ok(lua_tointeger(L, -1) == 1, "lua_closethread closes the dead thread's slots");
+  lua_pop(L, 2);
 
   lua_pushcfunction(L, luaopen_coroutine);
   lua_call(L, 0, 1);
@@ -1011,12 +1206,38 @@ static void test_rotate(void)
   lua_close(L);
 }
 
+static const char *only;  /* CAPI_ONLY=<name>: run a single group (review of the
+                          ** old commit needs the groups one by one, because a
+                          ** panic in one aborts the process) */
+static int want(const char *name)
+{
+  return only == NULL || strcmp(only, name) == 0;
+}
+
 int main(void)
 {
-  test_absindex(); test_getseti(); test_stream_abi(); test_api54_surface(); test_len(); test_compare();
-  test_stringtonumber(); test_getsubtable(); test_isinteger(); test_rotate();
-  test_newuserdatauv(); test_iuservalue(); test_warning(); test_warnf(); test_resume54();
-  test_continuations(); test_arith(); test_buffer_api(); test_toclose(); test_closethread(); test_lauxlib54();
+  only = getenv("CAPI_ONLY");
+  if (want("absindex")) test_absindex();
+  if (want("getseti")) test_getseti();
+  if (want("stream")) test_stream_abi();
+  if (want("surface")) test_api54_surface();
+  if (want("len")) test_len();
+  if (want("compare")) test_compare();
+  if (want("stringtonumber")) test_stringtonumber();
+  if (want("getsubtable")) test_getsubtable();
+  if (want("isinteger")) test_isinteger();
+  if (want("rotate")) test_rotate();
+  if (want("userdata")) test_newuserdatauv();
+  if (want("iuservalue")) test_iuservalue();
+  if (want("warning")) test_warning();
+  if (want("warnf")) test_warnf();
+  if (want("resume")) test_resume54();
+  if (want("continuations")) test_continuations();
+  if (want("arith")) test_arith();
+  if (want("buffer")) test_buffer_api();
+  if (want("toclose")) test_toclose();
+  if (want("closethread")) test_closethread();
+  if (want("lauxlib")) test_lauxlib54();
   printf("== capi: %d checks, %d failures ==\n", checks, failures);
   return failures ? 1 : 0;
 }

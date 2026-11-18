@@ -333,7 +333,8 @@ static void newbox(lua_State *L)
 #define buffonstack(B)	((B)->b != (B)->init.b)
 #define checkbufferlevel(B,idx) \
   lj_assertX(buffonstack(B) ? lua_touserdata(B->L, idx) != NULL \
-                            : lua_touserdata(B->L, idx) == (void *)B)
+                            : lua_touserdata(B->L, idx) == (void *)B, \
+	     "buffer level does not match the stack slot")
 
 static size_t newbuffsize(luaL_Buffer *B, size_t sz)
 {

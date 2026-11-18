@@ -14,5 +14,8 @@ $CC $CFLAGS -I"$SRC" "$ROOT/tests/capi/test_capi.c" -o "$OUT/test_capi" \
   "$LIB" $LDFLAGS -lm -ldl
 $CC $CFLAGS -I"$SRC" "$ROOT/tests/capi/test_i64.c" -o "$OUT/test_i64" \
   "$LIB" $LDFLAGS -lm -ldl
+$CC $CFLAGS -I"$SRC" "$ROOT/tests/capi/test_extraspace.c" -o "$OUT/test_extraspace" \
+  "$LIB" $LDFLAGS -lm -ldl
 "$OUT/test_capi"
 "$OUT/test_i64"
+"$OUT/test_extraspace"

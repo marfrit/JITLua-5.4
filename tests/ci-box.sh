@@ -78,6 +78,9 @@ for j in -joff -jon; do timeout 120 ./src/luajit $j tests/lib/env-noflush.lua ||
 # x64 math.random/negative-int-key JIT bug (known-bad math B): hangs on the
 # buggy build, so bound it.
 for j in -joff -O0 -O3; do timeout 120 ./src/luajit $j tests/lib/math-random-jit.lua || exit 1; done
+# Array parts above 2^28 / 2^29 slots: 64 bit index scaling in the interpreter
+# and in compiled code. Needs about 4.3 GiB, skips itself on a small machine.
+for j in -joff -jon; do timeout 600 ./src/luajit $j tests/lib/array-huge.lua || exit 1; done
 
 say "harness: GC stress (pause 0 in every arm), int64 + close tests, modes A+B+R"
 stage 'tail -12' tests/harness.sh --strict --mode all --opt-levels 0,3 --gc-stress --corpus tests/d54 \

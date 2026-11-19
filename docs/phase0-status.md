@@ -76,16 +76,10 @@ Also fixed a real syntax error in `err_01_xpcall.lua` (missing paren) found by t
 
 ## Session 7 — REQUIRED WORKFLOW CHANGE (external guard) + amd64 box
 
-An external guard now REFUSES local builds: `make` on pica prints
-"make is not allowed on this host (dcw2). Run: bash -lc \"dirac-gate build\"" and
-exits 97 (wrapper at ~/.local/bin/make; comment cites Markus "Do not build
-locally"). So **nothing may be compiled or tested on pica any more**. All
-verification must go to the boxes:
-- `arm-box` = escher, aarch64 (works; proven this session)
-- `build-box` = `build@<build host>`, **x86_64** (new from outside; restricted
-  key that only runs build-box). Currently blocked: a card measurement window
-  on dirac (`~/wp/window.lock`, started 08:31 UTC, ~80 min) -> exit 75 "try
-  later". Re-run after ~09:51 UTC.
+From this session on, nothing is compiled or tested in the development
+container. All verification goes to remote test hosts through private wrappers:
+- `arm-box`: aarch64 test host
+- `build-box` (later `x64-box`): x86_64 test host, restricted key
 - Both copy the tree (no .git) into a fresh dir, run, delete; only stdout comes
   back. Memory cap 8G. Keep jobs small.
 Consequence: verify with `arm-box -t 1200 sh tests/ci-box.sh` (or `build-box …`).
@@ -281,7 +275,6 @@ OPEN / next:
 - `calls.lua` B/R and `heavy.lua` exceed 60 s per side -> TIMEOUT (inconclusive).
   Either raise the limit for those files (`--! timeout:`) or split them.
 - Full-corpus run under ASan/UBSan (only d54 done so far).
-- Persist decisions to mneme (`sic hertz lmcp-tool mneme command=remember ...`).
 - M0 sign-off, then Phase 1 (lexer -> parser -> bytecode -> interpreter -> C API).
 
 ## Blocking-command discipline
@@ -998,7 +991,7 @@ Gates at 4fe1f9c5 (main 4a6fbbd7 merged), both arches identical: A+B 93
 PASS / 0 FAIL / 8 XFAIL / 1 XPASS (dump_03_version B), opt 0-3 200/0/0/4,
 R 51, GC stress 58/0/2, JIT tooling smoke 30/30, corpus 6/0, C API 81 + i64
 14/14, fuzz 160/160. Bench arm64 (JIT): B1 16.7, B2 929.6 (822-942 across
-runs on the shared escher; was 1496.6; FFI 618, PUC 544), B2b 163.2, B3 21.1
+runs on the shared arm64 test host; was 1496.6; FFI 618, PUC 544), B2b 163.2, B3 21.1
 / 219.2 ms. x64 (JIT, main 4a6fbbd7 measured back to back as reference):
 B1 30.3 (main 30.3), B2 3179.1 (main 3242.9), B2b 793.2 (main 654.5), B3
 47.7 / 1013.3 (main 47.7 / 934.1) ms. B2b: main sorted the widened values
@@ -1114,7 +1107,7 @@ select(i, ...) typed a boxed int64 vararg as UDATA (rec_check_slots); the
 assert suite is green afterwards (A+B 95/0, opt 204/0, GC stress all d54
 198/0, fuzz 240/0, smoke 30/30). The x64 assert build segfaults at start-up
 on main as well (5316a836, `-DLUA_USE_ASSERT` alone, `luajit -e
-'print(1)'`): pre-existing, not investigated here; a Debian 13 gcc on pve2.
+'print(1)'`): pre-existing, not investigated here; a Debian 13 gcc on the x86_64 test host.
 tests/soak/gc-soak.sh is the overnight GC soak (item 4): GC-stress harness
 over all of d54 (A, B@0, B@3, R), the fuzzer with a fresh seed per round
 and the real-program corpus, in a loop; one summary line per round,
@@ -1657,13 +1650,13 @@ Tools kept: `tests/lib/perf-*.py` from Session 53; the ad-hoc stats patch
 (`newtab`/exit counters by vmstate) and the IR histogram script are described
 in the regression doc, not committed.
 
-Gate (arm64, escher, `sh tests/ci-box.sh` on c62fa218): A+B 116 PASS/0 FAIL/5 XFAIL (62 tests), opt 0..3 248/0, R 62/0, GC
+Gate (arm64, `sh tests/ci-box.sh` on c62fa218): A+B 116 PASS/0 FAIL/5 XFAIL (62 tests), opt 0..3 248/0, R 62/0, GC
 stress 59+1X, jitutil smoke 30 ok, corpus-ext 15 arms SAME/0 unexpected, capi
 112/0, i64 14/0, fuzz 160/0. Bench (`BENCH_ONLY=deltablue,k-nucleotide
 BENCH_REPS=5`): deltablue stock 3561.5 / ours 4590.0 ms (0.78x; 0.76x before),
 k-nucleotide stock 24.5 / ours 19.9 ms (1.23x). deltablue -jv: NOMM aborts
 0 (74 before), traces 167 vs stock 163.
-Gate (x86_64, pve2, c62fa218 plus the later-reverted checkint macro; re-run on
+Gate (x86_64, c62fa218 plus the later-reverted checkint macro; re-run on
 c62fa218 itself recorded below): R 62/0, GC stress 59+1X, jitutil smoke 30 ok,
 corpus-ext 15 arms SAME/0 unexpected, capi 112/0, i64 14/0, fuzz 160/0 (A+B
 and opt summaries in the follow-up job below). Bench: deltablue stock 20809.2 /

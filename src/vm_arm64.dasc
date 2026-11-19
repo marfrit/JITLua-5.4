@@ -3785,6 +3785,14 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |    add NODE:CARG3, NODE:CARG3, TMP1, lsl #3  // node = tab->node + idx*3*8
     |  add CARG4, STR:RC, CARG4, lsl #47	// Tagged key to look for.
     |   strb wzr, TAB:CARG2->nomm	// Clear metamethod cache.
+    |  // A store of the interned "__mode" key makes this table's weakness flag
+    |  // stale; rec_tabguard recomputes it. TMP0 is re-set below.
+    |  ldr TMP0, GL->gcroot[GCROOT_MMNAME+MM_mode]
+    |  cmp TMP0, STR:RC
+    |  bne >8
+    |   mov TMP0w, #0xff
+    |   strb TMP0w, TAB:CARG2->weak
+    |8:
     |1:
     |  ldp TMP1, CARG1, NODE:CARG3->val
     |   ldr NODE:TMP3, NODE:CARG3->next

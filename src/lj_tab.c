@@ -136,6 +136,7 @@ static GCtab *newtab(lua_State *L, uint32_t asize, uint32_t hbits)
     t = (GCtab *)lj_mem_newgco(L, sizetabcolo(asize));
     t->gct = ~LJ_TTAB;
     t->nomm = (uint8_t)~0;
+    t->weak = 0;
     t->colo = (int8_t)asize;
     setmref(t->array, (TValue *)((char *)t + sizeof(GCtab)));
     setgcrefnull(t->metatable);
@@ -151,6 +152,7 @@ static GCtab *newtab(lua_State *L, uint32_t asize, uint32_t hbits)
     t = lj_mem_newobj(L, GCtab);
     t->gct = ~LJ_TTAB;
     t->nomm = (uint8_t)~0;
+    t->weak = 0;
     t->colo = 0;
     setmref(t->array, NULL);
     setgcrefnull(t->metatable);
@@ -217,6 +219,7 @@ GCtab * LJ_FASTCALL lj_tab_dup(lua_State *L, const GCtab *kt)
   lj_assertL(kt->asize == t->asize && kt->hmask == t->hmask,
 	     "mismatched size of table and template");
   t->nomm = 0;  /* Keys with metamethod names may be present. */
+  t->weak = kt->weak;  /* Keep the weakness flag of a parsed metatable. */
   asize = kt->asize;
   if (asize > 0) {
     TValue *array = tvref(t->array);
@@ -252,6 +255,7 @@ GCtab * LJ_FASTCALL lj_tab_dup(lua_State *L, const GCtab *kt)
 /* Clear a table. */
 void LJ_FASTCALL lj_tab_clear(GCtab *t)
 {
+  t->weak = 0;  /* __mode, if any, is cleared with the hash part. */
   clearapart(t);
   if (t->hmask > 0) {
     Node *node = noderef(t->node);
@@ -497,10 +501,23 @@ cTValue *lj_tab_get(lua_State *L, GCtab *t, cTValue *key)
 
 /* -- Table setters ------------------------------------------------------- */
 
+/* A write of the interned "__mode" key makes this table's weakness flag
+** stale: mark it for recompute by the next trace guard (rec_tabguard). Every
+** string-key store funnels through lj_tab_setstr (existing keys) or
+** lj_tab_newkey (new keys), plus the VM's TSETS fast path. */
+static LJ_AINLINE void tab_updweak(lua_State *L, GCtab *t, GCstr *key)
+{
+  if (key == mmname_str(G(L), MM_mode))
+    t->weak = LJ_TAB_WEAK_UNKNOWN;
+}
+
 /* Insert new key. Use Brent's variation to optimize the chain length. */
 TValue *lj_tab_newkey(lua_State *L, GCtab *t, cTValue *key)
 {
-  Node *n = hashkey(t, key);
+  Node *n;
+  if (tvisstr(key))
+    tab_updweak(L, t, strV(key));
+  n = hashkey(t, key);
   if (!tvisnil(&n->val) || t->hmask == 0) {
     Node *nodebase = noderef(t->node);
     Node *collide, *freenode = getfreetop(t, nodebase);
@@ -605,7 +622,9 @@ TValue *lj_tab_seti64(lua_State *L, GCtab *t, int64_t v)
 TValue *lj_tab_setstr(lua_State *L, GCtab *t, const GCstr *key)
 {
   TValue k;
-  Node *n = hashstr(t, key);
+  Node *n;
+  tab_updweak(L, t, (GCstr *)key);
+  n = hashstr(t, key);
   do {
     if (tvisstr(&n->key) && strV(&n->key) == key)
       return &n->val;

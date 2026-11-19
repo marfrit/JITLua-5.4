@@ -5,4 +5,3 @@
 # Refresh with: tests/harness.sh --mode all --update-known-bad (keeps reasons).
 # Real defects only. Deliberate and implementation-defined differences from
 # PUC 5.4.9 are in tests/known-different.tsv.
-tests/corpus/puc54/db.lua	A	P5: debug.getinfo(1,"t").istailcall must be true without a hook; Fable tail marks exist only while a call hook is installed (db.lua:619). nups/getlocal now match.

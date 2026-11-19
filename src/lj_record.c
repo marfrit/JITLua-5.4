@@ -138,6 +138,8 @@ static void rec_check_slots(jit_State *J)
       }
       if (s == 0) {
 	lj_assertJ(tref_isfunc(tr), "frame slot 0 is not a function");
+	lj_assertJ(!(tr & TREF_TAIL) || frame_istail(tv+1),
+		   "frame slot 0 lacks the tail mark");
 #if LJ_FR2
       } else if (s == 1) {
 	lj_assertJ((tr & ~TREF_FRAME) == 0, "bad frame slot 1");
@@ -173,6 +175,14 @@ static void rec_check_slots(jit_State *J)
       } else if ((tr & TREF_KEYINDEX)) {
 	lj_assertJ(tref_isint(tr), "keyindex slot %d bad type %d",
 				   s, tref_type(tr));
+      } else if ((tr & TREF_TAIL)) {
+	/* Function of a tail-called frame: the VM must have marked it, too.
+	** An unmarked function slot is checked below like any other value,
+	** where a marked stack slot fails the type comparison. */
+	lj_assertJ(tref_isfunc(tr) && frame_istail(tv+1),
+		   "slot %d: tail mark of the frame differs", s);
+	lj_assertJ(!tref_isk(tr) || gcval(tv) == ir_kgc(ir),
+		   "slot %d function mismatch", s);
       } else {
 	/* Number repr. may differ, but other types must be the same. */
 	lj_assertJ(tvisi64any(tv) ? tref_isi64(tr) :
@@ -1248,6 +1258,12 @@ static void rec_callt(jit_State *J, BCReg func, ptrdiff_t nargs)
   }
 #endif
   lj_record_tailcall(J, func, nargs);
+#if LJ_FRAME_TAILMARK
+  /* The VM marks the frame of a Lua function entered by BC_CALLT/BC_CALLMT
+  ** (see lj_frame.h). The flag travels with the function's slot into the
+  ** snapshots, so an exit rebuilds the frame with its mark. */
+  J->base[-1-LJ_FR2] |= TREF_TAIL;
+#endif
 }
 
 /* Check unroll limits for down-recursion. */
@@ -2337,7 +2353,7 @@ static TRef rec_upvalue(jit_State *J, uint32_t uv, TRef val)
       kfunc = lj_ir_kfunc(J, J->fn);
       emitir(IRTG(IR_EQ, IRT_FUNC), fn, kfunc);
 #if LJ_FR2
-      J->base[-2] = kfunc;
+      J->base[-2] = kfunc | (fn & TREF_TAIL);  /* Keep the tail-call mark. */
 #else
       J->base[-1] = kfunc | TREF_FRAME;
 #endif

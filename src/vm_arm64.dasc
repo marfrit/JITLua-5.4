@@ -4001,6 +4001,9 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  tst PC, #FRAME_TYPE
     |  bne >7
     |1:
+    |  // The frame of a Lua function entered by a tail call is marked in the
+    |  // tag of its function slot: LJ_TFUNC -> LJ_TTRACE (see lj_frame.h).
+    |  and TMP1, TMP1, #FRAME_TAILCLR
     |  str TMP1, [BASE, FRAME_FUNC]	// Copy function down, but keep PC.
     |  cbz NARGS8:RC, >4
     |3:
@@ -4544,13 +4547,12 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
   case BC_IFUNCV:
     |  // BASE = new base, RA = BASE+framesize*8, CARG3 = LFUNC, RC = nargs*8
     |  ldr CARG1, L->maxstack
-    |   movn TMP0, #~LJ_TFUNC
+    |   ldr TMP0, [BASE, FRAME_FUNC]	// Tagged LFUNC with its tail-call mark.
     |   add TMP2, BASE, RC
-    |   add LFUNC:CARG3, CARG3, TMP0, lsl #47
     |  add RA, RA, RC
     |  sub CARG1, CARG1, #8
+    |   str TMP0, [TMP2], #8		// Store copy of the function slot.
     |   add TMP0, RC, #16+FRAME_VARG
-    |   str LFUNC:CARG3, [TMP2], #8	// Store (tagged) copy of LFUNC.
     |    ldr KBASE, [PC, #-4+PC2PROTO(k)]
     |  cmp RA, CARG1
     |   str TMP0, [TMP2], #8		// Store delta + FRAME_VARG.

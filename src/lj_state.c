@@ -224,7 +224,6 @@ static void close_state(lua_State *L)
   global_State *g = G(L);
   lj_func_closeuv(L, tvref(L->stack));
   lj_meta_tbcfree(g, L);
-  lj_debug_tailfree(g, L);
   lj_gc_freeall(g);
   lj_assertG(gcref(g->gc.root) == obj2gco(L),
 	     "main thread is not first GC object");
@@ -291,8 +290,6 @@ LUA_API lua_State *lua_newstate(lua_Alloc allocf, void *allocd)
   L->dummy_ffid = FF_C;
   setmref(L->tbclist, NULL);
   L->tbcn = L->tbcsize = 0;
-  setmref(L->tailbits, NULL);
-  L->tailbitsz = L->tailhi = L->tailepoch = 0;
   setmref(L->hookff, NULL);
   L->errnest = 0;
   L->errnestofs = 0;
@@ -396,8 +393,6 @@ lua_State *lj_state_new(lua_State *L)
   setgcrefnull(L1->openupval);
   setmref(L1->tbclist, NULL);
   L1->tbcn = L1->tbcsize = 0;
-  setmref(L1->tailbits, NULL);
-  L1->tailbitsz = L1->tailhi = L1->tailepoch = 0;
   setmref(L1->hookff, NULL);
   L1->errnest = 0;
   L1->errnestofs = 0;
@@ -426,7 +421,6 @@ void LJ_FASTCALL lj_state_free(global_State *g, lua_State *L)
     lj_assertG(gcref(L->openupval) == NULL, "stale open upvalues");
   }
   lj_meta_tbcfree(g, L);
-  lj_debug_tailfree(g, L);
   lj_mem_freevec(g, tvref(L->stack), L->stacksize, TValue);
   lj_mem_freet(g, L);
 }

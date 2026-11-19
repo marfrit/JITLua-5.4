@@ -188,6 +188,15 @@ def install_libs(scratch, arm):
     return True
 
 
+# Directives for vendored corpus files, which stay unmodified. A timeout here
+# is an upper bound, the --timeout option still applies if it is lower.
+VENDORED_DIRECTIVES = {
+    # Ends in a loop that waits for a finalizer (see known-different.tsv); it
+    # gets there in well under a second.
+    "tests/corpus/puc54/db.lua": {"timeout": "10"},
+}
+
+
 def directives(path, text):
     d = {}
     for ln in text.split("\n")[:80]:
@@ -444,6 +453,8 @@ def plan(tests, modes, ctx, opts):
                 continue
         allow = [m.split()[0].upper() for m in d["modes"].split(",") if m.split()] if "modes" in d else None
         timeout = float(d["timeout"]) if "timeout" in d else opts.timeout
+        if rel in VENDORED_DIRECTIVES and "timeout" in VENDORED_DIRECTIVES[rel]:
+            timeout = min(timeout, float(VENDORED_DIRECTIVES[rel]["timeout"]))
         extra = shlex.split(d["args"]) if "args" in d else []
         for m in modes:
             if allow and m[0] not in allow:

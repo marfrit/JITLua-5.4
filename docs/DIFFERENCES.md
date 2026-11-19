@@ -120,8 +120,37 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   function: PUC calls the return hook for the Lua caller after the C function
   returns; here the caller returns through the continuation without a hook
   event, as it did when the frame was replaced.
-- `PENDING` `debug.getinfo(1,"t").istailcall` is not true without a call hook;
-  PUC reports true (`db.lua` line 619; Fable tail marks need a hook).
+- `FIXED` `debug.getinfo(level, "t").istailcall` is true for every Lua
+  function entered by a tail call, with or without a hook, in the interpreter
+  and in compiled code. `BC_CALLT`/`BC_CALLMT` marks the frame it sets up in
+  the tag of the frame's function slot; trace exits rebuild frames with the
+  mark; the `"tail call"` hook event reads the same mark. As in PUC, a C
+  function reached by a tail call is an ordinary call, a function entered by
+  a tail call has no name for `debug.getinfo` option `n`, and a traceback
+  prints `(...tail calls...)` after its level
+  (`tests/d54/debug_05_istailcall.lua`; mechanism in
+  `docs/notes/istailcall.md`). x64 (GC64) and arm64 only.
+- `FIXED` Debug names PUC's `db.lua` checks after its tail-call section:
+  metamethod frames are named without the `__` prefix (`index`, `add`, the
+  bit operators included), the call of a generic `for` iterator is
+  `for iterator`, a finalizer run by the collector is `metamethod '__gc'`;
+  tracebacks take a nil message and skip levels like lauxlib
+  (`...\t(skipping n levels)`); `nups` counts the upvalues of the closures
+  made by `string.gmatch` and `coroutine.wrap`; `activelines` has the line of
+  the function's `end`; code without debug info reports `(no name)` upvalues,
+  `currentline` -1 and `?:-1:` positions; on x64, `coroutine.resume` of a
+  coroutine ending in an error no longer crashes while a return hook is set
+  (`tests/d54/debug_06_names.lua`).
+- `IMPL-DEFINED` When an object referenced only from a dead stack slot is
+  collected. The stack of a running Lua function is scanned up to the top of
+  its frame (inherited from LuaJIT), so a value left in the argument slot of
+  a finished call stays alive until the slot is reused or the function
+  returns. PUC limits the scan to the live registers of the instruction that
+  started the collection. `db.lua` line 913 waits in a loop for the finalizer
+  of such an object and does not end here (the runner bounds the file at
+  10 s; `tests/known-different.tsv`).
+- `FORK` A stripped dump keeps no `linedefined`/`lastlinedefined` (both are 0
+  after loading it); PUC's stripped dumps keep them (`db.lua` line 1002).
 - `IMPL-DEFINED` Inside a `__close` handler on an error path, debug level 2 is
   the unwound Lua function; PUC shows the pcall C function
   (`close_03/04`; documented divergence).

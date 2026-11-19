@@ -835,7 +835,6 @@ LJ_NOINLINE void LJ_FASTCALL lj_err_throw(lua_State *L, int errcode)
 {
   global_State *g = G(L);
   lj_trace_abort(g);
-  g->tailofs = 0;  /* A CALLT that never reached its callee (5.4 hooks). */
   g->ffretry = 0;
   if (errcode == LUA_ERRERR) {  /* A handler episode is over. */
     L->errnest = 0;
@@ -1015,7 +1014,7 @@ void LJ_FASTCALL lj_err_stkov(lua_State *L)
 {
   if (L->status == LUA_ERRERR)
     lj_err_err(L);
-  lj_debug_addloc(L, err2msg(LJ_ERR_STKOV), L->base-1, NULL);
+  lj_debug_addloc_rt(L, err2msg(LJ_ERR_STKOV));
   lj_err_run(L);
 }
 
@@ -1043,7 +1042,7 @@ LJ_NORET LJ_NOINLINE static void err_msgv(lua_State *L, ErrMsg em, ...)
   if (curr_funcisL(L)) L->top = curr_topL(L);
   msg = lj_strfmt_pushvf(L, err2msg(em), argp);
   va_end(argp);
-  lj_debug_addloc(L, msg, L->base-1, NULL);
+  lj_debug_addloc_rt(L, msg);
   lj_err_run(L);
 }
 
@@ -1063,7 +1062,7 @@ LJ_NOINLINE void lj_err_msgv(lua_State *L, ErrMsg em, ...)
   if (curr_funcisL(L)) L->top = curr_topL(L);
   msg = lj_strfmt_pushvf(L, err2msg(em), argp);
   va_end(argp);
-  lj_debug_addloc(L, msg, L->base-1, NULL);
+  lj_debug_addloc_rt(L, msg);
   lj_err_run(L);
 }
 

@@ -166,11 +166,6 @@ void LJ_FASTCALL lj_dispatch_update(global_State *g, int nolock)
 	  disp[BC_RET0] = lj_vm_rethook;
 	  disp[BC_RET1] = lj_vm_rethook;
 	}
-	/* 5.4 "tail call" events: lj_dispatch_ins notes CALLT/CALLMT. */
-	if ((mode & DISPMODE_CALL)) {
-	  disp[BC_CALLT] = lj_vm_rethook;
-	  disp[BC_CALLMT] = lj_vm_rethook;
-	}
       } else {
 	/* The recording dispatch also checks for hooks. */
 	ASMFunction f = (mode & DISPMODE_PROF) ? lj_vm_profhook :
@@ -196,13 +191,6 @@ void LJ_FASTCALL lj_dispatch_update(global_State *g, int nolock)
 	disp[BC_RET] = disp[GG_LEN_DDISP+BC_RET];
 	disp[BC_RET0] = disp[GG_LEN_DDISP+BC_RET0];
 	disp[BC_RET1] = disp[GG_LEN_DDISP+BC_RET1];
-      }
-      if ((mode & DISPMODE_CALL)) {
-	disp[BC_CALLT] = lj_vm_rethook;
-	disp[BC_CALLMT] = lj_vm_rethook;
-      } else {
-	disp[BC_CALLT] = disp[GG_LEN_DDISP+BC_CALLT];
-	disp[BC_CALLMT] = disp[GG_LEN_DDISP+BC_CALLMT];
       }
     }
 
@@ -359,8 +347,6 @@ LUA_API int lua_sethook(lua_State *L, lua_Hook func, int mask, int count)
   g->hookf = func;
   g->hookcount = g->hookcstart = (int32_t)count;
   g->hookmask = (uint8_t)((g->hookmask & ~HOOK_EVENTMASK) | mask);
-  g->hookepoch++;  /* Invalidates the threads' tail-call marks. */
-  g->tailofs = 0;
   g->ffretry = 0;
   lj_trace_abort(g);  /* Abort recording on any hook change. */
   lj_dispatch_update(g, 0);
@@ -461,13 +447,6 @@ void LJ_FASTCALL lj_dispatch_ins(lua_State *L, const BCIns *pc)
     }
   }
 #endif
-  {
-    BCOp op = bc_op(pc[-1]);
-    /* 5.4 "tail call" event: remember that the next function entry replaces
-    ** this frame (consumed and cleared by lj_dispatch_call). */
-    if ((op == BC_CALLT || op == BC_CALLMT) && !hook_active(g))
-      g->tailofs = (MSize)((char *)L->base - (char *)tvref(L->stack));
-  }
   if ((g->hookmask & LUA_MASKCOUNT) && g->hookcount == 0) {
     g->hookcount = g->hookcstart;
     callhook(L, LUA_HOOKCOUNT, -1, 0, 0);
@@ -656,8 +635,9 @@ ASMFunction LJ_FASTCALL lj_dispatch_call(lua_State *L, const BCIns *pc)
 #endif
   if ((g->hookmask & LUA_MASKCALL) && !hook_active(g)) {
     int i;
-    MSize ofs = (MSize)((char *)L->base - (char *)tvref(L->stack));
-    int tail = g->tailofs == ofs && isluafunc(fn);  /* 5.4: C callees "call". */
+    /* 5.4 "tail call" event: BC_CALLT marked the frame. C callees get a
+    ** plain "call", their frame is never marked. */
+    int tail = frame_istail(L->base-1);
     MSize nparams = isluafunc(fn) ? funcproto(fn)->numparams :
 				    (MSize)(L->top - L->base);
     /* An ASM fast function whose fallback handler returned FFH_RETRY is
@@ -665,9 +645,7 @@ ASMFunction LJ_FASTCALL lj_dispatch_call(lua_State *L, const BCIns *pc)
     ** event. Its return event comes from lj_dispatch_ffret() (hookff). */
     int isasmff = bc_op(pc[-1]) >= BC__MAX;
     setmref(L->hookff, isasmff ? fn : NULL);
-    g->tailofs = 0;
     if (!retry) {
-      lj_debug_tailmark(L, ofs / sizeof(TValue), tail);
       for (i = 0; i < missing; i++)  /* Add missing parameters. */
 	setnilV(L->top++);
       callhook(L, tail ? LUA_HOOKTAILCALL : LUA_HOOKCALL, -1, nparams ? 1 : 0,

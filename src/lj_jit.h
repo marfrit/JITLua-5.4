@@ -197,9 +197,11 @@ typedef uint32_t SnapEntry;
 #define SNAP_NORESTORE		0x040000	/* No need to restore slot. */
 #define SNAP_SOFTFPNUM		0x080000	/* Soft-float number. */
 #define SNAP_KEYINDEX		0x100000	/* Traversal key index. */
+#define SNAP_TAIL		0x200000	/* Function of a tail-called frame. */
 LJ_STATIC_ASSERT(SNAP_FRAME == TREF_FRAME);
 LJ_STATIC_ASSERT(SNAP_CONT == TREF_CONT);
 LJ_STATIC_ASSERT(SNAP_KEYINDEX == TREF_KEYINDEX);
+LJ_STATIC_ASSERT(SNAP_TAIL == TREF_TAIL);
 
 /* Packed 64-bit argument for lj_gc_step_jit on GC64 targets: trace number
 ** (16 bits), loop-head flag (16 bits) and step count (32 bits). The flag is
@@ -215,7 +217,7 @@ LJ_STATIC_ASSERT(SNAP_KEYINDEX == TREF_KEYINDEX);
 #define SNAP(slot, flags, ref)	(((SnapEntry)(slot) << 24) + (flags) + (ref))
 #define SNAP_TR(slot, tr) \
   (((SnapEntry)(slot) << 24) + \
-   ((tr) & (TREF_KEYINDEX|TREF_CONT|TREF_FRAME|TREF_REFMASK)))
+   ((tr) & (TREF_TAIL|TREF_KEYINDEX|TREF_CONT|TREF_FRAME|TREF_REFMASK)))
 #if !LJ_FR2
 #define SNAP_MKPC(pc)		((SnapEntry)u32ptr(pc))
 #endif

@@ -84,6 +84,11 @@ on the reference would otherwise "pass" mode A by failing on both sides.
    `--! args: ...`, `--! no-parse-check:`.
 5. New semantics land with a test **before** the code (MISSION §7.2).
 
+The vendored `corpus/puc54` files stay unmodified. A directive for one of
+them goes into `VENDORED_DIRECTIVES` in `lib/runner.py` (today: a 10 s bound
+for `db.lua`, which ends in a loop that does not terminate here, see
+`known-different.tsv`).
+
 ## Fuzzing
 ```sh
 python3 tests/fuzz/fuzz.py --seed 1 --count 500 --mode B --opt-levels 0,1,2,3 --gc

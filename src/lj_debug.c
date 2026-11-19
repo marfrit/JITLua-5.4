@@ -14,6 +14,7 @@
 #include "lj_tab.h"
 #include "lj_state.h"
 #include "lj_frame.h"
+#include "lj_ff.h"
 #include "lj_bc.h"
 #include "lj_strfmt.h"
 #if LJ_HASJIT
@@ -146,6 +147,7 @@ static BCLine debug_frameline(lua_State *L, GCfunc *fn, cTValue *nextframe)
   if (pc != NO_BCPOS) {
     GCproto *pt = funcproto(fn);
     lj_assertL(pc <= pt->sizebc, "PC out of range");
+    if (!proto_lineinfo(pt)) return -1;  /* 5.4: no line info, no line. */
     return lj_debug_line(pt, pc);
   }
   return -1;
@@ -247,67 +249,6 @@ static TValue *debug_localname(lua_State *L, const lua_Debug *ar,
   return frame+slot1;
 }
 
-/* -- 5.4 tail-call frame marks ------------------------------------------- */
-
-/* Marks are kept per thread while a call hook is installed: the "tail call"
-** event marks the callee's base slot, a plain call clears everything from
-** its base upwards. Frames entered while no call hook was set are never
-** marked, so istailcall is exact under a debugger and false otherwise.
-*/
-static void debug_tailclear(lua_State *L, MSize ofs)
-{
-  MSize hi = L->tailhi;
-  if (ofs < hi) {
-    uint32_t *bits = mref(L->tailbits, uint32_t);
-    MSize w = ofs >> 5, wend = (hi + 31) >> 5;
-    bits[w] &= (1u << (ofs & 31)) - 1u;
-    for (w++; w < wend; w++) bits[w] = 0;
-    L->tailhi = ofs;
-  }
-}
-
-void lj_debug_tailmark(lua_State *L, MSize ofs, int tail)
-{
-  global_State *g = G(L);
-  if (L->tailepoch != g->hookepoch) {  /* Marks from an earlier hook phase. */
-    if (L->tailbitsz)
-      memset(mref(L->tailbits, void), 0, L->tailbitsz*sizeof(uint32_t));
-    L->tailhi = 0;
-    L->tailepoch = g->hookepoch;
-  }
-  if (tail) {
-    uint32_t *bits;
-    MSize need = (ofs >> 5) + 1;
-    if (need > L->tailbitsz) {
-      MSize nsz = need < 8 ? 8 : need * 2;
-      bits = (uint32_t *)lj_mem_realloc(L, mref(L->tailbits, void),
-				       L->tailbitsz*sizeof(uint32_t),
-				       nsz*sizeof(uint32_t));
-      memset(bits + L->tailbitsz, 0, (nsz - L->tailbitsz)*sizeof(uint32_t));
-      setmref(L->tailbits, bits);
-      L->tailbitsz = nsz;
-    }
-    debug_tailclear(L, ofs+1);
-    mref(L->tailbits, uint32_t)[ofs >> 5] |= 1u << (ofs & 31);
-    if (L->tailhi <= ofs) L->tailhi = ofs+1;
-  } else {
-    debug_tailclear(L, ofs);
-  }
-}
-
-int lj_debug_istailcall(lua_State *L, cTValue *frame)
-{
-  MSize ofs = (MSize)((frame+1) - tvref(L->stack));
-  return L->tailepoch == G(L)->hookepoch && ofs < L->tailhi &&
-	 ((mref(L->tailbits, uint32_t)[ofs >> 5] >> (ofs & 31)) & 1u);
-}
-
-void lj_debug_tailfree(global_State *g, lua_State *L)
-{
-  if (L->tailbitsz)
-    lj_mem_freevec(g, mref(L->tailbits, void), L->tailbitsz, uint32_t);
-}
-
 /* Get name of upvalue. */
 const char *lj_debug_uvname(GCproto *pt, uint32_t idx)
 {
@@ -392,7 +333,8 @@ const char *lj_debug_uvnamev(cTValue *o, uint32_t idx, TValue **tvp, GCobj **op)
 	GCobj *uvo = gcref(fn->l.uvptr[idx]);
 	*tvp = uvval(&uvo->uv);
 	*op = uvo;
-	return lj_debug_uvname(pt, idx);
+	/* 5.4 lua_getupvalue/lua_setupvalue without debug info. */
+	return proto_uvinfo(pt) ? lj_debug_uvname(pt, idx) : "(no name)";
       }
     } else {
       if (idx < fn->c.nupvalues) {
@@ -441,7 +383,8 @@ restart:
 	}
 	return "field";
       case BC_UGET:
-	*name = lj_debug_uvname(pt, bc_d(ins));
+	/* 5.4 names an upvalue without debug info "?". */
+	*name = proto_uvinfo(pt) ? lj_debug_uvname(pt, bc_d(ins)) : "?";
 	return "upvalue";
       default:
 	return NULL;
@@ -461,6 +404,12 @@ const char *lj_debug_funcname(lua_State *L, cTValue *frame, const char **name)
     return NULL;
   if (frame_isvarg(frame))
     frame = frame_prevd(frame);
+  /* 5.4: a finalizer called by the collector (PUC CIST_FIN). */
+  if (G(L)->finbase && L == vmthread(G(L)) &&
+      frame == tvref(L->stack) + G(L)->finbase) {
+    *name = "__gc";
+    return "metamethod";
+  }
   pframe = frame_prev(frame);
   /* 5.4: a function called by the hook machinery is a "hook '?'" frame
   ** (PUC CIST_HOOKED), not whatever the hooked frame's instruction names. */
@@ -475,12 +424,28 @@ const char *lj_debug_funcname(lua_State *L, cTValue *frame, const char **name)
     GCproto *pt = funcproto(fn);
     const BCIns *ip = &proto_bc(pt)[check_exp(pc < pt->sizebc, pc)];
     MMS mm = bcmode_mm(bc_op(*ip));
+    if (mm == MM__MAX) {
+      /* The 5.4 bit operators carry no metamethod in their bytecode mode. */
+      switch (bc_op(*ip)) {
+      case BC_BAND: mm = MM_band; break;
+      case BC_BOR: mm = MM_bor; break;
+      case BC_BXOR: mm = MM_bxor; break;
+      case BC_BSHL: mm = MM_shl; break;
+      case BC_BSHR: mm = MM_shr; break;
+      case BC_BNOT: mm = MM_bnot; break;
+      default: break;
+      }
+    }
     if (mm == MM_call) {
       BCReg slot = bc_a(*ip);
-      if (bc_op(*ip) == BC_ITERC) slot -= 3;
+      if (bc_op(*ip) == BC_ITERC) {  /* 5.4: the generic 'for' call. */
+	*name = "for iterator";
+	return "for iterator";
+      }
       return lj_debug_slotname(pt, ip, slot, name);
     } else if (mm != MM__MAX) {
-      *name = strdata(mmname_str(G(L), mm));
+      /* 5.4 names the event without the "__" prefix ("index", "add"). */
+      *name = strdata(mmname_str(G(L), mm)) + 2;
       return "metamethod";
     } else if (bc_op(*ip) == BC_UCLO || bc_op(*ip) == BC_TBCCLO ||
 	       (pc+1 < pt->sizebc &&
@@ -528,14 +493,17 @@ void lj_debug_shortname(char *out, GCstr *str, BCLine line)
 }
 
 /* Add current location of a frame to error message. */
-void lj_debug_addloc(lua_State *L, const char *msg,
-		     cTValue *frame, cTValue *nextframe)
+static void debug_addloc(lua_State *L, const char *msg,
+			cTValue *frame, cTValue *nextframe, int rt)
 {
   if (frame) {
     GCfunc *fn = frame_func(frame);
     if (isluafunc(fn)) {
       BCLine line = debug_frameline(L, fn, nextframe);
-      if (line >= 0) {
+      /* 5.4: a runtime error in a Lua function without line info still
+      ** gets a position, with the line -1 (luaG_runerror); luaL_where and
+      ** error() add nothing then. */
+      if (line >= 0 || (rt && !proto_lineinfo(funcproto(fn)))) {
 	GCproto *pt = funcproto(fn);
 	char buf[LUA_IDSIZE];
 	lj_debug_shortname(buf, proto_chunkname(pt), pt->firstline);
@@ -545,6 +513,19 @@ void lj_debug_addloc(lua_State *L, const char *msg,
     }
   }
   lj_strfmt_pushf(L, "%s", msg);
+}
+
+/* Add the position of a frame like luaL_where(). */
+void lj_debug_addloc(lua_State *L, const char *msg,
+		     cTValue *frame, cTValue *nextframe)
+{
+  debug_addloc(L, msg, frame, nextframe, 0);
+}
+
+/* Add the position of a runtime error raised in the current function. */
+void lj_debug_addloc_rt(lua_State *L, const char *msg)
+{
+  debug_addloc(L, msg, L->base-1, NULL, 1);
 }
 
 /* Push location string for a bytecode position to Lua stack. */
@@ -652,9 +633,12 @@ int lj_debug_getinfo(lua_State *L, const char *what, lj_Debug *ar, int ext)
     } else if (*what == 'u') {
       /* 5.4: Lua functions include the _ENV view; library C functions expose
       ** no implementation upvalues (PUC's print has nups 0); user-created C
-      ** closures keep their real count. */
+      ** closures keep their real count, and so do the closures a library
+      ** function builds per call, which are C closures in PUC as well (the
+      ** string.gmatch iterator, the function made by coroutine.wrap). */
       ar->nups = isluafunc(fn) ? (int)lj_debug_nupvalues(fn) :
-		 (fn->c.ffid != 0 ? 0 : fn->c.nupvalues);
+		 (fn->c.ffid == FF_C || fn->c.ffid == FF_string_gmatch_aux ||
+		  fn->c.ffid == FF_coroutine_wrap_aux) ? fn->c.nupvalues : 0;
       if (ext) {
 	if (isluafunc(fn)) {
 	  GCproto *pt = funcproto(fn);
@@ -666,7 +650,10 @@ int lj_debug_getinfo(lua_State *L, const char *what, lj_Debug *ar, int ext)
 	}
       }
     } else if (*what == 'n') {
-      ar->namewhat = frame ? lj_debug_funcname(L, frame, &ar->name) : NULL;
+      /* 5.4: no name for a function entered by a tail call, the call site
+      ** in the frame below belongs to the function it replaced. */
+      ar->namewhat = (frame && !frame_istail(frame)) ?
+		     lj_debug_funcname(L, frame, &ar->name) : NULL;
       if (ar->namewhat == NULL) {
 	ar->namewhat = "";
 	ar->name = NULL;
@@ -676,7 +663,7 @@ int lj_debug_getinfo(lua_State *L, const char *what, lj_Debug *ar, int ext)
     } else if (*what == 'L') {
       opt_L = 1;
     } else if (*what == 't') {  /* 5.4 */
-      ar->istailcall = frame ? (unsigned char)lj_debug_istailcall(L, frame) : 0;
+      ar->istailcall = frame ? (unsigned char)frame_istail(frame) : 0;
     } else if (*what == 'r') {  /* 5.4: only meaningful inside a hook. */
       if (!frame || !hook_active(G(L)) ||
 	  (MSize)(frame - tvref(L->stack)) != G(L)->hookbase) {
@@ -706,6 +693,10 @@ int lj_debug_getinfo(lua_State *L, const char *what, lj_Debug *ar, int ext)
 	     (BCLine)((const uint32_t *)lineinfo)[i]);
 	  setboolV(lj_tab_setint(L, t, line), 1);
 	}
+	/* 5.4 ends every function with a return at its 'end' line. A function
+	** whose last statement is a return has no instruction there here. */
+	if (first || !pt->numline)
+	  setboolV(lj_tab_setint(L, t, first + (BCLine)pt->numline), 1);
       }
       settabV(L, L->top, t);
     } else {
@@ -840,31 +831,33 @@ void lj_debug_dumpstack(lua_State *L, SBuf *sb, const char *fmt, int depth)
 #endif
 
 /* Number of frames for the leading and trailing part of a traceback. */
-#define TRACEBACK_LEVELS1	12
-#define TRACEBACK_LEVELS2	10
+#define TRACEBACK_LEVELS1	10
+#define TRACEBACK_LEVELS2	11
 
 LUALIB_API void luaL_traceback (lua_State *L, lua_State *L1, const char *msg,
 				int level)
 {
   int top = (int)(L->top - L->base);
-  int lim = TRACEBACK_LEVELS1;
+  int last, limit2show;
   lua_Debug ar;
   if (msg) lua_pushfstring(L, "%s\n", msg);
   lua_pushliteral(L, "stack traceback:");
+  /* 5.4 lauxlib: a long traceback shows the first and the last levels and
+  ** says how many it skipped. A level that does not exist leaves the number
+  ** of levels in ar.i_ci. */
+  lua_getstack(L1, -10, &ar);
+  last = ar.i_ci - 1;
+  limit2show = (last - level > TRACEBACK_LEVELS1 + TRACEBACK_LEVELS2) ?
+	       TRACEBACK_LEVELS1 : -1;
   while (lua_getstack(L1, level++, &ar)) {
     GCfunc *fn;
-    if (level > lim) {
-      if (!lua_getstack(L1, level + TRACEBACK_LEVELS2, &ar)) {
-	level--;
-      } else {
-	lua_pushliteral(L, "\n\t...");
-	lua_getstack(L1, -10, &ar);
-	level = ar.i_ci - TRACEBACK_LEVELS2;
-      }
-      lim = 2147483647;
+    if (limit2show-- == 0) {
+      int n = last - level - TRACEBACK_LEVELS2 + 1;
+      lua_pushfstring(L, "\n\t...\t(skipping %d levels)", n);
+      level += n;
       continue;
     }
-    lua_getinfo(L1, "Snlf", &ar);
+    lua_getinfo(L1, "Snlft", &ar);
     fn = funcV(L1->top-1); L1->top--;
     if (isffunc(fn) && !*ar.namewhat)
       lua_pushfstring(L, "\n\t[builtin#%d]:", fn->c.ffid);
@@ -882,13 +875,8 @@ LUALIB_API void luaL_traceback (lua_State *L, lua_State *L1, const char *msg,
       const char *gname = lj_err_funcname_loaded(L, fn, namebuf, sizeof(namebuf));
       if (gname)
 	lua_pushfstring(L, " in function " LUA_QS, gname);
-      else if (*ar.namewhat) {
-	const char *nm = ar.name;
-	/* 5.4 tracebacks name the event without the '__' prefix. */
-	if (*ar.namewhat == 'm' && ar.namewhat[1] == 'e' &&
-	    nm[0] == '_' && nm[1] == '_') nm += 2;
-	lua_pushfstring(L, " in %s " LUA_QS, ar.namewhat, nm);
-      }
+      else if (*ar.namewhat)
+	lua_pushfstring(L, " in %s " LUA_QS, ar.namewhat, ar.name);
       else if (*ar.what == 'm')
 	lua_pushliteral(L, " in main chunk");
       else if (*ar.what != 'C')
@@ -896,6 +884,8 @@ LUALIB_API void luaL_traceback (lua_State *L, lua_State *L1, const char *msg,
       else
 	lua_pushliteral(L, " in ?");
     }
+    if (ar.istailcall)
+      lua_pushliteral(L, "\n\t(...tail calls...)");
     if ((int)(L->top - L->base) - top >= 15)
       lua_concat(L, (int)(L->top - L->base) - top);
   }

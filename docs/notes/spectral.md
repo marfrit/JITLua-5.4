@@ -60,7 +60,8 @@ recording is reverted again; only the benchmark (838e414e) and this note stay.
   for recording pcall/xpcall: a trace-level counter with increment AND
   decrement (and exit near the limit).
 - Gates: `sh tests/ci-box.sh` AND `sh tests/ci-local.sh --sanitizers-only`,
-  both arches. Only x64-box/arm-box wrappers; NEVER build or test on pica.
+  both arches. Only the remote test-host wrappers (x64-box/arm-box); never
+  build or test in the development container.
   X64_BOX_HOST only for A/B benchmarks on one box.
 - Commit tagline: "Implemented by DeepSeek-4.1-Flash (cloud); briefed by
   Claude." + Co-Authored-By lines (noreply@example.invalid). Tests first, then

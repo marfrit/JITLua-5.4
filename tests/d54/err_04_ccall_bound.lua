@@ -23,3 +23,27 @@ p("handler", (function()
   local function loop() assert(pcall(loop)) end
   return xpcall(loop, loop)
 end)())
+
+-- ccallnest must be exact on every path: a recursive-pcall depth probe is
+-- unchanged after calls that used to leak or underflow it. The absolute depth
+-- differs from PUC (PUC's C-call baseline is nonzero), so print the delta.
+local function depth()
+  local n = 0
+  local function rec() n = n + 1; pcall(rec) end
+  pcall(rec)
+  return n
+end
+local d0 = depth()
+local function probe(name) p(name, depth() - d0) end
+for i = 1, 300 do pcall(xpcall, print, nil) end  -- xpcall(f, nonfunction)
+probe("after-bad1")
+for i = 1, 300 do pcall(pcall) end               -- pcall()
+probe("after-bad2")
+for i = 1, 300 do pcall(xpcall, print) end       -- xpcall(f)
+probe("after-bad3")
+for i = 1, 300 do pcall(xpcall) end              -- xpcall()
+probe("after-bad4")
+local function loop() assert(pcall(loop)) end
+p("handler2", xpcall(loop, loop))
+probe("after-handler")
+p("fine", pcall(function() return "fine" end))

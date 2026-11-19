@@ -93,7 +93,10 @@ static TValue *index2adr_stack(lua_State *L, int idx)
 static GCtab *getcurrenv(lua_State *L)
 {
   GCfunc *fn = curr_func(L);
-  return fn->c.gct == ~LJ_TFUNC ? tabref(fn->c.env) : tabref(L->env);
+  GCtab *env = fn->c.gct == ~LJ_TFUNC ? tabref(fn->c.env) : tabref(L->env);
+  /* A non-table _ENV leaves fn->c.env NULL: fall back to the global table so
+  ** a new C closure/userdata never carries a NULL env (PUC has no env here). */
+  return env ? env : tabref(L->env);
 }
 
 /* -- Miscellaneous API functions ----------------------------------------- */
@@ -1630,6 +1633,7 @@ LUA_API int lua_setfenv(lua_State *L, int idx)
   if (tvisfunc(o)) {
     setgcref(funcV(o)->c.env, obj2gco(t));
     settabV(L, &funcV(o)->c.envv, t);
+    lj_func_flushenv(L);  /* compiled traces baked/loaded the old env */
   } else if (tvisudata(o) && !tvisi64(o)) {  /* boxed int64 is a number */
     GCudata *ud = udataV(o);
     setgcref(ud->env, obj2gco(t));
@@ -1698,6 +1702,7 @@ LUA_API const char *lua_setupvalue(lua_State *L, int idx, int n)
 	setgcref(funcV(f)->l.env, obj2gco(tabV(val)));
       else
 	setgcrefnull(funcV(f)->l.env);
+      lj_func_flushenv(L);  /* compiled traces baked/loaded the old env */
     }
   }
   return name;

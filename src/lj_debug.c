@@ -358,6 +358,7 @@ void lj_debug_uvjoin(lua_State *L, GCfunc *fn1, GCRef *r1, int e1,
 	lj_gc_barrier(L, fn1, v);
       }
     }
+    lj_func_flushenv(L);  /* compiled traces baked/loaded the old env */
   } else {  /* Real upvalue of fn1 takes fn2's env value as its value. */
     GCupval *uv = &gcref(*r1)->uv;
     copyTV(L, uvval(uv), &fn2->l.envv);

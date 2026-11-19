@@ -1127,18 +1127,20 @@ static void rec_call_setup(jit_State *J, BCReg func, ptrdiff_t nargs)
   (void)getslot(J, func); /* Ensure func has a reference. */
   for (i = 1; i <= nargs; i++)
     (void)getslot(J, func+LJ_FR2+i);  /* Ensure all args have a reference. */
-  if (!tref_isfunc(fbase[0])) {  /* Resolve __call metamethod. */
+  while (!tref_isfunc(fbase[0])) {  /* Resolve the __call chain. */
     ix.tab = fbase[0];
     copyTV(J->L, &ix.tabv, functv);
-    if (!lj_record_mm_lookup(J, &ix, MM_call) || !tref_isfunc(ix.mobj))
+    if (!lj_record_mm_lookup(J, &ix, MM_call))
       lj_trace_err(J, LJ_TRERR_NOMM);
     for (i = ++nargs; i > LJ_FR2; i--)  /* Shift arguments up. */
       fbase[i+LJ_FR2] = fbase[i+LJ_FR2-1];
 #if LJ_FR2
     fbase[2] = fbase[0];
 #endif
-    fbase[0] = ix.mobj;  /* Replace function. */
+    fbase[0] = ix.mobj;  /* Replace function with its __call value. */
     functv = &ix.mobjv;
+    if (J->baseslot + func + nargs + 2*LJ_FR2 >= LJ_MAX_JSLOTS)
+      lj_trace_err(J, LJ_TRERR_STACKOV);  /* Chain too deep for a trace. */
   }
   kfunc = rec_call_specialize(J, funcV(functv), fbase[0]);
 #if LJ_FR2
@@ -1165,15 +1167,29 @@ void lj_record_call(jit_State *J, BCReg func, ptrdiff_t nargs)
 /* Record tail call. */
 void lj_record_tailcall(jit_State *J, BCReg func, ptrdiff_t nargs)
 {
-  /* Determine whether the callee is a C function (directly or via __call). */
+  /* Determine whether the final callee is a C function (directly or via the
+  ** __call chain). Follow the chain on the live stack; a chain longer than a
+  ** trace can hold or a cyclic chain aborts recording cleanly. */
   int iscfunc;
   {
-    TValue *ftv = &J->L->base[func];
-    if (tvisfunc(ftv))
-      iscfunc = !isluafunc(funcV(ftv));
-    else {
-      cTValue *mo = lj_meta_lookup(J->L, ftv, MM_call);
-      iscfunc = (!mo || !tvisfunc(mo) || !isluafunc(funcV(mo)));
+    TValue cur;
+    int n = 0;
+    copyTV(J->L, &cur, &J->L->base[func]);
+    for (;;) {
+      if (tvisfunc(&cur)) {
+	iscfunc = !isluafunc(funcV(&cur));
+	break;
+      }
+      {
+	cTValue *mo = lj_meta_lookup(J->L, &cur, MM_call);
+	if (!mo || tvisnil(mo)) {  /* Not callable: the VM raises an error. */
+	  iscfunc = 1;
+	  break;
+	}
+	if (++n >= LJ_MAX_JSLOTS)
+	  lj_trace_err(J, LJ_TRERR_STACKOV);
+	copyTV(J->L, &cur, mo);
+      }
     }
   }
   rec_call_setup(J, func, nargs);

@@ -722,16 +722,60 @@ void lj_meta_istype(lua_State *L, BCReg ra, BCReg tp)
   else lj_err_argtype(L, ra, lj_obj_itypename[tp]);
 }
 
-/* Helper for calls. __call metamethod. */
-void lj_meta_call(lua_State *L, TValue *func, TValue *top)
+/* Helper for calls. __call metamethod chain (PUC 5.4 luaD_tryfuncTM retry).
+** Every callable object on the chain is prepended as an argument, innermost
+** first, and the func slot finally holds the first plain function. The chain
+** is bounded by the Lua stack, like PUC: the per-level stack request grows the
+** stack and a cyclic or over-long chain raises the usual "stack overflow"
+** instead of a fixed depth limit. The stack may move while growing, so the
+** caller gets the (possibly moved) func slot back and rebases its own
+** addresses; nargs is then derived from L->top. The prepends are done in one
+** linear shift here, unlike PUC's per-level shift, which is quadratic.
+*/
+TValue *lj_meta_call(lua_State *L, TValue *func, TValue *top)
 {
-  cTValue *mo = lj_meta_lookup(L, func, MM_call);
-  TValue *p;
-  if (!tvisfunc(mo))
-    lj_err_optype_call(L, func);
-  for (p = top; p > func+2*LJ_FR2; p--) copyTV(L, p, p-1);
-  if (LJ_FR2) copyTV(L, func+2, func);
-  copyTV(L, func, mo);
+  TValue cur;
+  ptrdiff_t fofs = savestack(L, func);
+  ptrdiff_t tofs = savestack(L, top);
+  MSize n = 0;
+  copyTV(L, &cur, func);  /* Walk the chain without touching the stack. */
+  for (;;) {
+    cTValue *mo = lj_meta_lookup(L, &cur, MM_call);
+    if (tvisnil(mo)) {  /* A non-callable object named at its level. */
+      func = restorestack(L, fofs);
+      copyTV(L, func, &cur);  /* Put it in the func slot for the error name. */
+      lj_err_optype_call(L, func);
+    }
+    n++;
+    lj_state_checkstack(L, n);  /* Reserve n extra slots; may move the stack. */
+    if (tvisfunc(mo)) break;
+    copyTV(L, &cur, mo);
+  }
+  func = restorestack(L, fofs);
+  top = restorestack(L, tofs);
+  {
+    TValue *p;
+    ptrdiff_t i;
+    for (p = top; p > func+1+LJ_FR2; p--)  /* Shift the arguments up by n. */
+      copyTV(L, p+n-1, p-1);
+    copyTV(L, &cur, func);
+    for (i = 0; i < (ptrdiff_t)n; i++) {
+      cTValue *mo = lj_meta_lookup(L, &cur, MM_call);
+      /* Innermost object first, the called object last. */
+      copyTV(L, func+1+LJ_FR2+(n-1-i), &cur);
+      if (tvisnil(mo)) {
+	copyTV(L, func, &cur);
+	lj_err_optype_call(L, func);
+      }
+      if (tvisfunc(mo)) {
+	copyTV(L, func, mo);
+	break;
+      }
+      copyTV(L, &cur, mo);
+    }
+  }
+  L->metanargs = n;  /* The VM adds this to its nargs bookkeeping. */
+  return func;
 }
 
 /* Helper for FORI. Coercion. */

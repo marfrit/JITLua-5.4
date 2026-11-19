@@ -3080,8 +3080,17 @@ void lj_record_ins(jit_State *J)
       if (k == strref(G(J->L)->gcroot[GCROOT_ENVSTR]))
 	lj_trace_err(J, LJ_TRERR_NYIBC);
     }
-    settabV(J->L, &ix.tabv, tabref(J->fn->l.env));
-    ix.tab = emitir(IRT(IR_FLOAD, IRT_TAB), getcurrf(J), IRFL_FUNC_ENV);
+    if (gcref(J->fn->l.env) != NULL) {  /* Table env: the FUNC_ENV fast path. */
+      settabV(J->L, &ix.tabv, tabref(J->fn->l.env));
+      ix.tab = emitir(IRT(IR_FLOAD, IRT_TAB), getcurrf(J), IRFL_FUNC_ENV);
+    } else {  /* Non-table env: a constant while the trace runs (an env
+	      ** change flushes all traces; _ENV = v aborts recording). */
+      copyTV(J->L, &ix.tabv, &J->fn->l.envv);
+      ix.tab = tvisnil(&ix.tabv) ? lj_ir_knull(J, IRT_NIL) :
+	       lj_record_constify(J, &ix.tabv);
+      if (!ix.tab)
+	lj_trace_err(J, LJ_TRERR_NYIBC);  /* lightuserdata: no IR const */
+    }
     ix.idxchain = LJ_MAX_IDXCHAIN;
     rc = lj_record_idx(J, &ix);
     break;

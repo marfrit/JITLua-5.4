@@ -11,4 +11,3 @@ tests/d54/err_02_tailname.lua	A	P1.8b: tail-call error names -- LuaJIT reuses th
 tests/d54/gc_01_tbc_gc.lua	A	PENDING: LuaJIT runs __gc only for userdata, not tables (PUC 5.4 finalizes tables, manual 2.5.3; named VM gap); gc options now match
 tests/d54/tbl_03_border_divergence.lua	A	IMPL-DEFINED: runtime-built sparse tables may report any legal border (5.4 manual 3.4.7); LuaJIT's array-growth policy differs from PUC's alimit hint
 tests/d54/dump_03_version.lua	A	FORK: private dump format (JITLua-5.4 fork); PUC 5.4.9 cannot round-trip it, mode R checks ours
-tests/d54/env_05_envvalue.lua	A	PENDING: load()/loadfile() must accept any value as the environment (PUC stores it as the _ENV upvalue); table-only env is VM work on wip-calls-vm

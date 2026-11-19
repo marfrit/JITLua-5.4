@@ -199,6 +199,12 @@ static TValue *cpluaopen(lua_State *L, lua_CFunction dummy, void *ud)
   setgcref(L->env, obj2gco(lj_tab_new(L, 0, LJ_MIN_GLOBAL)));
   settabV(L, registry(L), lj_tab_new(L, 0, LJ_MIN_REGISTRY));
   lj_str_init(L);
+  /* The 5.4 lexical _ENV special case reads this interned string from
+  ** gcroot[] in the parser (lj_parse.c var_lookup) and in the recorder
+  ** (lj_record.c BC_GGET/GSET), so it must exist on every state -- not only
+  ** after the base library, which used to install it, has been opened.
+  ** Anchored as a GC root, like the metamethod names below. */
+  setgcref(g->gcroot[GCROOT_ENVSTR], obj2gco(lj_str_newlit(L, "_ENV")));
   lj_meta_init(L);
   lj_lex_init(L);
   fixstring(lj_err_str(L, LJ_ERR_ERRMEM));  /* Preallocate memory error msg. */

@@ -18,10 +18,16 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   decision, Markus 2026-11-16; C probe `tests/capi` `probe_549`).
 - `FORK` `string.dump` uses JITLua-5.4's private format; PUC 5.4.9 cannot load
   it, and mode R checks our own dump/reload round-trip.
-- `PENDING` Arbitrary `_ENV` values: LuaJIT stores only a table as a function
-  environment; `load("return _ENV", nil, nil, 123)()` does not return 123
-  (calls.lua A stops at line 359; `env_05_envvalue`; VM/C-API work, branch
-  `wip-calls-vm`).
+- `FIXED` Arbitrary `_ENV` values: LuaJIT stored only a table as a function
+  environment, so `load("return _ENV", nil, nil, 123)()` returned the global
+  table and a non-table env was silently ignored. The function now carries the
+  `_ENV` value itself (`GCfunc.envv`, any type): a table keeps the GGET/GSET
+  fast path, any other value is indexed through the generic metamethod path in
+  the interpreter and the JIT, and a nil env errors with PUC's "attempt to
+  index a nil value (upvalue '_ENV')" -- before this fix that case SEGFAULTED
+  in the VM (a NULL env table fed to the GGET/GSET lookup). `calls.lua` line
+  359 now passes; tests `env_05_envvalue`, `env_06_nilenv` (the nil-env crash),
+  `env_07_udenv` (userdata env, modes B,R).
 - `PENDING` pcall/xpcall C-call nesting bound and `__call` chain argument
   prepending (calls.lua A/B; VM work on `wip-calls-vm`; handler-reentry bound is
   already on main).
@@ -77,14 +83,15 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   against PUC's `lua.h` and linked against JITLua reads the wrong bytes and must
   be rebuilt against JITLua's headers (same ABI class as the `luaL_Buffer` note
   above).
-- `PENDING` Parsing or running a chunk that names a global on a state whose
-  base library is not installed segfaults (PUC 5.4.9 runs it): the 5.4 `_ENV`
-  GGET special case reads the interned `_ENV` string from `GCROOT_ENVSTR`
-  (`lj_parse.c`), which `lib_base` installs only when the base library is
-  opened (`lib_base.c`); `luaL_dostring` on a fresh state crashes. Repro and
-  mechanism in `docs/differences-audit-2026-11.md` (new difference found in
-  the 2026-11 audit).
-
+- `FIXED` A state created without the base library (`luaL_newstate()` with no
+  `luaopen_base`) segfaulted in `var_lookup` on any chunk that names a global:
+  the 5.4 `_ENV` special case reads the interned `_ENV` string from
+  `gcroot[GCROOT_ENVSTR]`, which `lib_base` installed only when the base
+  library was opened; `lj_record.c` read the same root. The string is now
+  interned at state creation (`lj_state.c`), so parsing and recording work on
+  bare states. Regression test `tests/capi` `test_bare_state` (reads, writes,
+  loops, `lua_getglobal`/`lua_setglobal`, and a JIT-on hot global loop); the
+  portable PUC 5.4.9 parity check is `tests/capi/bare_state_ref.c`.
 - `FIXED` Weak-table JIT loop hang (`closure.lua:37`; stock LuaJIT 2.1 hangs
   there too). A trace that reads from a weak table keeps its allocations, so
   the loop's GC check drives the collector, and the GC step at the loop head

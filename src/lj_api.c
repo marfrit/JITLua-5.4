@@ -1369,7 +1369,7 @@ LUA_API void lua_getfenv(lua_State *L, int idx)
 {
   cTValue *o = index2adr_check(L, idx);
   if (tvisfunc(o)) {
-    settabV(L, L->top, tabref(funcV(o)->c.env));
+    copyTV(L, L->top, &funcV(o)->c.envv);
   } else if (tvisudata(o) && !tvisi64(o)) {  /* boxed int64 is a number */
     GCudata *ud = udataV(o);
     if (ud->udtype == UDTYPE_USERDATA) {
@@ -1413,10 +1413,7 @@ LUA_API const char *lua_getupvalue(lua_State *L, int idx, int n)
   GCobj *o;
   const char *name = lj_debug_uvnamev(index2adr(L, idx), (uint32_t)(n-1), &val, &o);
   if (name) {
-    if (val == NULL)  /* 5.4 debug view: _ENV is the function's env table. */
-      settabV(L, L->top, tabref(gco2func(o)->l.env));
-    else
-      copyTV(L, L->top, val);
+    copyTV(L, L->top, val);
     incr_top(L);
   }
   return name;
@@ -1581,11 +1578,13 @@ LUA_API int lua_setmetatable(lua_State *L, int idx)
   }
   g = G(L);
   if (tvistab(o)) {
-    setgcref(tabV(o)->metatable, obj2gco(mt));
+    if (mt) setgcref(tabV(o)->metatable, obj2gco(mt));
+    else setgcrefnull(tabV(o)->metatable);
     if (mt)
       lj_gc_objbarriert(L, tabV(o), mt);
   } else if (tvisudata(o) && !tvisi64(o)) {  /* boxed int64 is a number */
-    setgcref(udataV(o)->metatable, obj2gco(mt));
+    if (mt) setgcref(udataV(o)->metatable, obj2gco(mt));
+    else setgcrefnull(udataV(o)->metatable);
     if (mt)
       lj_gc_objbarrier(L, udataV(o), mt);
   } else {
@@ -1595,11 +1594,17 @@ LUA_API int lua_setmetatable(lua_State *L, int idx)
     o = index2adr(L, idx);  /* Stack may have been reallocated. */
     if (tvisbool(o)) {
       /* NOBARRIER: basemt is a GC root. */
-      setgcref(basemt_it(g, LJ_TTRUE), obj2gco(mt));
-      setgcref(basemt_it(g, LJ_TFALSE), obj2gco(mt));
+      if (mt) {
+	setgcref(basemt_it(g, LJ_TTRUE), obj2gco(mt));
+	setgcref(basemt_it(g, LJ_TFALSE), obj2gco(mt));
+      } else {
+	setgcrefnull(basemt_it(g, LJ_TTRUE));
+	setgcrefnull(basemt_it(g, LJ_TFALSE));
+      }
     } else {
       /* NOBARRIER: basemt is a GC root. */
-      setgcref(basemt_obj(g, o), obj2gco(mt));
+      if (mt) setgcref(basemt_obj(g, o), obj2gco(mt));
+      else setgcrefnull(basemt_obj(g, o));
     }
   }
   L->top--;
@@ -1621,6 +1626,7 @@ LUA_API int lua_setfenv(lua_State *L, int idx)
   t = tabV(L->top-1);
   if (tvisfunc(o)) {
     setgcref(funcV(o)->c.env, obj2gco(t));
+    settabV(L, &funcV(o)->c.envv, t);
   } else if (tvisudata(o) && !tvisi64(o)) {  /* boxed int64 is a number */
     GCudata *ud = udataV(o);
     setgcref(ud->env, obj2gco(t));
@@ -1682,13 +1688,13 @@ LUA_API const char *lua_setupvalue(lua_State *L, int idx, int n)
   name = lj_debug_uvnamev(f, (uint32_t)(n-1), &val, &o);
   if (name) {
     L->top--;
-    if (val == NULL) {  /* 5.4 debug view: set the env (a table here). */
-      if (!tvistab(L->top)) return NULL;
-      setgcref(gco2func(o)->l.env, obj2gco(tabV(L->top)));
-      lj_gc_objbarrier(L, o, tabV(L->top));
-    } else {
-      copyTV(L, val, L->top);
-      lj_gc_barrier(L, o, L->top);
+    copyTV(L, val, L->top);
+    lj_gc_barrier(L, o, L->top);
+    if (isluafunc(funcV(f)) && val == &funcV(f)->l.envv) {  /* _ENV value */
+      if (tvistab(val))
+	setgcref(funcV(f)->l.env, obj2gco(tabV(val)));
+      else
+	setgcrefnull(funcV(f)->l.env);
     }
   }
   return name;

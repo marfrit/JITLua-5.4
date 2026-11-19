@@ -823,7 +823,7 @@ static void build_subroutines(BuildCtx *ctx)
   |  // TValue * (finished) or NULL (metamethod) returned in eax (RC).
   |  mov BASE, L:RB->base
   |  test RC, RC
-  |  jz >3
+  |  jz ->vmeta_tget_mm
   |->cont_ra:				// BASE = base, RC = result
   |  endbr
   |  movzx RAd, PC_RA
@@ -831,7 +831,7 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov [BASE+RA*8], RB
   |  ins_next
   |
-  |3:  // Call __index metamethod.
+  |->vmeta_tget_mm:  // Call __index metamethod.
   |  // BASE = base, L->top = new base, stack = cont/func/t/k
   |  mov RA, L:RB->top
   |  mov [RA-24], PC			// [cont|PC]
@@ -897,7 +897,7 @@ static void build_subroutines(BuildCtx *ctx)
   |  // TValue * (finished) or NULL (metamethod) returned in eax (RC).
   |  mov BASE, L:RB->base
   |  test RC, RC
-  |  jz >3
+  |  jz ->vmeta_tset_mm
   |  // NOBARRIER: lj_meta_tset ensures the table is not black.
   |  movzx RAd, PC_RA
   |  mov RB, [BASE+RA*8]
@@ -915,7 +915,7 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov MULTRES, TMPRd
   |  ins_next
   |
-  |3:  // Call __newindex metamethod.
+  |->vmeta_tset_mm:  // Call __newindex metamethod.
   |  // BASE = base, L->top = new base, stack = cont/func/t/k/(v)
   |  mov RA, L:RB->top
   |  mov [RA-24], PC			// [cont|PC]
@@ -4131,13 +4131,29 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  ins_AND	// RA = dst, RD = str const (~)
     |  mov LFUNC:RB, [BASE-16]
     |  cleartp LFUNC:RB
-    |  mov TAB:RB, LFUNC:RB->env
     |  mov STR:RC, [KBASE+RD*8]
     |  mov TMPR, [DISPATCH+DISPATCH_GL(gcroot)+8*GCROOT_ENVSTR]
     |  cmp STR:RC, TMPR
     |  je >1
-    |  jmp ->BC_TGETS_Z
-    |1:			// implicit 5.4 _ENV read: the function env table
+    |  mov TAB:RB, LFUNC:RB->env
+    |  test TAB:RB, TAB:RB
+    |  jnz ->BC_TGETS_Z		// table env: fast path
+    |  mov LFUNC:RB, [BASE-16]		// non-table _ENV: reload the function
+    |  cleartp LFUNC:RB
+    |  mov L:CARG1, SAVE_L
+    |  mov L:CARG1->base, BASE
+    |  lea CARG2, [LFUNC:RB+offsetof(GCfuncL, envv)]
+    |  settp STR:RC, LJ_TSTR
+    |  mov TMP1, STR:RC
+    |  lea CARG3, TMP1
+    |  mov L:RB, L:CARG1
+    |  mov SAVE_PC, PC
+    |  call extern lj_meta_tget_env	// (L, TValue *o, TValue *k)
+    |  mov BASE, L:RB->base
+    |  test RC, RC
+    |  jz ->vmeta_tget_mm
+    |  jmp ->cont_ra
+    |1:			// implicit 5.4 _ENV read: the function env value
     |  mov L:RB, SAVE_L
     |  mov L:RB->base, BASE
     |  lea CARG2, [BASE+RA*8]
@@ -4150,12 +4166,32 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  ins_AND	// RA = src, RD = str const (~)
     |  mov LFUNC:RB, [BASE-16]
     |  cleartp LFUNC:RB
-    |  mov TAB:RB, LFUNC:RB->env
     |  mov STR:RC, [KBASE+RD*8]
     |  mov TMPR, [DISPATCH+DISPATCH_GL(gcroot)+8*GCROOT_ENVSTR]
     |  cmp STR:RC, TMPR
     |  je >1
-    |  jmp ->BC_TSETS_Z
+    |  mov TAB:RB, LFUNC:RB->env
+    |  test TAB:RB, TAB:RB
+    |  jnz ->BC_TSETS_Z		// table env: fast path
+    |  mov LFUNC:RB, [BASE-16]		// non-table _ENV: reload the function
+    |  cleartp LFUNC:RB
+    |  mov L:CARG1, SAVE_L
+    |  mov L:CARG1->base, BASE
+    |  lea CARG2, [LFUNC:RB+offsetof(GCfuncL, envv)]
+    |  settp STR:RC, LJ_TSTR
+    |  mov TMP1, STR:RC
+    |  lea CARG3, TMP1
+    |  mov L:RB, L:CARG1
+    |  mov SAVE_PC, PC
+    |  call extern lj_meta_tset_env	// (L, TValue *o, TValue *k)
+    |  mov BASE, L:RB->base
+    |  test RC, RC
+    |  jz ->vmeta_tset_mm
+    |  // NOBARRIER: lj_meta_tset ensures the table is not black.
+    |  movzx RAd, PC_RA
+    |  mov RB, [BASE+RA*8]
+    |  mov [RC], RB
+    |  ins_next
     |1:			// implicit 5.4 _ENV write: retarget the function env
     |  mov L:RB, SAVE_L
     |  mov L:RB->base, BASE

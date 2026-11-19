@@ -117,10 +117,11 @@ GCfunc *lj_func_newC(lua_State *L, MSize nelems, GCtab *env)
   /* NOBARRIER: The GCfunc is new (marked white). */
   setmref(fn->c.pc, &G(L)->bc_cfunc_ext);
   setgcref(fn->c.env, obj2gco(env));
+  settabV(L, &fn->c.envv, env);
   return fn;
 }
 
-static GCfunc *func_newL(lua_State *L, GCproto *pt, GCtab *env)
+static GCfunc *func_newL(lua_State *L, GCproto *pt, cTValue *envv)
 {
   uint32_t count;
   GCfunc *fn = (GCfunc *)lj_mem_newgco(L, sizeLfunc((MSize)pt->sizeuv));
@@ -129,7 +130,11 @@ static GCfunc *func_newL(lua_State *L, GCproto *pt, GCtab *env)
   fn->l.nupvalues = 0;  /* Set to zero until upvalues are initialized. */
   /* NOBARRIER: Really a setgcref. But the GCfunc is new (marked white). */
   setmref(fn->l.pc, proto_bc(pt));
-  setgcref(fn->l.env, obj2gco(env));
+  if (tvistab(envv))
+    setgcref(fn->l.env, obj2gco(tabV(envv)));
+  else
+    setgcrefnull(fn->l.env);
+  copyTV(L, &fn->l.envv, envv);
   /* Saturating 3 bit counter (0..7) for created closures. */
   count = (uint32_t)pt->flags + PROTO_CLCOUNT;
   pt->flags = (uint8_t)(count - ((count >> PROTO_CLC_BITS) & PROTO_CLCOUNT));
@@ -139,8 +144,11 @@ static GCfunc *func_newL(lua_State *L, GCproto *pt, GCtab *env)
 /* Create a new Lua function with empty upvalues. */
 GCfunc *lj_func_newL_empty(lua_State *L, GCproto *pt, GCtab *env)
 {
-  GCfunc *fn = func_newL(L, pt, env);
+  TValue envv;
+  GCfunc *fn;
   MSize i, nuv = pt->sizeuv;
+  settabV(L, &envv, env);
+  fn = func_newL(L, pt, &envv);
   /* NOBARRIER: The GCfunc is new (marked white). */
   for (i = 0; i < nuv; i++) {
     GCupval *uv = func_emptyuv(L);
@@ -161,7 +169,7 @@ GCfunc *lj_func_newL_gc(lua_State *L, GCproto *pt, GCfuncL *parent)
   MSize i, nuv;
   TValue *base;
   lj_gc_check_fixtop(L);
-  fn = func_newL(L, pt, tabref(parent->env));
+  fn = func_newL(L, pt, &parent->envv);
   /* NOBARRIER: The GCfunc is new (marked white). */
   puv = parent->uvptr;
   nuv = pt->sizeuv;
@@ -191,28 +199,34 @@ void LJ_FASTCALL lj_func_free(global_State *g, GCfunc *fn)
 
 
 /* Lua 5.4 implicit _ENV write: retarget the current function's environment.
-** Only a table can become the environment (LuaJIT's env is a GCtab field);
-** other values keep LuaJIT's fenv model instead of failing later. */
+** The 5.4 _ENV is an ordinary value (table, userdata, number, nil, ...): the
+** table cache fn->l.env is refreshed for the GGET/GSET fast path and compiled
+** traces (which read FUNC_ENV) are discarded. */
+void lj_func_setenvv(GCfunc *fn, cTValue *v)
+{
+  fn->l.envv = *v;
+  if (tvistab(v))
+    setgcref(fn->l.env, obj2gco(tabV(v)));
+  else
+    setgcrefnull(fn->l.env);
+}
+
 void LJ_FASTCALL lj_func_getenv(lua_State *L, TValue *dst)
 {
   GCfunc *fn = curr_func(L);
-  GCtab *t = tabref(fn->l.env);
-  if (t) settabV(L, dst, t); else setnilV(dst);
+  copyTV(L, dst, &fn->l.envv);
 }
 
 void LJ_FASTCALL lj_func_setenv(lua_State *L, TValue *v)
 {
   GCfunc *fn = curr_func(L);
-  if (tvistab(v)) {
-    GCtab *t = tabV(v);
-    setgcref(fn->l.env, obj2gco(t));
-    lj_gc_objbarrier(L, fn, t);
+  lj_func_setenvv(fn, v);
+  lj_gc_barrier(L, fn, v);
 #if LJ_HASJIT
-    {  /* Compiled traces cache FUNC_ENV (IRFL_FUNC_ENV): discard them. */
-      global_State *g = G(L);
-      if ((G2J(g)->flags & JIT_F_ON) && G2J(g)->state == LJ_TRACE_IDLE)
-	lj_trace_flushall(L);
-    }
-#endif
+  {  /* Compiled traces cache FUNC_ENV (IRFL_FUNC_ENV): discard them. */
+    global_State *g = G(L);
+    if ((G2J(g)->flags & JIT_F_ON) && G2J(g)->state == LJ_TRACE_IDLE)
+      lj_trace_flushall(L);
   }
+#endif
 }

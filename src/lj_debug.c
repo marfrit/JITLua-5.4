@@ -9,6 +9,7 @@
 #include "lj_obj.h"
 #include "lj_err.h"
 #include "lj_debug.h"
+#include "lj_func.h"
 #include "lj_buf.h"
 #include "lj_tab.h"
 #include "lj_state.h"
@@ -336,9 +337,9 @@ uint32_t lj_debug_envuv(GCfunc *fn)
 }
 
 /* debug.upvaluejoin(f1, n1, f2, n2) with the _ENV view: a real upvalue
-** pair shares the upvalue object; an env side copies the table (per-closure
+** pair shares the upvalue object; an env side copies the value (per-closure
 ** env, not a shared cell): fn1's env takes fn2's upvalue value if that is a
-** table, a real upvalue of fn1 takes fn2's env table as its value. */
+** table, a real upvalue of fn1 takes fn2's env value. */
 void lj_debug_uvjoin(lua_State *L, GCfunc *fn1, GCRef *r1, int e1,
 		     GCfunc *fn2, GCRef *r2, int e2)
 {
@@ -346,16 +347,22 @@ void lj_debug_uvjoin(lua_State *L, GCfunc *fn1, GCRef *r1, int e1,
     setgcrefr(*r1, *r2);
     lj_gc_objbarrier(L, fn1, gcref(*r1));
   } else if (e1) {
-    GCtab *t = NULL;
-    if (e2) t = tabref(*r2);
-    else { cTValue *v = uvval(&gcref(*r2)->uv); if (tvistab(v)) t = tabV(v); }
-    if (t) { setgcref(*r1, obj2gco(t)); lj_gc_objbarrier(L, fn1, t); }
-  } else {  /* Real upvalue of fn1 takes fn2's env table as its value. */
+    if (e2) {  /* fn1's env takes fn2's env value (any type). */
+      lj_func_setenvv(fn1, &fn2->l.envv);
+      if (tvisgcv(&fn2->l.envv))
+	lj_gc_barrier(L, fn1, &fn2->l.envv);
+    } else {  /* ... or fn2's real upvalue value, if it is a table. */
+      cTValue *v = uvval(&gcref(*r2)->uv);
+      if (tvistab(v)) {
+	lj_func_setenvv(fn1, v);
+	lj_gc_barrier(L, fn1, v);
+      }
+    }
+  } else {  /* Real upvalue of fn1 takes fn2's env value as its value. */
     GCupval *uv = &gcref(*r1)->uv;
-    settabV(L, uvval(uv), tabref(*r2));
+    copyTV(L, uvval(uv), &fn2->l.envv);
     lj_gc_barrier(L, uv, uvval(uv));
   }
-  UNUSED(fn2);
 }
 
 /* Number of upvalues as the debug API counts them (incl. _ENV). */
@@ -364,8 +371,8 @@ uint32_t lj_debug_nupvalues(GCfunc *fn)
   return fn->c.nupvalues + (lj_debug_envuv(fn) != ~0u);
 }
 
-/* Get name and value of an upvalue by debug index. For the synthesized
-** _ENV upvalue *tvp is NULL (the callers read/write fn->l.env). */
+/* Get name and value of an upvalue by debug index. The synthesized _ENV
+** upvalue's value is fn->l.envv (any 5.4 _ENV type). */
 const char *lj_debug_uvnamev(cTValue *o, uint32_t idx, TValue **tvp, GCobj **op)
 {
   if (tvisfunc(o)) {
@@ -375,7 +382,7 @@ const char *lj_debug_uvnamev(cTValue *o, uint32_t idx, TValue **tvp, GCobj **op)
       uint32_t ei = lj_debug_envuv(fn);
       if (ei != ~0u) {  /* Function has the synthesized _ENV upvalue. */
 	if (idx == ei) {
-	  *tvp = NULL;
+	  *tvp = &fn->l.envv;
 	  *op = obj2gco(fn);
 	  return "_ENV";
 	}

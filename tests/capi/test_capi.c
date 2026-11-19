@@ -1257,6 +1257,97 @@ static void test_rotate(void)
   lua_close(L);
 }
 
+static void test_bare_state(void)
+{
+  /* A state with no standard library must still load and run chunks that name
+  ** globals. The 5.4 lexical _ENV special case reads the interned "_ENV"
+  ** string from gcroot[GCROOT_ENVSTR] while parsing (lj_parse.c var_lookup)
+  ** and while recording (lj_record.c BC_GGET/GSET); luaopen_base used to
+  ** install it, so a bare luaL_newstate() + luaL_dostring(L, "x = 1") crashed
+  ** in var_lookup. PUC 5.4.9 runs the same chunk fine. */
+  {
+    lua_State *L = luaL_newstate();  /* deliberately no luaL_openlibs */
+    int rc = luaL_dostring(L,
+      "x = 1\n"
+      "y = x + 2\n"
+      "local s = 0\n"
+      "for i = 1, 10 do s = s + x end\n"
+      "z = s\n");
+    ok(rc == LUA_OK, "bare state: chunk with global read/write/loop runs");
+    if (rc != LUA_OK) printf("     error: %s\n", lua_tostring(L, -1));
+    lua_getglobal(L, "y");
+    ok(lua_tointeger(L, -1) == 3, "bare state: global written by chunk is visible");
+    lua_pop(L, 1);
+    lua_getglobal(L, "z");
+    ok(lua_tointeger(L, -1) == 10, "bare state: loop over a global yields the right value");
+    lua_pop(L, 1);
+    lua_close(L);
+  }
+  {
+    /* Only the string library: global access must not depend on luaopen_base. */
+    lua_State *L = luaL_newstate();
+    luaL_requiref(L, LUA_STRLIBNAME, luaopen_string, 1);
+    lua_pop(L, 1);
+    int rc = luaL_dostring(L, "a = ('x'):rep(3)\nb = a .. 'y'\n");
+    ok(rc == LUA_OK, "string-only state: chunk with a global write runs");
+    if (rc != LUA_OK) printf("     error: %s\n", lua_tostring(L, -1));
+    lua_getglobal(L, "b");
+    ok(lua_isstring(L, -1) && strcmp(lua_tostring(L, -1), "xxxy") == 0,
+       "string-only state: string method + global read work");
+    lua_pop(L, 1);
+    lua_close(L);
+  }
+  {
+    /* C API global access on a bare state, both directions. */
+    lua_State *L = luaL_newstate();
+    lua_pushinteger(L, 42);
+    lua_setglobal(L, "answer");
+    lua_getglobal(L, "answer");
+    ok(lua_tointeger(L, -1) == 42, "bare state: lua_setglobal/lua_getglobal round-trip");
+    lua_pop(L, 1);
+    int rc = luaL_dostring(L, "cseen = answer + 1\nfromlua = 7\n");
+    ok(rc == LUA_OK, "bare state: chunk reads a C-set global");
+    lua_getglobal(L, "cseen");
+    ok(lua_tointeger(L, -1) == 43, "bare state: C-set global value crosses into Lua");
+    lua_pop(L, 1);
+    lua_getglobal(L, "fromlua");
+    ok(lua_tointeger(L, -1) == 7, "bare state: Lua-set global crosses back to the C API");
+    lua_pop(L, 1);
+    lua_close(L);
+  }
+  {
+    /* The JIT recorder reads gcroot[GCROOT_ENVSTR] on every GGET/GSET; a hot
+    ** global loop on a bare state must compile a trace, not abort or crash. */
+    lua_State *L = luaL_newstate();
+    /* Open only the jit library. luaopen_jit is not a 5.4 luaL_requiref
+    ** library (its return value is not the jit table), so register it the way
+    ** luaL_openlibs does. */
+    lua_pushcfunction(L, luaopen_jit);
+    lua_pushstring(L, LUA_JITLIBNAME);
+    lua_call(L, 1, 0);
+    lua_getglobal(L, "jit");
+    ok(lua_istable(L, -1), "bare state: jit library registers its table");
+    lua_pop(L, 1);
+    int rc = luaL_dostring(L,
+      "jit.on()\n"
+      "local n = 0\n"
+      "jit.attach(function(what) if what == 'start' then n = n + 1 end end, 'trace')\n"
+      "g = 0\n"
+      "for i = 1, 2000 do g = g + i end\n"
+      "traces = n\n"
+      "result = g\n");
+    ok(rc == LUA_OK, "bare state + jit: hot global loop runs");
+    if (rc != LUA_OK) printf("     error: %s\n", lua_tostring(L, -1));
+    lua_getglobal(L, "result");
+    ok(lua_tointeger(L, -1) == 2001000, "bare state + jit: hot loop result is correct");
+    lua_pop(L, 1);
+    lua_getglobal(L, "traces");
+    ok(lua_tointeger(L, -1) > 0, "bare state + jit: hot global loop compiled a trace");
+    lua_pop(L, 1);
+    lua_close(L);
+  }
+}
+
 static const char *only;  /* CAPI_ONLY=<name>: run a single group (review of the
                           ** old commit needs the groups one by one, because a
                           ** panic in one aborts the process) */
@@ -1289,6 +1380,7 @@ int main(void)
   if (want("toclose")) test_toclose();
   if (want("closethread")) test_closethread();
   if (want("lauxlib")) test_lauxlib54();
+  if (want("bare_state")) test_bare_state();
   printf("== capi: %d checks, %d failures ==\n", checks, failures);
   return failures ? 1 : 0;
 }

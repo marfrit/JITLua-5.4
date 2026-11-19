@@ -14,7 +14,7 @@
 
 #define VMEVENT_MASK(ev)	((uint8_t)1 << ((int)(ev) & 7))
 #define VMEVENT_HASH(ev)	((int)(ev) & ~7)
-#define VMEVENT_HASHIDX(h)	((int)(h) << 3)
+#define VMEVENT_HASHIDX(h)	((int)((uint32_t)(h) << 3))
 #define VMEVENT_NOCACHE		255
 
 #define VMEVENT_DEF(name, hash) \

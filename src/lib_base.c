@@ -179,7 +179,10 @@ LJLIB_CF(getfenv)		LJLIB_REC(.)
     if (LJ_FR2) o--;
   }
   fn = &gcval(o)->fn;
-  settabV(L, L->top++, isluafunc(fn) ? tabref(fn->l.env) : tabref(L->env));
+  if (isluafunc(fn))
+    copyTV(L, L->top++, &fn->l.envv);
+  else
+    settabV(L, L->top++, tabref(L->env));
   return 1;
 }
 
@@ -206,6 +209,7 @@ LJLIB_CF(setfenv)
   if (!isluafunc(fn))
     lj_err_caller(L, LJ_ERR_SETFENV);
   setgcref(fn->l.env, obj2gco(t));
+  settabV(L, &fn->l.envv, t);
   lj_gc_objbarrier(L, obj2gco(fn), t);
   setfuncV(L, L->top++, fn);
   return 1;
@@ -423,16 +427,14 @@ static int load_aux(lua_State *L, int status, int envarg)
     if (envarg > 0 && tvisfunc(L->top-1)) {
       GCfunc *fn = funcV(L->top-1);
       cTValue *ev = L->base+envarg-1;
-      if (tvistab(ev)) {
-	GCtab *t = tabV(ev);
-	setgcref(fn->c.env, obj2gco(t));
-	lj_gc_objbarrier(L, fn, t);
-      } else if (tvisnil(ev)) {
-	/* PUC 5.4 loadfile(file,'t',nil): _ENV is nil inside the chunk. */
-	setgcrefnull(fn->c.env);
-      }
+      /* 5.4: any value is a valid _ENV (PUC stores it as the 1st upvalue).
+      ** The table cache fn->l.env is NULL for a non-table value; the
+      ** interpreter and recorder then use the generic index path. */
+      lj_func_setenvv(fn, ev);
+      if (tvisgcv(ev))
+	lj_gc_barrier(L, fn, ev);
       /* 5.4: _ENV reads/writes inside the chunk are the GGET/GSET special
-      ** case on the interned key (VM and recorder); the table itself must
+      ** case on the interned key (VM and recorder); the value itself must
       ** not carry an "_ENV" entry (PUC: _G._ENV == nil, pairs(_G) has none). */
     }
     return 1;
@@ -863,11 +865,10 @@ LUALIB_API int luaopen_base(lua_State *L)
   settabV(L, lj_tab_setstr(L, env, lj_str_newlit(L, "_G")), env);
   /* Lua 5.4: the chunk environment is _ENV. LuaJIT resolves globals through
   ** the function env; the VM special-cases the interned "_ENV" key so reads
-  ** yield the env and writes retarget it (function scope, see docs). */
-  { GCstr *envstr = lj_str_newlit(L, "_ENV");
-    setgcref(G(L)->gcroot[GCROOT_ENVSTR], obj2gco(envstr));
-    /* No _G._ENV entry: PUC's _ENV is an upvalue, not a global. */
-  }
+  ** yield the env and writes retarget it (function scope, see docs).
+  ** The interned string itself is created at state creation (lj_state.c), so
+  ** a state without the base library can parse and record global accesses.
+  ** No _G._ENV entry: PUC's _ENV is an upvalue, not a global. */
   lua_pushliteral(L, LUA_VERSION);  /* top-3. */
   newproxy_weaktable(L);  /* top-2. */
   LJ_LIB_REG(L, "_G", base);

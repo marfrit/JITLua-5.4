@@ -93,6 +93,20 @@ target x86_64 (GC64) and arm64.
   finalizers. Implemented on x64 and arm64; the other backends need the same
   interpreter fast-path guard before they can be trusted for table
   finalizers (`tests/d54/gc_01_tbc_gc.lua`, `gc_02_table_finalizers.lua`).
+- Userdata finalizers installed during `lua_close`: LuaJIT registers
+  finalizable userdata when the collector separates unreachable ones, and
+  `lua_close` separated again after every finalizer round, so a `__gc` that
+  created a finalizable userdata -- or gave `__gc` to another userdata -- ran
+  again in the next round, up to the close loop bound, with user code running
+  after teardown started. PUC 5.4 registers nothing while closing (GCSTPCLS in
+  `luaC_checkfinalizer`): the object is freed without a second call. The
+  separator's userdata branch now leaves everything alone while
+  `g->gc.closing` is set, and `lua_close` separates once before setting the
+  flag, so what already had `__gc` -- reachable objects included -- is still
+  finalized exactly once like PUC's finobj list. Tables were already covered
+  by the check in `lj_gc_checkfinalizer`; FFI cdata by the disabled finalizer
+  table. Tests `tests/d54/udfin_01_close.lua` (modes B,R, 20 s timeout) and
+  `tests/capi/udfinal.c` (same counters as the PUC 5.4.9 reference).
 - Tail-call error names: a tail call to a C function (fast function
   or C closure) now keeps the Lua caller frame alive and enters the C function
   through a new `LJ_CONT_TAILRET` continuation frame that makes the caller

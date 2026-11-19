@@ -122,9 +122,18 @@ LJ_FUNC void *lj_mem_grow(lua_State *L, void *p,
 
 #define lj_mem_new(L, s)	lj_mem_realloc(L, NULL, 0, (s))
 
+#if defined(LUAJIT_GC_STATS)
+/* Count a free for the Stage 0(b) allocation probe; defined in lj_gc.c.
+** Cheap (a counter), no timing; a no-op in a default build. */
+LJ_FUNC void lj_gc_stats_free(GCSize osz);
+#else
+#define lj_gc_stats_free(osz)	((void)0)
+#endif
+
 static LJ_AINLINE void lj_mem_free(global_State *g, void *p, size_t osize)
 {
   g->gc.total -= (GCSize)osize;
+  lj_gc_stats_free((GCSize)osize);
   g->allocf(g->allocd, p, osize, 0);
 }
 

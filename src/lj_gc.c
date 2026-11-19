@@ -33,26 +33,147 @@
 
 /* Optional GC pause instrumentation (measurement builds only). Compile with
 ** -DLUAJIT_GC_STATS. Nothing below is compiled in a default build.
+**
+** Stage 0(b) adds a per-phase split of collector time: every gc_onestep()
+** case is timed, so the phase totals sum to the incremental step total (plus
+** any explicit collectgarbage("collect") work, which lj_gc_fullgc drives
+** outside the lj_gc_step() timer). The allocation path is counted, and its
+** allocator time is timed on a 1-in-64 sample so the probes cannot dominate a
+** churn workload.
 */
 #ifdef LUAJIT_GC_STATS
 #include <stdio.h>
 #include <stdint.h>
 #include <sys/time.h>
 
+#define GCSTATS_ALLOC_SAMPLE	6  /* Time 1 call in (1<<6) = 64. */
+
 typedef struct GCStats {
   uint64_t steps, cycles, fullgc, atomic_calls;
   uint64_t step_ns, step_max_ns, full_ns, full_max_ns;
   uint64_t atomic_ns, atomic_max_ns;
+  /* Per-phase split (Stage 0b). atomic_ns is the atomic phase. */
+  uint64_t mark_ns, mark_steps, mark_runs;   /* GCSpause + GCSpropagate */
+  uint64_t sweepstr_ns, sweepstr_steps, sweepstr_runs;
+  uint64_t sweep_ns, sweep_steps, sweep_runs;
+  uint64_t finalize_ns, finalize_steps, finalize_runs;
+  /* Allocation path (mutator context; free() nests inside sweep). */
+  uint64_t alloc_calls, alloc_bytes, free_calls, free_bytes;
+  uint64_t alloc_ns, alloc_samples;
   uint32_t step_hist[64], full_hist[64], atomic_hist[64];
 } GCStats;
 
 static GCStats gcstats;
+static uint32_t gcstats_alloc_tick;
+
+/* Allocation sampler: GCSTATS_ALLOC_OPEN() before the allocf() call,
+** GCSTATS_ALLOC_CLOSE() after it. Times 1 call in (1<<GCSTATS_ALLOC_SAMPLE). */
+#define GCSTATS_ALLOC_OPEN() \
+  int _gcstats_time = ((gcstats_alloc_tick++ & ((1u<<GCSTATS_ALLOC_SAMPLE)-1)) == 0); \
+  uint64_t _gcstats_a0 = _gcstats_time ? gcstats_now() : 0
+#define GCSTATS_ALLOC_CLOSE() do { \
+  if (_gcstats_time) { \
+    gcstats.alloc_ns += gcstats_now() - _gcstats_a0; gcstats.alloc_samples++; \
+  } \
+} while (0)
 
 static uint64_t gcstats_now(void)
 {
   struct timeval tv;
   gettimeofday(&tv, NULL);
   return (uint64_t)tv.tv_sec * 1000000000ull + (uint64_t)tv.tv_usec * 1000ull;
+}
+
+/* Cost of one gcstats_now() call, measured at exit. Every timed interval in
+** this file contains one such call (the interval starts and ends at a clock
+** read), so the dump subtracts steps*clock to report body time, not probe
+** time. The probe is ~25 ns against mark/sweep bodies of ~80 ns to ~1 us, so
+** without this the split would be biased towards the phase with more steps. */
+static uint64_t gcstats_clock_ns;
+static uint64_t gcstats_calib_sink;
+
+static void gcstats_calibrate(void)
+{
+  int i;
+  uint64_t t0, t1, s = 0;
+  t0 = gcstats_now();
+  for (i = 0; i < 20000; i++) s += gcstats_now();
+  t1 = gcstats_now();
+  gcstats_calib_sink = s;
+  (void)gcstats_calib_sink;
+  gcstats_clock_ns = (t1 - t0) / 20001u;
+}
+
+/* Attribute a completed phase run to its phase. GCSatomic is skipped: it has
+** its own timer below, so the atomic phase is not double-counted. */
+static void gcstats_phase_add(int st, uint64_t dt)
+{
+  switch (st) {
+  case GCSpause: case GCSpropagate:
+    gcstats.mark_ns += dt; gcstats.mark_runs++; break;
+  case GCSatomic:
+    break;
+  case GCSsweepstring:
+    gcstats.sweepstr_ns += dt; gcstats.sweepstr_runs++; break;
+  case GCSsweep:
+    gcstats.sweep_ns += dt; gcstats.sweep_runs++; break;
+  case GCSfinalize:
+    gcstats.finalize_ns += dt; gcstats.finalize_runs++; break;
+  default:
+    break;
+  }
+}
+
+/* Phase-run timer. The collector runs in bursts (lj_gc_step / lj_gc_fullgc),
+** and a phase can span many bursts with mutator time in between, so the timer
+** is opened when a burst starts, closed when it ends, and closed+reopened when
+** the state changes inside a burst. That is ~2 clock reads per state change
+**(a few hundred per run), not per step, so the probe cost is negligible and
+** the split is not biased towards the phase with more steps. */
+static uint8_t gcstats_run;
+static uint8_t gcstats_phase_state;
+static uint64_t gcstats_phase_start;
+
+static void gcstats_resume(global_State *g)
+{
+  gcstats_run = 1;
+  gcstats_phase_state = (uint8_t)g->gc.state;
+  gcstats_phase_start = gcstats_now();
+}
+
+static void gcstats_pause(void)
+{
+  if (gcstats_run) {
+    gcstats_phase_add(gcstats_phase_state, gcstats_now() - gcstats_phase_start);
+    gcstats_run = 0;
+  }
+}
+
+static void gcstats_switch(global_State *g)
+{
+  uint64_t now = gcstats_now();
+  gcstats_phase_add(gcstats_phase_state, now - gcstats_phase_start);
+  gcstats_phase_state = (uint8_t)g->gc.state;
+  gcstats_phase_start = now;
+}
+
+/* Count one gc_onestep() in its entry phase (no clock read). */
+static void gcstats_step_count(int st)
+{
+  switch (st) {
+  case GCSpause: case GCSpropagate: gcstats.mark_steps++; break;
+  case GCSsweepstring: gcstats.sweepstr_steps++; break;
+  case GCSsweep: gcstats.sweep_steps++; break;
+  case GCSfinalize: gcstats.finalize_steps++; break;
+  default: break;
+  }
+}
+
+/* ns -> us, minus the per-sample clock-probe overhead (allocation sampler). */
+static double gcstats_net_us(uint64_t ns, uint64_t nsamples)
+{
+  uint64_t oh = gcstats_clock_ns * nsamples;
+  return (double)(ns > oh ? ns - oh : 0) / 1000.0;
 }
 
 /* Log2 histogram: bucket b holds durations in [2^b, 2^(b+1)) nanoseconds. */
@@ -80,11 +201,20 @@ static double gcstats_pct(const uint32_t *hist, uint64_t total, double p)
 
 static void __attribute__((destructor)) gcstats_dump(void)
 {
+  gcstats_calibrate();
   fprintf(stderr,
     "GCSTATS steps=%llu cycles=%llu full=%llu atomic=%llu "
     "step_total_us=%.3f step_p50_us=%.3f step_p99_us=%.3f step_max_us=%.3f "
     "full_total_us=%.3f full_p99_us=%.3f full_max_us=%.3f "
-    "atomic_total_us=%.3f atomic_p50_us=%.3f atomic_p99_us=%.3f atomic_max_us=%.3f\n",
+    "atomic_total_us=%.3f atomic_p50_us=%.3f atomic_p99_us=%.3f atomic_max_us=%.3f "
+    "phase_mark_us=%.3f phase_mark_steps=%llu phase_mark_runs=%llu "
+    "phase_atomic_us=%.3f "
+    "phase_sweepstr_us=%.3f phase_sweepstr_steps=%llu phase_sweepstr_runs=%llu "
+    "phase_sweep_us=%.3f phase_sweep_steps=%llu phase_sweep_runs=%llu "
+    "phase_finalize_us=%.3f phase_finalize_steps=%llu phase_finalize_runs=%llu "
+    "phase_sum_us=%.3f clock_ns=%llu "
+    "alloc_calls=%llu alloc_kb=%.3f free_calls=%llu free_kb=%.3f "
+    "alloc_us=%.3f alloc_samples=%llu\n",
     (unsigned long long)gcstats.steps, (unsigned long long)gcstats.cycles,
     (unsigned long long)gcstats.fullgc, (unsigned long long)gcstats.atomic_calls,
     (double)gcstats.step_ns / 1000.0,
@@ -97,10 +227,33 @@ static void __attribute__((destructor)) gcstats_dump(void)
     (double)gcstats.atomic_ns / 1000.0,
     gcstats_pct(gcstats.atomic_hist, gcstats.atomic_calls, 0.50),
     gcstats_pct(gcstats.atomic_hist, gcstats.atomic_calls, 0.99),
-    (double)gcstats.atomic_max_ns / 1000.0);
+    (double)gcstats.atomic_max_ns / 1000.0,
+    (double)gcstats.mark_ns / 1000.0, (unsigned long long)gcstats.mark_steps,
+    (unsigned long long)gcstats.mark_runs,
+    (double)gcstats.atomic_ns / 1000.0,
+    (double)gcstats.sweepstr_ns / 1000.0, (unsigned long long)gcstats.sweepstr_steps,
+    (unsigned long long)gcstats.sweepstr_runs,
+    (double)gcstats.sweep_ns / 1000.0, (unsigned long long)gcstats.sweep_steps,
+    (unsigned long long)gcstats.sweep_runs,
+    (double)gcstats.finalize_ns / 1000.0, (unsigned long long)gcstats.finalize_steps,
+    (unsigned long long)gcstats.finalize_runs,
+    (double)(gcstats.mark_ns + gcstats.atomic_ns + gcstats.sweepstr_ns +
+             gcstats.sweep_ns + gcstats.finalize_ns) / 1000.0,
+    (unsigned long long)gcstats_clock_ns,
+    (unsigned long long)gcstats.alloc_calls, (double)gcstats.alloc_bytes / 1024.0,
+    (unsigned long long)gcstats.free_calls, (double)gcstats.free_bytes / 1024.0,
+    gcstats_net_us(gcstats.alloc_ns, gcstats.alloc_samples),
+    (unsigned long long)gcstats.alloc_samples);
+}
+
+/* Count a free. Called from lj_mem_free (lj_gc.h); cheap, no timing. */
+void lj_gc_stats_free(GCSize osz)
+{
+  gcstats.free_calls++; gcstats.free_bytes += osz;
 }
 
 #define GCSTATS_STEP_RET(v) do { \
+  gcstats_pause(); \
   uint64_t _t = gcstats_now() - gcstats_t0; \
   gcstats.steps++; gcstats.step_ns += _t; \
   if (_t > gcstats.step_max_ns) gcstats.step_max_ns = _t; \
@@ -110,6 +263,8 @@ static void __attribute__((destructor)) gcstats_dump(void)
 } while (0)
 #else
 #define GCSTATS_STEP_RET(v) return (v)
+#define GCSTATS_ALLOC_OPEN()
+#define GCSTATS_ALLOC_CLOSE() ((void)0)
 #endif
 
 #define GCSTEPSIZE	1024u
@@ -838,18 +993,34 @@ static void atomic(global_State *g, lua_State *L)
 static size_t gc_onestep(lua_State *L)
 {
   global_State *g = G(L);
+  size_t r;
+#ifdef LUAJIT_GC_STATS
+  /* Open a phase run if the collector was paused, or close and reopen it when
+  ** the state changed.  Two clock reads per state change, none per step. */
+  if (!gcstats_run)
+    gcstats_resume(g);
+  else if ((uint8_t)g->gc.state != gcstats_phase_state)
+    gcstats_switch(g);
+  gcstats_step_count((int)g->gc.state);
+#endif
   switch (g->gc.state) {
   case GCSpause:
     gc_mark_start(g);  /* Start a new GC cycle by marking all GC roots. */
-    return 0;
+    r = 0;
+    break;
   case GCSpropagate:
     if (gcref(g->gc.gray) != NULL)
-      return propagatemark(g);  /* Propagate one gray object. */
-    g->gc.state = GCSatomic;  /* End of mark phase. */
-    return 0;
+      r = propagatemark(g);  /* Propagate one gray object. */
+    else {
+      g->gc.state = GCSatomic;  /* End of mark phase. */
+      r = 0;
+    }
+    break;
   case GCSatomic:
-    if (tvref(g->jit_base))  /* Don't run atomic phase on trace. */
-      return LJ_MAX_MEM;
+    if (tvref(g->jit_base)) {  /* Don't run atomic phase on trace. */
+      r = LJ_MAX_MEM;
+      break;
+    }
 #ifdef LUAJIT_GC_STATS
     {
       uint64_t t0 = gcstats_now();
@@ -864,7 +1035,8 @@ static size_t gc_onestep(lua_State *L)
 #endif
     g->gc.state = GCSsweepstring;  /* Start of sweep phase. */
     g->gc.sweepstr = 0;
-    return 0;
+    r = 0;
+    break;
   case GCSsweepstring: {
     GCSize old = g->gc.total;
     gc_sweepstr(g, &g->str.tab[g->gc.sweepstr++]);  /* Sweep one chain. */
@@ -872,7 +1044,8 @@ static size_t gc_onestep(lua_State *L)
       g->gc.state = GCSsweep;  /* All string hash chains sweeped. */
     lj_assertG(old >= g->gc.total, "sweep increased memory");
     g->gc.estimate -= old - g->gc.total;
-    return GCSWEEPCOST;
+    r = GCSWEEPCOST;
+    break;
     }
   case GCSsweep: {
     GCSize old = g->gc.total;
@@ -889,27 +1062,34 @@ static size_t gc_onestep(lua_State *L)
 	g->gc.debt = 0;
       }
     }
-    return GCSWEEPMAX*GCSWEEPCOST;
+    r = GCSWEEPMAX*GCSWEEPCOST;
+    break;
     }
   case GCSfinalize:
     if (gcref(g->gc.mmudata) != NULL) {
       GCSize old = g->gc.total;
-      if (tvref(g->jit_base))  /* Don't call finalizers on trace. */
-	return LJ_MAX_MEM;
+      if (tvref(g->jit_base)) {  /* Don't call finalizers on trace. */
+	r = LJ_MAX_MEM;
+	break;
+      }
       gc_finalize(L);  /* Finalize one userdata object. */
       if (old >= g->gc.total && g->gc.estimate > old - g->gc.total)
 	g->gc.estimate -= old - g->gc.total;
       if (g->gc.estimate > GCFINALIZECOST)
 	g->gc.estimate -= GCFINALIZECOST;
-      return GCFINALIZECOST;
+      r = GCFINALIZECOST;
+      break;
     }
     g->gc.state = GCSpause;  /* End of GC cycle. */
     g->gc.debt = 0;
-    return 0;
+    r = 0;
+    break;
   default:
     lj_assertG(0, "bad GC state");
-    return 0;
+    r = 0;
+    break;
   }
+  return r;
 }
 
 /* Perform a limited amount of incremental GC steps. */
@@ -1057,6 +1237,7 @@ void lj_gc_fullgc(lua_State *L)
   g->gc.threshold = (g->gc.estimate/100) * g->gc.pause;
   g->vmstate = ostate;
 #ifdef LUAJIT_GC_STATS
+  gcstats_pause();
   {
     uint64_t dt = gcstats_now() - gcstats_t0;
     gcstats.fullgc++; gcstats.cycles++;
@@ -1135,7 +1316,14 @@ void *lj_mem_realloc(lua_State *L, void *p, GCSize osz, GCSize nsz)
 {
   global_State *g = G(L);
   lj_assertG((osz == 0) == (p == NULL), "realloc API violation");
+#ifdef LUAJIT_GC_STATS
+  GCSTATS_ALLOC_OPEN();
+#endif
   p = g->allocf(g->allocd, p, osz, nsz);
+#ifdef LUAJIT_GC_STATS
+  GCSTATS_ALLOC_CLOSE();
+  gcstats.alloc_calls++; gcstats.alloc_bytes += nsz;
+#endif
   if (p == NULL && nsz > 0)
     lj_err_mem(L);
   lj_assertG((nsz == 0) == (p == NULL), "allocf API violation");
@@ -1149,7 +1337,15 @@ void *lj_mem_realloc(lua_State *L, void *p, GCSize osz, GCSize nsz)
 void * LJ_FASTCALL lj_mem_newgco(lua_State *L, GCSize size)
 {
   global_State *g = G(L);
-  GCobj *o = (GCobj *)g->allocf(g->allocd, NULL, 0, size);
+  GCobj *o;
+#ifdef LUAJIT_GC_STATS
+  GCSTATS_ALLOC_OPEN();
+#endif
+  o = (GCobj *)g->allocf(g->allocd, NULL, 0, size);
+#ifdef LUAJIT_GC_STATS
+  GCSTATS_ALLOC_CLOSE();
+  gcstats.alloc_calls++; gcstats.alloc_bytes += size;
+#endif
   if (o == NULL)
     lj_err_mem(L);
   lj_assertG(checkptrGC(o),

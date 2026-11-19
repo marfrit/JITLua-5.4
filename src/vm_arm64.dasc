@@ -517,10 +517,7 @@ static void build_subroutines(BuildCtx *ctx)
   |->vm_unwind_ff_eh:			// Landing pad for external unwinder.
   |  bti_tailcall
   |  ldr TMP2w, L->ccallnest
-  |  sub TMP3w, TMP2w, #1
-  |  ldr TMP0w, L->status
-  |  cmp TMP0w, #LUA_ERRERR
-  |  csel TMP2w, TMP2w, TMP3w, eq	// Keep depth while chaining handlers.
+  |  sub TMP2w, TMP2w, #1
   |  str TMP2w, L->ccallnest
   |  ldr BASE, L->base
   |  ldr PC, [BASE, FRAME_PC]		// Fetch PC of previous frame.
@@ -1369,14 +1366,15 @@ static void build_subroutines(BuildCtx *ctx)
   |  add TMP2, BASE, NARGS8:RC
   |  cmp TMP1, TMP2
   |  blo ->fff_fallback
+  |   cmp NARGS8:RC, #8
+  |   blo ->fff_fallback
   |  ldr TMP0w, L->ccallnest
   |  cmp TMP0w, #LJ_MAX_XLEVEL
   |  bhs ->fff_fallback
   |  add TMP0w, TMP0w, #1
   |  str TMP0w, L->ccallnest
-  |   cmp NARGS8:RC, #8
   |  ldrb TMP0w, GL->hookmask
-  |   blo ->fff_fallback
+  |   cmp NARGS8:RC, #8
   |   sub NARGS8:RC, NARGS8:RC, #8
   |    mov RB, BASE
   |    add BASE, BASE, #16
@@ -1397,21 +1395,21 @@ static void build_subroutines(BuildCtx *ctx)
   |  add TMP2, BASE, NARGS8:RC
   |  cmp TMP1, TMP2
   |  blo ->fff_fallback
+  |     ldp CARG1, CARG2, [BASE]
+  |   subs NARGS8:TMP1, NARGS8:RC, #16
+  |   blo ->fff_fallback
+  |     asr ITYPE, CARG2, #47
+  |     cmn ITYPE, #-LJ_TFUNC
+  |     bne ->fff_fallback		// Traceback must be a function.
   |  ldr TMP0w, L->ccallnest
   |  cmp TMP0w, #LJ_MAX_XLEVEL
   |  bhs ->fff_fallback
   |  add TMP0w, TMP0w, #1
   |  str TMP0w, L->ccallnest
-  |     ldp CARG1, CARG2, [BASE]
   |  ldrb TMP0w, GL->hookmask
-  |   subs NARGS8:TMP1, NARGS8:RC, #16
-  |   blo ->fff_fallback
   |    mov RB, BASE
-  |     asr ITYPE, CARG2, #47
   |  ubfx TMP0w, TMP0w, #HOOK_ACTIVE_SHIFT, #1
-  |     cmn ITYPE, #-LJ_TFUNC
   |  add PC, TMP0, #24+FRAME_PCALL
-  |     bne ->fff_fallback		// Traceback must be a function.
   |   mov NARGS8:RC, NARGS8:TMP1
   |    add BASE, BASE, #24
   |     stp CARG2, CARG1, [RB]		// Swap function and traceback.

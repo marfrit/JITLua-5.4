@@ -1876,14 +1876,23 @@ LUA_API int lua_yieldk(lua_State *L, int nresults, lua_KContext ctx,
   return lua_yield(L, nresults);
 }
 
-/* Lua 5.4 signature: from is the resuming thread (ignored here; LuaJIT resumes
-** on the state itself) and *nres receives the number of results. */
+/* Lua 5.4 signature: from is the resuming thread and *nres receives the
+** number of results. Besides the state itself, PUC's lua_resume uses from for
+** the C-call count: the resumed thread inherits the resumer's nesting plus one
+** (its own resume call), so only 200 - nesting C calls remain usable. */
 LUA_API int lua_resume(lua_State *L, lua_State *from, int nargs, int *nres)
 {
   int st;
-  UNUSED(from);
   if (nres) *nres = 0;
   if (L->cframe == NULL && L->status <= LUA_YIELD) {
+    L->ccallnest = from ? from->ccallnest : 0;  /* PUC lua_resume */
+    if (L->ccallnest >= LJ_MAX_XLEVEL) {  /* PUC resume_error */
+      L->top = L->base;
+      setstrV(L, L->top, lj_err_str(L, LJ_ERR_CSTKOV));
+      incr_top(L);
+      return LUA_ERRRUN;
+    }
+    L->ccallnest++;
     st = lj_vm_resume(L,
       L->status == LUA_OK ? api_call_base(L, nargs) : L->top - nargs,
       0, 0);
@@ -1899,8 +1908,9 @@ LUA_API int lua_resume(lua_State *L, lua_State *from, int nargs, int *nres)
 
 /* Lua 5.4 thread reset: close pending to-be-closed slots and upvalues, then
 ** put the thread back to its fresh suspended state. The PUC 'from' argument
-** only feeds PUC's C-call counter; the pcall nesting count kept here starts
-** from zero again, as the pcall frames it counted are gone. */
+** feeds the C-call counter: the closed thread's __close handlers run with the
+** closer's nesting plus one (PUC sets nCcalls to from's count, and the C call
+** into the handler it does not need to count here adds the other level). */
 LUA_API int lua_closethread(lua_State *L, lua_State *from)
 {
   int status = L->status, st;
@@ -1914,7 +1924,7 @@ LUA_API int lua_closethread(lua_State *L, lua_State *from)
   else
     setnilV(eslot);
   L->status = LUA_OK;
-  L->ccallnest = 0;  /* Before the __close handlers run, like PUC's nCcalls. */
+  L->ccallnest = from ? from->ccallnest + 1 : 1;  /* Closer's nesting + 1. */
   st = lj_meta_tbccloseall(L, tvref(L->stack), eslot);
   eslot = L->top-1;  /* close calls may grow the stack */
   lj_func_closeuv(L, tvref(L->stack));

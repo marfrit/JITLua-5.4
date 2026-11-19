@@ -45,10 +45,11 @@ resume_at3 | -4
 yieldcycle | -1 | -1
 ```
 
-The resume chain stops at the absolute depth 201 (`level(1)` resumes with
-`ccallnest = 200`); PUC stops at 198. The three-level absolute difference is
-the same C-call baseline difference that `err_04` deliberately measures as
-deltas, not a divergence in the inheritance formula.
+With `LJ_CCALLNEST_BASE` 3 the resume chain stops at the absolute depth 198
+(`level(1)` resumes with `ccallnest = 200`), the same as PUC. Without the
+baseline it stopped at 201; the three-level difference was the C-call baseline
+difference that `err_04` measures as deltas, not a divergence in the
+inheritance formula.
 
 `tests/d54/err_07_resume_chain.lua`: every depth returns, 250/300/1000 end
 in a caught error, and a `coroutine.wrap` chain at 250/1000 is caught by
@@ -103,20 +104,50 @@ d=201 to d=200 — it still crashed. A baseline of 2 moved it to d=198 — still
 crashed. Those measurements were about the same register clobber, not about
 the reachable depth.
 
-## Remaining (separate from the resume fix)
+## Close-path follow-up (same round)
 
-1. **The close path is unbounded.** `lua_closethread`/`coroutine.close` set
-   the closer's count but nothing bounds a deep `__close` chain, where PUC
-   errors at 198 through the C call into each handler. Measured on x86_64
-   with an 8 MB stack: 100000 nested closes run, 200000 end in SIGSEGV. The
-   closed thread is left with a count of zero, so a thread reset by
-   `lua_closethread` starts like a new one (main landed that reset).
-2. **aarch64/x64 reach the bound three levels deeper than PUC** because
-   `ccallnest` is 0-based while PUC's `nCcalls` includes the embedding's C
-   frames. The deltas (err_06, err_04) match; a fixed baseline such as
-   `LJ_CCALLNEST_BASE` would only approximate it and was not applied.
-3. Keep `LJ_MAX_XLEVEL` consistent across the interpreter, the trace counter
+`lua_closethread`, `coroutine.close` and the wrap-error close set the closed
+thread's count to the closer's count + 1 but nothing bounded it. A pure close
+chain (each suspended coroutine's `__close` closes the next suspended one, no
+resume inside the handler) ran on until the native stack died: SIGSEGV at
+depth 200000 on x86_64 and aarch64, `-joff` and `-jon`; depths up to 1000
+completed silently.
+
+PUC raises the bound when the C call into the first `__close` handler would
+reach 200. LuaJIT does not make that C call, so the check moved into
+`lj_meta_tbccloseall`: the call sites already store closer+1, and the helper
+raises `C stack overflow` into the error slot when that count is already at
+the bound and `L->tbcn > 0`. With no pending handler PUC does not error, so the
+guard is skipped. Before the handler can run, no throw is needed: the close
+returns false plus the error, exactly as PUC's `coroutine.close` does.
+
+Result (both arches, `-joff`/`-jon`, `tests/d54/err_09_close_chain.lua`):
+`d=196/197 fail=none`, `d=198..200000 fail=197 msg=C stack overflow`, matching
+PUC 5.4.9 line for line. No crash at 200000.
+
+## Baseline alignment
+
+The main thread now starts with `LJ_CCALLNEST_BASE` 3. PUC's `nCcalls` counts
+the C frames that entered the main chunk (the standalone's `lua_cpcall`/
+`lua_pcall`), while `ccallnest` counts only the pcall/xpcall fast paths; the
+fixed baseline stands in for those frames. It is a one-line change at state
+creation and it shifts every absolute depth by the same 3:
+
+* pcall depth: 200 -> 197 (PUC 197)
+* resume chain first error `err@1`: depth 201 -> 198 (PUC 198)
+* close chain failure: the close of thread 201 -> 198 (PUC 198)
+
+All deltas are unchanged (err_06, err_04, close_05 still match), because both
+the top-level depth and the inherited counts shift together. It is an
+approximation for other embeddings, where the host's own C frames differ;
+those environments keep the documented delta behaviour.
+
+## Remaining
+
+1. Keep `LJ_MAX_XLEVEL` consistent across the interpreter, the trace counter
    (`lj_record_ccallnest`), the C API and both arches.
+2. The baseline is fixed, not measured per embedding (see above); it matches
+   the standalone oracle used by the differential harness.
 
 ## Trap for the next attempt
 

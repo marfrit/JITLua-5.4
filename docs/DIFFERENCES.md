@@ -53,15 +53,20 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   at depth and returns cleanly. `tests/d54/err_07_resume_chain.lua` guards
   the crash and probes 1000 nested resumes and wraps, which must end in a
   caught error on both arches.
-  Remaining divergence, separate from the resume fix: this fork's close path
-  (`lua_closethread`/`coroutine.close`) only sets the closer's count and does
-  not bound the chain, where PUC errors at 198 through the C call into each
-  `__close` handler. Nothing bounds a deep enough close chain, so it
-  exhausts the native stack instead (measured on x86_64 with an 8 MB stack:
-  100000 nested closes run, 200000 end in SIGSEGV). The closed thread is left
-  with a count of zero, so a thread reset by `lua_closethread` starts like a
-  new one (main landed that reset with the review fixes).
-  Evidence and open leads: `docs/notes/resume-chain-crash.md`.
+  The close side is bounded too: `coroutine.close`, `lua_closethread` and the
+  wrap-error close give the closed thread the closer's count + 1, and
+  `lj_meta_tbccloseall` raises "C stack overflow" when that count is already
+  at the bound and a `__close` handler is pending (PUC errors when the C call
+  into the handler reaches it; with no pending handler PUC does not error).
+  A deep close chain now ends in PUC's error at its 198th thread instead of
+  exhausting the native stack (was SIGSEGV at depth 200000 on both arches),
+  `tests/d54/err_09_close_chain.lua`.
+  The main thread also starts with `LJ_CCALLNEST_BASE` 3, PUC's standalone
+  baseline, so the absolute bound now matches PUC without changing any delta:
+  pcall depth 197, resume `err@1` at depth 198, close failure at the 198th
+  thread. The closed thread is left with a count of zero, so a thread reset
+  by `lua_closethread` starts like a new one.
+  Evidence: `docs/notes/resume-chain-crash.md`.
 - `FIXED` pcall/xpcall are recorded in traces with an exact C-call counter
   (x64 and arm64; other targets keep them out of traces). The recorder emits
   the limit guard after the call setup and stores each change of `ccallnest`

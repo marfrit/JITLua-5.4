@@ -20,7 +20,15 @@ Brief: ~/tmp/ds-spectral.txt.
   lj_opt_narrow.c, lj_asm_x86.h). Tests for any fold/narrowing: 2^31-1, 2^31,
   -2^31, 2^53, 2^63-1, mixed int/float, // and % negatives; mode B opt 0-3.
 
-## -jdump finding (x64, -jdump=+rs; output is on STDOUT, not stderr)
+## -jdump finding CORRECTED (x64; -jdump output is on STDOUT)
+Stock 2.1 DOES emit the `FLOAD tab.meta` + `EQ NULL` guard for the integer-key
+store too (full trace 1: 0009/0010, after the array AREF). So the guard is NOT
+an ours-only addition and (1)'s premise was wrong. The real trace-1 deltas:
+ours orders the guard before the array access and uses SLOAD flags `RI`/`TI`
+where stock uses `CRI`/`CI`; ours emits ~2x the traces (68 vs 36 dump lines).
+Measurement is ~4%, below the >10% row.
+
+## old (wrong) -jdump note
 Trace 1 (init loop `for i=1,N do u[i]=1 end`): ours adds
 `FLOAD tab.meta` + `EQ NULL` (the 5.4 integer-key metatable guard before a raw
 store) and different SLOAD type flags (ours RI/TI vs stock CRI/CI); stock has

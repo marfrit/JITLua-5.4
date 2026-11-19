@@ -1693,15 +1693,6 @@ static void build_subroutines(BuildCtx *ctx)
   |  cmp PC, L:RB->maxstack; ja ->fff_fallback
   |  mov L:RB->top, PC
   |
-  |  // 5.4: the resumed thread inherits the resumer's pcall nesting + 1, so
-  |  // only 200-(nesting+1) C calls remain usable inside the coroutine.
-  |  mov L:KBASE, SAVE_L
-  |  mov TMPRd, L:KBASE->ccallnest
-  |  cmp TMPRd, LJ_MAX_XLEVEL
-  |  jae ->fff_fallback		// Resume at the bound: error in the fallback.
-  |  add TMPRd, 1
-  |  mov L:RB->ccallnest, TMPRd
-  |
   |  mov L:RB, SAVE_L
   |  mov L:RB->base, BASE
   |.if resume

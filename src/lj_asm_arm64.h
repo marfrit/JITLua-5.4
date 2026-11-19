@@ -1990,7 +1990,7 @@ static void asm_stack_restore(ASMState *as, SnapShot *snap)
   (A64I_ORRx|A64F_D(RID_ZERO)|A64F_M(RID_ZERO)|A64F_N(RID_ZERO))
 
 /* Check GC threshold and do one or more GC steps. */
-static void asm_gc_check(ASMState *as)
+static void asm_gc_check(ASMState *as, int loophead)
 {
   const CCallInfo *ci = &lj_ir_callinfo[IRCALL_lj_gc_step_jit];
   IRRef args[2];
@@ -2002,11 +2002,17 @@ static void asm_gc_check(ASMState *as)
   asm_guardcnb(as, A64I_CBNZ, RID_RET); /* Assumes asm_snap_prep() is done. */
   *--as->mcp = ARM64_NOPATCH_GC_CHECK;
   args[0] = ASMREF_TMP1;  /* global_State *g */
-  args[1] = ASMREF_TMP2;  /* MSize steps     */
-  asm_gencall(as, ci, args);
-  emit_dm(as, A64I_MOVx, ra_releasetmp(as, ASMREF_TMP1), RID_GL);
+  args[1] = ASMREF_TMP2;  /* uint64_t pak: traceno | loophead | steps */
+  {
+    IRIns *tmp2ir = IR(ASMREF_TMP2);
+    IRType1 savedt = tmp2ir->t;
+    tmp2ir->t.irt = IRT_I64;  /* Make the arg move 64-bit. */
+    asm_gencall(as, ci, args);
+    tmp2ir->t = savedt;
+  }
   tmp2 = ra_releasetmp(as, ASMREF_TMP2);
-  emit_loadi(as, tmp2, as->gcsteps);
+  emit_loadu64(as, tmp2, GCSTEP_ARG64(as->T->traceno, loophead, as->gcsteps));
+  emit_dm(as, A64I_MOVx, ra_releasetmp(as, ASMREF_TMP1), RID_GL);
   /* Jump around GC step if GC total < GC threshold. */
   emit_cond_branch(as, CC_LS, l_end);
   emit_nm(as, A64I_CMPx, RID_TMP, tmp2);

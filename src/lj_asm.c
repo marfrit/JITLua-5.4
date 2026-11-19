@@ -1207,7 +1207,7 @@ static void asm_tdup(ASMState *as, IRIns *ir)
   asm_gencall(as, ci, args);
 }
 
-static void asm_gc_check(ASMState *as);
+static void asm_gc_check(ASMState *as, int loophead);
 
 /* Explicit GC step. */
 static void asm_gcstep(ASMState *as, IRIns *ir)
@@ -1219,7 +1219,7 @@ static void asm_gcstep(ASMState *as, IRIns *ir)
 	ra_used(ira))
       as->gcsteps++;
   if (as->gcsteps)
-    asm_gc_check(as);
+    asm_gc_check(as, 0);
   as->gcsteps = 0x80000000;  /* Prevent implicit GC check further up. */
 }
 
@@ -1732,8 +1732,13 @@ static void asm_loop(ASMState *as)
   MCode *mcspill;
   /* LOOP is a guard, so the snapno is up to date. */
   as->loopsnapno = as->snapno;
+  /* A weak trace always gets the check: allocations may all sit in its side
+  ** traces, and the step at the loop head is the one that clears dead slots.
+  */
+  if (as->T->weak && !as->gcsteps)
+    as->gcsteps = 1;
   if (as->gcsteps)
-    asm_gc_check(as);
+    asm_gc_check(as, 1);  /* A LOOP is at the start bytecode of the root. */
   /* LOOP marks the transition from the variant to the invariant part. */
   as->flagmcp = as->invmcp = NULL;
   as->sectref = 0;
@@ -2613,7 +2618,8 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
 		 "IR %04d has unsplit 64 bit type",
 		 (int)(ir - as->ir) - REF_BIAS);
       asm_snap_prev(as);
-      if (!ra_used(ir) && !ir_sideeff(ir) && (as->flags & JIT_F_OPT_DCE))
+      if (!ra_used(ir) && !ir_sideeff(ir) && (as->flags & JIT_F_OPT_DCE) &&
+	  !(T->weak && ir_isalloc(ir->o)))
 	continue;  /* Dead-code elimination can be soooo easy. */
       if (irt_isguard(ir->t))
 	asm_snap_prep(as);
@@ -2628,10 +2634,16 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
     /* Emit head of trace. */
     RA_DBG_REF();
     checkmclim(as);
+    /* Same for a weak trace that loops without a LOOP instruction. */
+    if (T->weak && !as->loopref && T->link == T->traceno && as->gcsteps == 0)
+      as->gcsteps = 1;
     if (as->gcsteps > 0) {
       as->curins = as->T->snap[0].ref;
       asm_snap_prep(as);  /* The GC check is a guard. */
-      asm_gc_check(as);
+      /* The head of a root trace is at its start bytecode. So is the head
+      ** of a side trace that forms a loop: it starts at exit #0 of the root.
+      */
+      asm_gc_check(as, !as->parent || T->linktype == LJ_TRLINK_LOOP);
       as->curins = as->stopins;
     }
     ra_evictk(as);

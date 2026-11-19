@@ -201,6 +201,17 @@ LJ_STATIC_ASSERT(SNAP_FRAME == TREF_FRAME);
 LJ_STATIC_ASSERT(SNAP_CONT == TREF_CONT);
 LJ_STATIC_ASSERT(SNAP_KEYINDEX == TREF_KEYINDEX);
 
+/* Packed 64-bit argument for lj_gc_step_jit on GC64 targets: trace number
+** (16 bits), loop-head flag (16 bits) and step count (32 bits). The flag is
+** set by a GC check that runs at the start bytecode of the root trace (LOOP,
+** head of a root trace, head of a looping side trace). If that bytecode is a
+** loop, the stack slots above the loop's variables are dead there.
+** Loaded as an immediate into the existing ASMREF_TMP2 register: no
+** allocator action may happen in the asm GC-check slow path. */
+#define GCSTEP_ARG64(tno, loophead, steps) \
+  (((uint64_t)(uint16_t)(tno)) | (((uint64_t)((loophead) != 0)) << 16) | \
+   (((uint64_t)(uint32_t)(steps)) << 32))
+
 #define SNAP(slot, flags, ref)	(((SnapEntry)(slot) << 24) + (flags) + (ref))
 #define SNAP_TR(slot, tr) \
   (((SnapEntry)(slot) << 24) + \
@@ -279,7 +290,7 @@ typedef struct GCtrace {
   uint8_t sinktags;	/* Trace has SINK tags. */
   uint8_t topslot;	/* Top stack slot already checked to be allocated. */
   uint8_t linktype;	/* Type of link. */
-  uint8_t unused1;
+  uint8_t weak;		/* Trace reads a weak table (or its parent does). */
 #ifdef LUAJIT_USE_GDBJIT
   void *gdbjit_entry;	/* GDB JIT entry. */
 #endif

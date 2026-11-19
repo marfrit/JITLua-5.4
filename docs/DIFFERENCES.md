@@ -70,6 +70,18 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   per-thread allocation, moving the GC object/interior pointer and the assembler
   offsets; not done. Modules using it need a portable side area instead.
 
+- `FIXED` Weak-table JIT loop hang (`closure.lua:37`; stock LuaJIT 2.1 hangs
+  there too). A trace that reads from a weak table keeps its allocations, so
+  the loop's GC check drives the collector, and the GC step at the loop head
+  clears the dead stack slots, so a value the interpreter left there is not a
+  GC root. A guard on the metatable and on its `__mode` field exits the trace
+  when a table becomes weak (or strong) after the trace was compiled. Cause,
+  fix and limits: `docs/bug-weak-table-jit-loop.md`; tests:
+  `tests/d54/weak_*.lua`.
+  Not a difference: a loop that allocates nothing never runs the collector, so
+  a weak entry it only reads (`while x[1] do A = A+1 end`) stays. PUC 5.4 and
+  `-joff` behave the same (`weak_noalloc_boundary.lua`).
+
 ### Known JIT/performance rows (not semantic divergences)
 - `FIXED` arm64 `bit.lshift/rshift/arshift/rol/ror` returned 0 for native and
   cdata; regression `cb2f6da`, fix `6e4d7bb9` (TMP0 clobber in checkint).
@@ -82,8 +94,6 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   OR-ed the type tag into it, so negative int32 keys corrupted the hash
   part. See `docs/bug-math-random-jit.md`; `tests/lib/math-random-jit.lua` is
   the regression test.
-- `PENDING` `closure.lua` mode B on arm64: JIT-on exceeds 600 s while JIT-off
-  passes (PERF triage).
 - `PENDING` `heavy.lua` needs near 8 GiB in the PUC reference and OOM-kills an
   8 GiB box; excluded from the default corpus, explicit `--include-heavy` stage.
 - `PENDING` Classic benchmarks slower than stock 2.1 (>10%): deltablue both

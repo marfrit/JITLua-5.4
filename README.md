@@ -20,11 +20,11 @@ Status as measured, not a compatibility claim:
 
 - Differential gates against PUC Lua 5.4.9 pass on the tested platforms.
   Measured on Linux arm64 and x86_64, identical on both, on the `tests/d54`
-  edge-case corpus: A+B **129 PASS / 0 FAIL / 5 XFAIL**, JIT optimization
-  levels 0–3 **280**, R (dump/reload round-trip) **70**; the ASan/UBSan run
-  of A+B+R is **199 PASS / 0 FAIL / 5 XFAIL**; C API checks **204 + 14**.
+  edge-case corpus: A+B **144 PASS / 0 FAIL / 5 XFAIL**, JIT optimization
+  levels 0–3 **316**, R (dump/reload round-trip) **76**; the ASan/UBSan run
+  of A+B+R is **220 PASS / 0 FAIL / 5 XFAIL**; C API checks **204 + 14**.
 - Full corpus (PUC 5.4.9 test suite plus `tests/d54`) with `--strict`, the
-  exact command of the public CI: **254 PASS / 0 FAIL / 10 XFAIL / 12 SKIP /
+  exact command of the public CI: **276 PASS / 0 FAIL / 9 XFAIL / 12 SKIP /
   0 TIMEOUT**. Every XFAIL is a known-bad entry with its reason in
   `tests/known-bad.tsv`.
 - The remaining known gaps and deliberate divergences are recorded in
@@ -33,9 +33,9 @@ Status as measured, not a compatibility claim:
   `_ENV` and the pcall/`__call` VM work in the `calls.lua` corpus, tail-call
   error names, `debug.getinfo(...).istailcall` without a hook, a private dump
   format, and implementation-defined table/GC edges.
-- Open performance items: `heavy.lua` requires a box above 8 GiB; `closure.lua`
-  JIT-on is slow on arm64; classic benchmark runs show remaining gaps in
-  deltablue, x64 spectral-norm and x64 k-nucleotide
+- Open performance items: `heavy.lua` requires a box above 8 GiB; classic
+  benchmark runs show remaining gaps in deltablue, x64 spectral-norm and x64
+  k-nucleotide
   ([docs/perf-regression-2026-11-17.md](docs/perf-regression-2026-11-17.md)).
 - **Not yet covered:** arbitrary `_ENV` values, `lua_getextraspace`, the
   no-op `lua_setcstacklimit`, and the remaining pcall/`__call` VM work. See

@@ -1232,8 +1232,10 @@ static void build_subroutines(BuildCtx *ctx)
   |  lea RA, [BASE+RA*8+16]
   |->vmeta_call:			// Resolve and call __call metamethod.
   |  // BASE = old base, RA = new base, RC = nargs+1, PC = return
+  |  // KBASE == BASE is the hint that this is a CALLT. Otherwise KBASE is
+  |  // left alone: a fast function returns to the caller without reloading it.
   |  mov TMP1d, NARGS:RDd		// Save nargs+1 across the C call.
-  |  sub KBASE, BASE		// Keep the CALLT hint as a relocation offset.
+  |  mov RB, BASE			// Old base, to recognize the hint afterwards.
   |.if X64WIN
   |  mov L:TMPR, SAVE_L
   |  mov L:TMPR->base, BASE		// Caveat: CARG2 is BASE.
@@ -1250,15 +1252,17 @@ static void build_subroutines(BuildCtx *ctx)
   |  call extern lj_meta_call	// (lua_State *L, TValue *func, TValue *top)
   |  // The chain may have moved the stack: RC = returned func slot.
   |  lea RA, [RC+16]
-  |  mov L:RB, SAVE_L
-  |  mov BASE, L:RB->base
-  |  add KBASE, BASE		// Hint survives a stack move.
+  |  mov L:TMPR, SAVE_L
+  |  mov BASE, L:TMPR->base
   |  mov NARGS:RDd, TMP1d		// Restore nargs+1, add the prepended objects.
-  |  mov TMPRd, L:RB->metanargs
+  |  mov TMPRd, L:TMPR->metanargs
   |  add NARGS:RDd, TMPRd		// RD = nargs+1 (all prepended objects included).
+  |  cmp KBASE, RB			// Was the CALLT hint set?
   |  mov LFUNC:RB, [RA-16]
-  |  cmp KBASE, BASE			// Continue with CALLT if flag set.
-  |  je ->BC_CALLT_Z
+  |  jne >1
+  |  mov KBASE, BASE			// The hint follows a moved stack.
+  |  jmp ->BC_CALLT_Z
+  |1:
   |  cleartp LFUNC:RB
   |  mov BASE, RA
   |  ins_call				// Otherwise call resolved metamethod.

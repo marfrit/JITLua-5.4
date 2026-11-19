@@ -1140,7 +1140,8 @@ static void rec_call_setup(jit_State *J, BCReg func, ptrdiff_t nargs)
   while (!tref_isfunc(fbase[0])) {  /* Resolve the __call chain. */
     ix.tab = fbase[0];
     copyTV(J->L, &ix.tabv, functv);
-    if (!lj_record_mm_lookup(J, &ix, MM_call))
+    if (!lj_record_mm_lookup(J, &ix, MM_call) ||
+	(!LJ_META_CALLCHAIN && !tref_isfunc(ix.mobj)))
       lj_trace_err(J, LJ_TRERR_NOMM);
     for (i = ++nargs; i > LJ_FR2; i--)  /* Shift arguments up. */
       fbase[i+LJ_FR2] = fbase[i+LJ_FR2-1];
@@ -1179,7 +1180,6 @@ void lj_record_call(jit_State *J, BCReg func, ptrdiff_t nargs)
 ** to a metamethod (vm_call_tail), whatever kind of function that is. */
 void lj_record_tailcall(jit_State *J, BCReg func, ptrdiff_t nargs)
 {
-
   rec_call_setup(J, func, nargs);
   if (frame_isvarg(J->L->base - 1)) {
     BCReg cbase = (BCReg)frame_delta(J->L->base - 1);

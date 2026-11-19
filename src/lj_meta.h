@@ -38,6 +38,14 @@ LJ_FUNCA TValue *lj_meta_equal_any(lua_State *L, uint64_t a, uint64_t b,
 LJ_FUNCA TValue * LJ_FASTCALL lj_meta_equal_cd(lua_State *L, BCIns ins);
 LJ_FUNCA TValue *lj_meta_comp(lua_State *L, cTValue *o1, cTValue *o2, int op);
 LJ_FUNCA void lj_meta_istype(lua_State *L, BCReg ra, BCReg tp);
+/* The x64 (GC64) and arm64 interpreters follow a whole __call chain and
+** rebase after lj_meta_call, which may move the stack. The others resolve
+** one level, as before. The recorder must model what its interpreter does. */
+#if LJ_FR2 && (LJ_TARGET_X64 || LJ_TARGET_ARM64)
+#define LJ_META_CALLCHAIN	1
+#else
+#define LJ_META_CALLCHAIN	0
+#endif
 LJ_FUNCA TValue *lj_meta_call(lua_State *L, TValue *func, TValue *top);
 LJ_FUNCA void LJ_FASTCALL lj_meta_for(lua_State *L, TValue *o);
 /* 5.4 to-be-closed variables. */

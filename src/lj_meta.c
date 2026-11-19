@@ -722,6 +722,7 @@ void lj_meta_istype(lua_State *L, BCReg ra, BCReg tp)
   else lj_err_argtype(L, ra, lj_obj_itypename[tp]);
 }
 
+#if LJ_META_CALLCHAIN
 /* A stack overflow raised while resolving a call has no target frame yet. If
 ** the caller is a fast pcall/xpcall (its C-frame pc is not a Lua frame), put
 ** the same dummy frame in the func slot that lj_err_optype_call installs for
@@ -767,18 +768,16 @@ TValue *lj_meta_call(lua_State *L, TValue *func, TValue *top)
     n++;
     func = restorestack(L, fofs);
     top = restorestack(L, tofs);
-    {
-      /* The call top may sit above L->top (L->top is frame-relative), so ask
-      ** for that distance plus the n slots this chain has added. */
-      MSize extra = (top > L->top) ? (MSize)(top - L->top) : 0;
-      MSize need = n + extra;
-      if ((mref(L->maxstack, char) - (char *)L->top) <=
-	  (ptrdiff_t)need*(ptrdiff_t)sizeof(TValue) &&
-	  L->stacksize + need >= LUAI_MAXSTACK) {
+    /* Room for n more slots above the call's arguments. L->top is no
+    ** measure for it: it is where the last C call left it, which can be far
+    ** below this call (the request would then be for that whole distance and
+    ** overflow early) or above it. */
+    if ((mref(L->maxstack, char) - (char *)top) <=
+	(ptrdiff_t)n*(ptrdiff_t)sizeof(TValue)) {
+      /* Same test as in lj_state_growstack: the request cannot be met. */
+      if (L->stacksize + n >= LUAI_MAXSTACK)
 	stkov_callframe(L, func);  /* Make the overflow catchable by pcall. */
-	lj_state_growstack(L, need);  /* No room left: raises stack overflow. */
-      }
-      lj_state_checkstack(L, need);  /* May move the stack. */
+      lj_state_growstack(L, n);  /* May move the stack or raise the error. */
     }
     if (tvisfunc(mo)) break;
     copyTV(L, &cur, mo);
@@ -809,6 +808,23 @@ TValue *lj_meta_call(lua_State *L, TValue *func, TValue *top)
   L->metanargs = n;  /* The VM adds this to its nargs bookkeeping. */
   return func;
 }
+#else
+/* Helper for calls. __call metamethod, one level: the interpreters that are
+** not ported to the chain neither rebase after this call nor read metanargs,
+** so the stack must not move here and exactly one argument is added. */
+TValue *lj_meta_call(lua_State *L, TValue *func, TValue *top)
+{
+  cTValue *mo = lj_meta_lookup(L, func, MM_call);
+  TValue *p;
+  if (!tvisfunc(mo))
+    lj_err_optype_call(L, func);
+  for (p = top; p > func+2*LJ_FR2; p--) copyTV(L, p, p-1);
+  if (LJ_FR2) copyTV(L, func+2, func);
+  copyTV(L, func, mo);
+  L->metanargs = 1;
+  return func;
+}
+#endif
 
 /* Helper for FORI. Coercion. */
 void LJ_FASTCALL lj_meta_for(lua_State *L, TValue *o)

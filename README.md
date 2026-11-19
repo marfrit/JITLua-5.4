@@ -41,6 +41,8 @@ Status as measured, not a compatibility claim:
   inherited LuaJIT 3.0 short-function syntax `->`, and two points of `db.lua`
   (a dead stack slot that keeps an object from being finalized; no
   `linedefined` in a stripped dump).
+- Fixed divergences (former known bugs) with their technical notes are in
+  [docs/CHANGELOG-VM.md](docs/CHANGELOG-VM.md).
 
 ## Build
 

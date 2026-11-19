@@ -38,6 +38,24 @@ else
   echo "== probe_549 (PUC side skipped: reference source missing, run tests/ref/fetch-ref.sh) =="
 fi
 
+# lua_close must not register finalizers installed while closing (PUC
+# GCSTPCLS). Same source against both libraries, so the PUC counts are the
+# oracle; run under a hard timeout, since a close that keeps finalizing must
+# fail the stage rather than block it.
+$CC $CFLAGS -I"$SRC" "$ROOT/tests/capi/udfinal.c" -o "$OUT/udfinal" \
+  "$LIB" $LDFLAGS -lm -ldl
+echo "== udfinal (JITLua-5.4) =="
+timeout 60 "$OUT/udfinal"
+if [ -f "$PUC_SRC/liblua.a" ] && [ -f "$PUC_SRC/lua.h" ]; then
+  $CC $CFLAGS -I"$PUC_SRC" "$ROOT/tests/capi/udfinal.c" \
+    -o "$OUT/udfinal_puc" "$PUC_SRC/liblua.a" \
+    $LDFLAGS -lm -ldl -lpthread
+  echo "== udfinal (PUC 5.4.9 reference) =="
+  timeout 60 "$OUT/udfinal_puc"
+else
+  echo "== udfinal (PUC side skipped: reference source missing, run tests/ref/fetch-ref.sh) =="
+fi
+
 # Public-header probe for the module-facing macros (no <limits.h> include in
 # the probe itself) and the real third-party module that exposed the gap.
 # MODLUAJIT is the host interpreter used to load the modules; it defaults to

@@ -1268,6 +1268,25 @@ static void test_oom_pcall(void)
   }
 }
 
+/* closethread helpers: close the thread in argument 1 from the running one,
+** and measure the usable pcall nesting depth of a (new or reset) thread. */
+static int l_closefrom(lua_State *L)
+{
+  lua_closethread(lua_tothread(L, 1), L);
+  return 0;
+}
+
+static lua_Integer thread_depth(lua_State *L, lua_State *co)
+{
+  int nres = 0;
+  lua_Integer d;
+  lua_getglobal(co, "depthprobe");
+  if (lua_resume(co, L, 0, &nres) != LUA_OK || nres != 1) return -1;
+  d = lua_tointeger(co, -1);
+  lua_settop(co, 0);
+  return d;
+}
+
 static void test_closethread(void)
 {
   lua_State *L = newL();
@@ -1336,6 +1355,56 @@ static void test_closethread(void)
     }
     ok(good, "lua_closethread resets the pcall nesting count");
     lua_pop(L, 1);
+  }
+
+  /* The count the __close handlers ran with (the closer's nesting plus one)
+  ** must not stay on the thread: a reset thread has the pcall depth of a new
+  ** one, whoever closed it and from whatever nesting. */
+  luaL_dostring(L,
+    "function depthprobe()\n"
+    "  local d = 0\n"
+    "  local function rec() d = d + 1; pcall(rec) end\n"
+    "  pcall(rec)\n"
+    "  return d\n"
+    "end\n"
+    "function closer_at(n, f, co)\n"
+    "  if n == 0 then f(co) return end\n"
+    "  pcall(closer_at, n - 1, f, co)\n"
+    "end");
+  {
+    int nres;
+    lua_Integer fresh, d;
+    lua_State *fr = lua_newthread(L);
+    fresh = thread_depth(L, fr);
+    ok(fresh > 100, "closethread: a new thread has the full pcall depth");
+
+    co = lua_newthread(L);
+    lua_getglobal(co, "nest"); lua_pushinteger(co, 10);
+    ok(lua_resume(co, L, 1, &nres) == LUA_YIELD, "closethread: suspended in pcalls");
+    lua_closethread(co, NULL);
+    d = thread_depth(L, co);
+    ok(d == fresh, "lua_closethread(co, NULL): reset thread has the full pcall depth");
+
+    lua_getglobal(co, "nest"); lua_pushinteger(co, 10);
+    ok(lua_resume(co, L, 1, &nres) == LUA_YIELD, "closethread: suspended again");
+    lua_getglobal(L, "closer_at");
+    lua_pushinteger(L, 100);
+    lua_pushcfunction(L, l_closefrom);
+    lua_pushthread(co); lua_xmove(co, L, 1);
+    ok(lua_pcall(L, 3, 0, 0) == LUA_OK, "closethread: closed from 100 nested pcalls");
+    d = thread_depth(L, co);
+    ok(d == fresh, "lua_closethread(co, from): closer's nesting does not stay on the thread");
+
+    lua_getglobal(co, "nest"); lua_pushinteger(co, 10);
+    ok(lua_resume(co, L, 1, &nres) == LUA_YIELD, "closethread: suspended a third time");
+    lua_getglobal(L, "closer_at");
+    lua_pushinteger(L, 100);
+    lua_getglobal(L, "coroutine"); lua_getfield(L, -1, "close"); lua_remove(L, -2);
+    lua_pushthread(co); lua_xmove(co, L, 1);
+    ok(lua_pcall(L, 3, 0, 0) == LUA_OK, "coroutine.close from 100 nested pcalls");
+    d = thread_depth(L, co);
+    ok(d == fresh, "coroutine.close: closer's nesting does not stay on the thread");
+    lua_pop(L, 2);
   }
 
   {

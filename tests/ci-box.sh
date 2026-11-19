@@ -57,6 +57,9 @@ if ! tests/ref/bin/lua54ref -v >/dev/null 2>&1; then
 fi
 tests/ref/bin/lua54ref -v | head -1
 
+say "harness self-test (known-bad / known-different handling)"
+stage 'tail -16' sh tests/lib/runner-selftest.sh
+
 say "harness: modes A+B (port corpus)"
 stage 'tail -12' tests/harness.sh --strict --mode both --corpus tests/d54 --timeout 120
 

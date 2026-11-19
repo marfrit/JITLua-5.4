@@ -78,6 +78,8 @@ cTValue *lj_meta_lookup(lua_State *L, cTValue *o, MMS mm)
     cTValue *mo = lj_tab_getstr(mt, mmname_str(G(L), mm));
     if (mo)
       return mo;
+    if (mm == MM_tostring)
+      mt->nomm |= MM_TOSTR_ABSENT;  /* asm tostring may inline the next time */
   }
   return niltv(L);
 }

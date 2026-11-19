@@ -15,6 +15,7 @@
 #include "lj_str.h"
 #include "lj_tab.h"
 #include "lj_frame.h"
+#include "lj_meta.h"
 #include "lj_bc.h"
 #include "lj_ff.h"
 #include "lj_ir.h"
@@ -540,23 +541,30 @@ static int recff_metacall(jit_State *J, RecordFFData *rd, MMS mm)
 static void LJ_FASTCALL recff_tostring(jit_State *J, RecordFFData *rd)
 {
   TRef tr = J->base[0];
+  /* 5.4 calls a __tostring in the metatable of the value first, including a
+  ** per-type base metatable for a primitive, and checks its result. Leave
+  ** such a call to the interpreter: the result type has to be validated (a
+  ** number is converted, anything else raises), which a tail-call trace cannot
+  ** express. The plain paths below stay traced. */
+  if (tr && J->maxslot >= 1 &&
+      !tvisnil(lj_meta_lookup(J->L, &rd->argv[0], MM_tostring))) {
+    recff_nyiu(J, rd);
+    return;
+  }
   if (tref_istype(tr, IRT_I64)) {  /* 5.4 int64: exact decimal. */
     J->base[0] = lj_ir_call(J, IRCALL_lj_strfmt_i64, tr);
     return;
   }
   if (tref_isstr(tr)) {
-    /* Ignore __tostring in the string base metatable. */
-    /* Pass on result in J->base[0]. */
-  } else if (tr && !recff_metacall(J, rd, MM_tostring)) {
-    if (tref_isnumber(tr)) {
-      J->base[0] = emitir(IRT(IR_TOSTR, IRT_STR), tr,
+    /* No __tostring (checked above): pass on the string. */
+  } else if (tr && tref_isnumber(tr)) {
+    J->base[0] = emitir(IRT(IR_TOSTR, IRT_STR), tr,
 			  tref_isnum(tr) ? IRTOSTR_NUM : IRTOSTR_INT);
-    } else if (tref_ispri(tr)) {
-      J->base[0] = lj_ir_kstr(J, lj_strfmt_obj(J->L, &rd->argv[0]));
-    } else {
-      recff_nyiu(J, rd);
-      return;
-    }
+  } else if (tr && tref_ispri(tr)) {
+    J->base[0] = lj_ir_kstr(J, lj_strfmt_obj(J->L, &rd->argv[0]));
+  } else {
+    recff_nyiu(J, rd);
+    return;
   }
 }
 

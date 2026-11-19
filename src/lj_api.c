@@ -1350,11 +1350,11 @@ LUALIB_API int luaL_getmetafield(lua_State *L, int idx, const char *field)
     cTValue *tv = lj_tab_getstr(tabV(L->top-1), lj_str_newz(L, field));
     if (tv && !tvisnil(tv)) {
       copyTV(L, L->top-1, tv);
-      return 1;
+      return lua_type(L, -1);  /* 5.4: the field's type, not a boolean */
     }
     L->top--;
   }
-  return 0;
+  return LUA_TNIL;
 }
 
 LUA_API void lua_getfenv(lua_State *L, int idx)

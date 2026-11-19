@@ -603,6 +603,7 @@ typedef enum {
   GCROOT_MMNAME,	/* Metamethod names. */
   GCROOT_MMNAME_LAST = GCROOT_MMNAME + MM__MAX-1,
   GCROOT_BASEMT,	/* Metatables for base types. */
+  GCROOT_BASEMT_STR = GCROOT_BASEMT + ~LJ_TSTR,
   GCROOT_BASEMT_NUM = GCROOT_BASEMT + ~LJ_TNUMX,
   GCROOT_IO_INPUT,	/* Userdata for default I/O input file. */
   GCROOT_IO_OUTPUT,	/* Userdata for default I/O output file. */
@@ -612,6 +613,12 @@ typedef enum {
 #endif
   GCROOT_MAX
 } GCRootID;
+
+/* GCtab.nomm caches the absence of the fast metamethods in bits 0..MM_FAST.
+** Spare bit 6 caches the absence of __tostring in a basic type's metatable,
+** which the asm tostring fast path reads; any store into the metatable clears
+** the whole byte. */
+#define MM_TOSTR_ABSENT	(1u<<6)
 
 #define basemt_it(g, it)	((g)->gcroot[GCROOT_BASEMT+~(it)])
 #define basemt_obj(g, o)	((g)->gcroot[GCROOT_BASEMT+itypemap(o)])

@@ -63,11 +63,15 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   `getmetatable` of such an integer returns nil (PUC returns the number
   metatable; `meta_05_nummt_i64`). Interpreter and JIT agree; found in the
   release review.
-- `PENDING` `lua_getextraspace`: there is no reserved pointer-sized area before
-  `lua_State`. Adding one would need a layout change in `GG_State` and in every
-  per-thread allocation, moving the GC object/interior pointer and the assembler
-  offsets; not done. Modules using it need a portable side area instead
-  (C probe `tests/capi` `probe_549`).
+- `FORK` `lua_getextraspace` is a function, not PUC's macro, and the
+  `LUA_EXTRASPACE` area is appended to the end of `struct lua_State` instead of
+  sitting before it: `(char *)L - lua_getextraspace(L)` differs from PUC. The
+  semantics match PUC (per-thread area, a new thread copies the main thread's,
+  freed with the thread; `tests/capi` `test_extraspace`), and the layout keeps
+  the GC object pointer and every assembler offset unchanged. A module compiled
+  against PUC's `lua.h` and linked against JITLua reads the wrong bytes and must
+  be rebuilt against JITLua's headers (same ABI class as the `luaL_Buffer` note
+  above).
 - `PENDING` Parsing or running a chunk that names a global on a state whose
   base library is not installed segfaults (PUC 5.4.9 runs it): the 5.4 `_ENV`
   GGET special case reads the interned `_ENV` string from `GCROOT_ENVSTR`

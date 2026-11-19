@@ -80,7 +80,7 @@ say "real-program corpus (tests/corpus-ext: PUC vs -joff / -jon / -jon+GC-stress
 stage 'grep -v "^      " | tail -44' sh tests/corpus-ext/run.sh
 
 say "C API"
-stage "grep -E '^== (capi|i64):'" tests/capi/run.sh
+stage "grep -E '^== (capi|i64|extraspace):'" tests/capi/run.sh
 
 say "fuzz: mode B, 40 programs x opt levels 0-3, GC pressure"
 stage 'tail -6' python3 tests/fuzz/fuzz.py --seed 1 --count 40 --mode B --opt-levels 0,1,2,3 --gc

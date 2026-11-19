@@ -7,6 +7,13 @@
 --! Fails (bounded, no hang) if the weakness guard misses the change, or if
 --! the trace compiled before the change keeps running the collector with the
 --! dead stack slots of the loop still in place.
+-- The bounds in this test are sized for a collector pause of 200. Pin it, so
+-- the result does not depend on the default GC policy; a lower pause (the
+-- harness's GC-stress arm) is kept.
+do
+  local prev = collectgarbage("setpause", 200)
+  if prev < 200 then collectgarbage("setpause", prev) end
+end
 local jit = rawget(_G, "jit")
 local Keep                        -- keeps the method function strongly alive
 local Last                        -- keeps the loop's allocation live

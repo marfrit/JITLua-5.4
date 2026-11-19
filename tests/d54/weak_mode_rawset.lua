@@ -3,6 +3,13 @@
 --! exit and re-specialize. Bounded and observable, default options and -dce.
 --! RED on 7b85747e and 32068a54, GREEN with the runtime metatable/__mode guard.
 --! modes: B,R  (PUC keeps the pre-__mode value alive in a temp slot)
+-- The bounds in this test are sized for a collector pause of 200. Pin it, so
+-- the result does not depend on the default GC policy; a lower pause (the
+-- harness's GC-stress arm) is kept.
+do
+  local prev = collectgarbage("setpause", 200)
+  if prev < 200 then collectgarbage("setpause", prev) end
+end
 
 local function spin(x, LIMIT)
   local A, n = 0, 0

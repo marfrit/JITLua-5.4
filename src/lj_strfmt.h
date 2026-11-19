@@ -120,6 +120,7 @@ LJ_FUNCA GCstr * LJ_FASTCALL lj_strfmt_number(lua_State *L, cTValue *o);
 LJ_FUNC GCstr * LJ_FASTCALL lj_strfmt_char(lua_State *L, int c);
 #endif
 LJ_FUNC GCstr * LJ_FASTCALL lj_strfmt_obj(lua_State *L, cTValue *o);
+LJ_FUNC GCstr * LJ_FASTCALL lj_strfmt_tolstrres(lua_State *L);
 
 /* Internal string formatting. */
 LJ_FUNC const char *lj_strfmt_pushvf(lua_State *L, const char *fmt,

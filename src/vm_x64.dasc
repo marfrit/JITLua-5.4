@@ -1485,7 +1485,15 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov PC, [BASE-8]
   |  mov STR:RB, [BASE]
   |  checktp_nc STR:RB, LJ_TSTR, >3
-  |  // A __tostring method in the string base metatable is ignored.
+  |  // 5.4 keeps one metatable per type: a __tostring in the string base
+  |  // metatable (or later in this table) must call the C fallback. The
+  |  // negative metamethod cache bit says the field is absent; a store into the
+  |  // metatable clears it.
+  |  mov RA, [DISPATCH+DISPATCH_GL(gcroot[GCROOT_BASEMT_STR])]
+  |  test RA, RA
+  |  jz >2
+  |  test byte TAB:RA->nomm, MM_TOSTR_ABSENT
+  |  jz ->fff_fallback
   |2:
   |  mov [BASE-16], STR:RB
   |  jmp ->fff_res1

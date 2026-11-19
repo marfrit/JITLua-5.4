@@ -385,8 +385,18 @@ LJLIB_ASM(tostring)		LJLIB_REC(.)
   cTValue *mo;
   L->top = o+1;  /* Only keep one argument. */
   if (!tvisnil(mo = lj_meta_lookup(L, o, MM_tostring))) {
-    copyTV(L, L->base-1-LJ_FR2, mo);  /* Replace callable. */
-    return FFH_TAILCALL;
+    /* 5.4 luaL_tolstring: call __tostring and check its result. A number is
+    ** converted; anything else is a hard error, not passed through. A tail
+    ** call cannot check the result, so the method is called as a normal
+    ** call and the result slot below the frame is filled from it. */
+    GCstr *str;
+    copyTV(L, L->top++, mo);
+    copyTV(L, L->top++, o);
+    lua_call(L, 1, 1);
+    str = lj_strfmt_tolstrres(L);
+    setstrV(L, L->base-1-LJ_FR2, str);
+    L->top = L->base + 1;
+    return FFH_RES(1);
   }
   lj_gc_check(L);
   setstrV(L, L->base-1-LJ_FR2, lj_strfmt_obj(L, L->base));
@@ -589,41 +599,19 @@ LJLIB_CF(newproxy)
   return 1;
 }
 
-LJLIB_PUSH("tostring")
 LJLIB_CF(print)
 {
   ptrdiff_t i, nargs = L->top - L->base;
-  cTValue *tv = lj_tab_getstr(tabref(L->env), strV(lj_lib_upvalue(L, 1)));
-  int shortcut;
-  if (tv && !tvisnil(tv)) {
-    copyTV(L, L->top++, tv);
-  } else {
-    setstrV(L, L->top++, strV(lj_lib_upvalue(L, 1)));
-    lua_gettable(L, LUA_GLOBALSINDEX);
-    tv = L->top-1;
-  }
-  shortcut = (tvisfunc(tv) && funcV(tv)->c.ffid == FF_tostring) &&
-	     !gcrefu(basemt_it(G(L), LJ_TNUMX));
+  /* 5.4.9 luaB_print converts every argument with luaL_tolstring (not with a
+  ** replaced global tostring) and raises "'__tostring' must return a
+  ** string" from there. */
   for (i = 0; i < nargs; i++) {
-    cTValue *o = &L->base[i];
-    const char *str;
     size_t size;
-    MSize len;
-    if (shortcut && (str = lj_strfmt_wstrnum(L, o, &len)) != NULL) {
-      size = len;
-    } else {
-      copyTV(L, L->top+1, o);
-      copyTV(L, L->top, L->top-1);
-      L->top += 2;
-      lua_call(L, 1, 1);
-      str = lua_tolstring(L, -1, &size);
-      if (!str)
-	lj_err_caller(L, LJ_ERR_PRTOSTR);
-      L->top--;
-    }
+    const char *str = luaL_tolstring(L, (int)(i+1), &size);
     if (i)
       putchar('\t');
     fwrite(str, 1, size, stdout);
+    lua_pop(L, 1);
   }
   putchar('\n');
   fflush(stdout);  /* PUC 5.4 lua_writeline flushes each line */

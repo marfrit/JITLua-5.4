@@ -117,14 +117,15 @@ static int report(lua_State *L, int status)
 
 static int traceback(lua_State *L)
 {
-  if (!lua_isstring(L, 1)) { /* Non-string error object? Try metamethod. */
-    if (lua_isnoneornil(L, 1) ||
-	!luaL_callmeta(L, 1, "__tostring") ||
-	!lua_isstring(L, -1))
-      return 1;  /* Return non-string error object. */
-    lua_remove(L, 1);  /* Replace object by result of __tostring metamethod. */
+  const char *msg = lua_tostring(L, 1);
+  if (msg == NULL) {  /* is the error object not a string? */
+    if (luaL_callmeta(L, 1, "__tostring") &&  /* does it have a metamethod */
+	lua_type(L, -1) == LUA_TSTRING)  /* that produces a string? */
+      return 1;  /* that is the message (PUC 5.4.9 msghandler, no traceback) */
+    msg = lua_pushfstring(L, "(error object is a %s value)",
+			  luaL_typename(L, 1));
   }
-  luaL_traceback(L, L, lua_tostring(L, 1), 1);
+  luaL_traceback(L, L, msg, 1);  /* append a standard traceback */
   return 1;
 }
 

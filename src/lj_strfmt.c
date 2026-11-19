@@ -12,6 +12,7 @@
 #include "lj_err.h"
 #include "lj_buf.h"
 #include "lj_str.h"
+#include "lj_tab.h"
 #include "lj_meta.h"
 #include "lj_state.h"
 #include "lj_char.h"
@@ -523,8 +524,10 @@ int lj_strfmt_putarg(lua_State *L, SBuf *sb, int arg, int retry)
 	  copyTV(L, L->top++, mo);
 	  copyTV(L, L->top++, o);
 	  lua_call(L, 1, 1);
-	  o = &L->base[arg-1];  /* Stack may have been reallocated. */
-	  copyTV(L, o, --L->top);  /* Replace inline for retry. */
+	  o = &L->base[arg-1];  /* The stack may have been reallocated. */
+	  lj_strfmt_tolstrres(L);  /* 5.4: string or number, else raise. */
+	  copyTV(L, o, L->top-1);  /* Replace inline for retry (now a string). */
+	  L->top--;
 	  if (retry < 2) {  /* Global buffer may have been overwritten. */
 	    retry = 1;
 	    break;
@@ -617,6 +620,27 @@ GCstr * LJ_FASTCALL lj_strfmt_char(lua_State *L, int c)
 }
 #endif
 
+/* 5.4 luaL_tolstring: a metatable's string __name names an object without a
+** __tostring. Look it up like lj_meta_lookup does, so per-type base
+** metatables (function, thread, light userdata) work too. */
+static GCstr *strfmt_objname(lua_State *L, cTValue *o)
+{
+  GCtab *mt;
+  if (tvistab(o))
+    mt = tabref(tabV(o)->metatable);
+  else if (tvisudata(o) && !tvisi64(o))  /* boxed int64 is a number */
+    mt = tabref(udataV(o)->metatable);
+  else
+    mt = tabref(basemt_obj(G(L), o));
+  if (mt) {
+    cTValue *tv = lj_tab_getstr(mt, lj_str_newlit(L, "__name"));
+    if (tv && tvisstr(tv)) return strV(tv);
+  }
+  return NULL;
+}
+
+#define STRFMT_OBJBUF	(8+2+2+16)
+
 /* Raw conversion of object to string. */
 GCstr * LJ_FASTCALL lj_strfmt_obj(lua_State *L, cTValue *o)
 {
@@ -633,17 +657,54 @@ GCstr * LJ_FASTCALL lj_strfmt_obj(lua_State *L, cTValue *o)
   } else if (tvistrue(o)) {
     return lj_str_newlit(L, "true");
   } else {
-    char buf[8+2+2+16], *p = buf;
-    p = lj_buf_wmem(p, lj_typename(o), (MSize)strlen(lj_typename(o)));
-    *p++ = ':'; *p++ = ' ';
+    GCstr *name = strfmt_objname(L, o);
+    const char *kind = name ? strdata(name) : lj_typename(o);
+    MSize klen = name ? name->len : (MSize)strlen(kind);
+    char tail[2+STRFMT_MAXBUF_PTR], *tp = tail;
+    MSize tlen;
+    *tp++ = ':'; *tp++ = ' ';
     if (tvisfunc(o) && isffunc(funcV(o))) {
-      p = lj_buf_wmem(p, "builtin#", 8);
-      p = lj_strfmt_wint(p, funcV(o)->c.ffid);
+      tp = lj_buf_wmem(tp, "builtin#", 8);
+      tp = lj_strfmt_wint(tp, funcV(o)->c.ffid);
     } else {
-      p = lj_strfmt_wptr(p, lj_obj_ptr(G(L), o));
+      tp = lj_strfmt_wptr(tp, lj_obj_ptr(G(L), o));
     }
-    return lj_str_new(L, buf, (size_t)(p - buf));
+    tlen = (MSize)(tp - tail);
+    if (klen + tlen <= STRFMT_OBJBUF) {
+      char buf[STRFMT_OBJBUF];
+      memcpy(buf, kind, klen);
+      memcpy(buf+klen, tail, tlen);
+      return lj_str_new(L, buf, klen+tlen);
+    } else {  /* Long __name: build in a heap buffer, not the global one. */
+      SBuf sb;
+      GCstr *s;
+      lj_buf_init(L, &sb);
+      lj_buf_putmem(&sb, kind, klen);
+      lj_buf_putmem(&sb, tail, tlen);
+      s = lj_buf_str(L, &sb);
+      lj_buf_free(G(L), &sb);
+      return s;
+    }
   }
+}
+
+/* 5.4 rule for a __tostring result (luaL_tolstring): a string is used as is, a
+** number is converted, anything else raises. The result is at L->top-1 and is
+** replaced by the string it stands for. Buffers are userdata in LuaJIT and,
+** like in lua_isstring, not strings for this check. */
+GCstr * LJ_FASTCALL lj_strfmt_tolstrres(lua_State *L)
+{
+  TValue *o = L->top-1;
+  if (tvisstr(o)) return strV(o);
+  if (tvisnumber(o) || tvisi64(o)) {
+    GCstr *s;
+    lj_gc_check(L);
+    s = lj_strfmt_obj(L, L->top-1);
+    setstrV(L, L->top-1, s);
+    return s;
+  }
+  lj_err_caller(L, LJ_ERR_TOLSTR);
+  return NULL;  /* unreachable */
 }
 
 /* -- Internal string formatting ------------------------------------------ */

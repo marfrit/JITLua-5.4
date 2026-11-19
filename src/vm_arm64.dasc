@@ -1286,9 +1286,17 @@ static void build_subroutines(BuildCtx *ctx)
   |  // Only handles the string or number case inline.
   |  asr ITYPE, CARG1, #47
   |  cmn ITYPE, #-LJ_TSTR
-  |  // A __tostring method in the string base metatable is ignored.
-  |  beq ->fff_restv
-  |  // Handle numbers inline, unless a number base metatable is present.
+  |  bne >5
+  |  // 5.4 keeps one metatable per type: a __tostring in the string base
+  |  // metatable must call the C fallback. The negative metamethod cache bit
+  |  // says the field is absent; a store into the metatable clears it.
+  |  ldr TMP1, GL->gcroot[GCROOT_BASEMT_STR]
+  |  cbz TMP1, ->fff_restv
+  |  ldrb TMP0w, TAB:TMP1->nomm
+  |  tst TMP0w, #MM_TOSTR_ABSENT
+  |  beq ->fff_fallback
+  |  b ->fff_restv
+  |5:  // Handle numbers inline, unless a number base metatable is present.
   |  ldr TMP1, GL->gcroot[GCROOT_BASEMT_NUM]
   |   str BASE, L->base
   |  cmn ITYPE, #-LJ_TISNUM

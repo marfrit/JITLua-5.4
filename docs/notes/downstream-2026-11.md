@@ -166,3 +166,130 @@ for the `->` divergence in item 1. Verified on arm64:
 `XFAIL 1, FAIL 0`. No other candidate was warranted: items 2-5 are already
 covered by the `jit.*` / dump FORKs or are implementation-defined, and the
 identical failures are suite issues rather than interpreter bugs.
+
+---
+
+# Downstream compatibility round 3 (2026-11)
+
+Large Lua code bases rather than library test suites: the Teal compiler, Fennel
+(the compiler and its suite), MoonScript, and busted's own self-suite. Same
+protocol as round 2 (pinned version + sha256, PUC 5.4.9 / JITLua `-joff` /
+`-jon` / `-jon`+GC stress, arm64 and x86_64, no interpreter change). LuaRocks
+was dropped before the run: its suite needs a hererocks-style test environment
+(`spec/util/test_env.lua` searches for a full Lua tree via `LUA`/`LUA_DIR`);
+it is not runnable offline from the pinned tarball alone.
+
+## Pinned inputs
+
+| project | version | kind | source | sha256 |
+|---|---|---|---|---|
+| Teal (`tl`) | 0.24.8 | compiler + busted suite | codeload.github.com/teal-language/tl tag v0.24.8 | 8d7a143fd67d71dca5dad132a0e1443be6c013c54de2884adf4f3ed3b2cef022 |
+| Fennel | 1.6.1 | compiler + `test/faith` suite | codeload.github.com/bakpakin/Fennel tag 1.6.1 | 8bf46040ea9554f4c132de6cb6bf26a30ce8f7c99e58e82bc971c533d91ecd71 |
+| MoonScript | 0.8.0 | compiler + busted suite | codeload.github.com/leafo/moonscript tag v0.8.0 | 0458ba86359c9089f823f81e4198ea3f7d57c2f2773fb8a1364940ebdd802ac5 |
+| loadkit (MoonScript suite loader) | 1.1.0 | dep | codeload.github.com/leafo/loadkit tag v1.1.0 | 39742dd5db94f13886810cf69fc9b3db89bba3180c060384136115c9da431196 |
+| LuaRocks | 3.13.0 | not run (see above) | codeload.github.com/luarocks/luarocks tag v3.13.0 | 71adfead6966e2912034b8fb8103dd343c3adc6c91a276f1d209eebbaefe3a15 |
+
+lpeg 1.1.0 and the busted 2.2.0 stack are reused from round 2; argparse 0.7.1
+is used by the Teal and MoonScript CLIs. MoonScript's `native.c` parser is
+compiled per interpreter against its headers.
+
+## Results
+
+`P/F` is the suite's own count; `rc` where the suite only reports an exit
+status. `jon-gc` is `-jon` with GC stress.
+
+### arm64
+
+| project | puc | joff | jon | jon-gc |
+|---|---|---|---|---|
+| teal | 1645/1 | 1645/1 | 1645/1 | 1645/1 |
+| fennel | 151/1 | 150/2 | 150/2 | 150/2 |
+| moonscript | 242/0 | 242/0 | 242/0 | 242/0 |
+| busted | 1676/1 | 1676/1 | 1676/1 | 1676/1 |
+
+### x86_64
+
+| project | puc | joff | jon | jon-gc |
+|---|---|---|---|---|
+| teal | 1645/1 | 1645/1 | 1645/1 | 1645/1 |
+| fennel | 151/1 | **segfault (139)** | **segfault (139)** | **segfault (139)** |
+| moonscript | 242/0 | 242/0 | 242/0 | 242/0 |
+| busted | 1676/1 | 1676/1 | 1676/1 | 1676/1 |
+
+## Self-compile timing (median of 3, ms) and output stability
+
+The compiler runs under the arm it is timed on; the generated output is
+compared byte for byte across arms.
+
+| project | arm64 puc | arm64 joff | arm64 jon | x86_64 puc | x86_64 joff | x86_64 jon | output |
+|---|---:|---:|---:|---:|---:|---:|---|
+| Teal `tl gen tl.tl` | 590 | 472 | 492 | 1887 | 1260 | 1261 | byte-identical, 175 files |
+| Fennel `fennel.lua` | 387 | 304 | 495 | 1532 | 1115 | 2055 | byte-identical |
+| MoonScript `moonc moon/ moonscript/` | 79 | 66 | 77 | 390 | 301 | 356 | byte-identical, 62 files |
+
+JITLua `-jon` is 1.2-1.5x faster than PUC on Teal and MoonScript, and about
+equal on Fennel on arm64; the x86_64 host is a 4-thread NUC and noisier. The
+compiler output is interpreter-independent in all three cases.
+
+## Differences vs PUC 5.4.9
+
+### 1. OPEN — x86_64 JITLua segfault with a to-be-closed table (real bug)
+
+Fennel's `test.core` → `test-destructuring` segfaults under JITLua on x86_64
+(both `-joff` and `-jon`), while PUC completes all 66 assertions; arm64 is
+unaffected. The reduced Fennel reproducer is `test/init.lua test.red` with
+`test.red` = the `test/core.fnl` header plus `test-destructuring`; the crash
+needs the `{:toBeClosed true}` option (real `<close>` codegen).
+
+Minimal Lua reproducer (x86_64, `-joff` and `-jon`, rc 139; PUC prints
+`true true`):
+
+```lua
+local function f()
+  local t = {}
+  do
+    local t2 <close> = setmetatable({}, {__close = function() t.closed = true end})
+    t2.what = "ever"
+  end
+  return t.closed
+end
+print(pcall(f))   -- PUC: true true | x86_64 JITLua: SIGSEGV
+```
+
+It crashes in both JIT modes, so it is an interpreter/GC issue, not a JIT
+miscompile; it is x86_64-only. No `tests/d54` entry was added: `known-bad.tsv`
+has no architecture qualifier, so a test for this would be XFAIL on x86_64 but
+XPASS on arm64 and would fail the strict arm64 gate. The next session should
+fix it, then add a cross-architecture test.
+
+### 2. Fennel `test-getinfo` — `debug.getinfo(1,"t").istailcall` (known PENDING)
+
+JITLua adds one failure on every arm: Fennel's `test-getinfo` expects
+`istailcall = true` for a tail call; JITLua reports `false` without a call
+hook. Already recorded in `docs/DIFFERENCES.md` as PENDING (db.lua line 619).
+
+```lua
+local function f() return debug.getinfo(1, "t").istailcall end
+local function g() return f() end
+print(g())   -- PUC: true | JITLua: false
+```
+
+### 3. Failures identical on PUC and JITLua (suite / environment)
+
+- Teal `spec/api/load_spec.lua` (1 failure): runs the `tl` CLI through
+  `io.popen`; identical on PUC after the CLI gets argparse on `LUA_PATH`.
+- Fennel `test-lua-plugin` (1): fails on PUC too (plugin fixture).
+- busted `configfile for luacov` (1): the luacov output handler is not
+  installed in the pinned stack.
+- MoonScript: 242/242 on every arm.
+
+## Open items for the next round
+
+1. x86_64-only JITLua segfault on a to-be-closed table with `__close`
+   (minimal repro above); needs a fix and then a d54 test with an
+   architecture-aware known-bad policy (or a fix that makes it pass on both).
+2. Teal `spec/api/load_spec.lua` failure: classify definitively (it is
+   identical on PUC, but the exact cause was not traced).
+3. LuaRocks suite: needs a hererocks-style `LUA`/`LUA_DIR` test environment;
+   not run here.
+4. `debug.getinfo(...).istailcall` remains PENDING (known, unchanged).

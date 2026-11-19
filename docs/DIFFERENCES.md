@@ -18,10 +18,16 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   decision, Markus 2026-11-16; C probe `tests/capi` `probe_549`).
 - `FORK` `string.dump` uses JITLua-5.4's private format; PUC 5.4.9 cannot load
   it, and mode R checks our own dump/reload round-trip.
-- `PENDING` Arbitrary `_ENV` values: LuaJIT stores only a table as a function
-  environment; `load("return _ENV", nil, nil, 123)()` does not return 123
-  (calls.lua A stops at line 359; `env_05_envvalue`; VM/C-API work, branch
-  `wip-calls-vm`).
+- `FIXED` Arbitrary `_ENV` values: LuaJIT stored only a table as a function
+  environment, so `load("return _ENV", nil, nil, 123)()` returned the global
+  table and a non-table env was silently ignored. The function now carries the
+  `_ENV` value itself (`GCfunc.envv`, any type): a table keeps the GGET/GSET
+  fast path, any other value is indexed through the generic metamethod path in
+  the interpreter and the JIT, and a nil env errors with PUC's "attempt to
+  index a nil value (upvalue '_ENV')" -- before this fix that case SEGFAULTED
+  in the VM (a NULL env table fed to the GGET/GSET lookup). `calls.lua` line
+  359 now passes; tests `env_05_envvalue`, `env_06_nilenv` (the nil-env crash),
+  `env_07_udenv` (userdata env, modes B,R).
 - `PENDING` pcall/xpcall C-call nesting bound and `__call` chain argument
   prepending (calls.lua A/B; VM work on `wip-calls-vm`; handler-reentry bound is
   already on main).

@@ -200,8 +200,7 @@ void LJ_FASTCALL lj_func_free(global_State *g, GCfunc *fn)
 
 /* Lua 5.4 implicit _ENV write: retarget the current function's environment.
 ** The 5.4 _ENV is an ordinary value (table, userdata, number, nil, ...): the
-** table cache fn->l.env is refreshed for the GGET/GSET fast path and compiled
-** traces (which read FUNC_ENV) are discarded. */
+** table cache fn->l.env is refreshed for the GGET/GSET fast path. */
 void lj_func_setenvv(GCfunc *fn, cTValue *v)
 {
   fn->l.envv = *v;
@@ -222,18 +221,7 @@ void LJ_FASTCALL lj_func_setenv(lua_State *L, TValue *v)
   GCfunc *fn = curr_func(L);
   lj_func_setenvv(fn, v);
   lj_gc_barrier(L, fn, v);
-  lj_func_flushenv(L);
-}
-
-/* Discard compiled traces that depend on a function environment: the table
-** path loads FUNC_ENV (IRFL_FUNC_ENV) and the non-table path bakes the envv
-** value in, so every env change must flush. Called by _ENV = v and by every
-** C-API/debug env setter. */
-void lj_func_flushenv(lua_State *L)
-{
-#if LJ_HASJIT
-  global_State *g = G(L);
-  if ((G2J(g)->flags & JIT_F_ON) && G2J(g)->state == LJ_TRACE_IDLE)
-    lj_trace_flushall(L);
-#endif
+  /* No trace flush: traces load FUNC_ENV at run time and guard it (table
+  ** path) or guard the raw env value (non-table path), see BC_GGET/BC_GSET
+  ** in lj_record.c. The same holds for the C-API/debug env setters. */
 }

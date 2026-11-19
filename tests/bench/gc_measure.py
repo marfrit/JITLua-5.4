@@ -33,6 +33,9 @@ PUC_STATS = ROOT / "tmp" / "puc-stats" / "src" / "lua"
 CORPUS = ROOT / "tmp" / "gc-corpus"
 
 REPS_MAX = int(os.environ.get("GC_REPS_MAX", "5"))
+# Force one repetition count for every workload instead of the adaptive
+# default (a decision table needs the same n on every row).
+REPS_FORCE = os.environ.get("GC_REPS_FORCE", "").strip()
 ONLY = os.environ.get("GC_ONLY", "").strip()
 DO_CLASSIC = os.environ.get("GC_CLASSIC", "1") != "0"
 DO_CORPUS = os.environ.get("GC_CORPUS", "1") != "0"
@@ -323,6 +326,8 @@ def run_repetition(wl, arm, mods, timeout):
 
 
 def reps_for(round1_ms):
+    if REPS_FORCE:
+        return int(REPS_FORCE)
     if round1_ms > 45000:
         return 1
     if round1_ms > 15000:

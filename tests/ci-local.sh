@@ -50,6 +50,7 @@ ASAN_OPTIONS=detect_leaks=0:abort_on_error=1 \
 ASAN_OPTIONS=detect_leaks=0:abort_on_error=1 \
   UBSAN_OPTIONS=print_stacktrace=0:halt_on_error=1 \
   LUAJIT_LIB="$SANBUILD/src/libluajit.a" LUAINC="$SANBUILD/src" \
+  MODLUAJIT="$SANBUILD/src/luajit" \
   CAPI_OUT="$SANBUILD/capi-build" \
   CC="gcc -fsanitize=address,undefined -fno-sanitize=alignment -fno-omit-frame-pointer -g" \
   LDFLAGS="-fsanitize=address,undefined -fno-sanitize=alignment" \
@@ -72,5 +73,6 @@ if [ ! -f "$ASSERTBUILD/src/libluajit.a" ] || [ "$SAN" = 1 ]; then
 fi
 ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=0:halt_on_error=1 \
   LUAJIT_LIB="$ASSERTBUILD/src/libluajit.a" LUAINC="$ASSERTBUILD/src" \
+  MODLUAJIT="$ASSERTBUILD/src/luajit" \
   CAPI_OUT="$ASSERTBUILD/capi-build" tests/capi/run.sh
 echo "ci-local: OK"

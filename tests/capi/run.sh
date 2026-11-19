@@ -42,6 +42,23 @@ else
   echo "== probe_549 (PUC side skipped: reference source missing, run tests/ref/fetch-ref.sh) =="
 fi
 
+# Public-header probe for the module-facing macros (no <limits.h> include in
+# the probe itself) and the real third-party module that exposed the gap.
+# MODLUAJIT is the host interpreter used to load the modules; it defaults to
+# the freshly built one and may point at a sanitizer/assert build.
+MODLUAJIT=${MODLUAJIT:-$ROOT/src/luajit}
+$CC $CFLAGS -shared -fPIC -I"$SRC" "$ROOT/tests/capi/headers_probe.c" \
+  -o "$OUT/headers_probe.so" $LDFLAGS
+if [ -x "$MODLUAJIT" ]; then
+  echo "== headers_probe (public headers, probes never include <limits.h>) =="
+  LUA_CPATH="$OUT/?.so;;" "$MODLUAJIT" -joff "$ROOT/tests/capi/headers_probe.lua"
+  LUA_CPATH="$OUT/?.so;;" "$MODLUAJIT" -jon  "$ROOT/tests/capi/headers_probe.lua"
+  echo "== luasystem 0.4.4 (pinned) built and loaded =="
+  LUAINC="$SRC" LUAJIT="$MODLUAJIT" CC="$CC" sh "$ROOT/tests/capi/luasystem.sh"
+else
+  echo "capi: modules compiled but not loaded (no host interpreter at $MODLUAJIT)"
+fi
+
 # Bare-state parity check against the vendored PUC 5.4.9 when its source tree is
 # present (ci-box.sh builds it before this stage). A build failure is skipped
 # (e.g. a reference tree copied from another architecture); a run that fails is

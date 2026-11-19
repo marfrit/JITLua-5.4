@@ -37,13 +37,23 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   bounded at PUC's LUAI_MAXCCALLS (200) with "C stack overflow" and a
   repeatedly erroring message handler ends in "error in error handling"
   (`tests/d54/err_04_ccall_bound.lua`).
-- `FIXED` pcall/xpcall are recorded in traces with an exact C-call counter:
-  `lj_record_ccallnest` emits the `ccallnest` increment and an exit-near-the-
-  limit guard before the protected call, and the matching decrement on the
-  trace's normal return from the pcall frame (any exit before that leaves the
-  frame live for the interpreter's own decrement). `tests/bench/b5_pcall.lua`
-  (x64 2M iterations): pcall 150->47 ms, xpcall 150->2.8 ms;
-  `tests/d54/err_05_pcall_trace.lua` covers the penlight test-pretty shape.
+- `FIXED` pcall/xpcall are recorded in traces with an exact C-call counter
+  (x64 and arm64; other targets keep them out of traces). The recorder emits
+  the limit guard after the call setup and stores each change of `ccallnest`
+  as the first instruction behind the snapshot that adds or drops the pcall
+  frame, so memory matches every state a trace can leave to: by a guard or by
+  an error raised in compiled code. An out-of-memory error inside a compiled
+  pcall is caught by that pcall. Design and path table:
+  `docs/notes/spectral.md`. `tests/bench/b5_pcall.lua` (x64 2M iterations):
+  pcall 150->47 ms, xpcall 150->2.8 ms. Tests:
+  `tests/d54/err_05_pcall_trace.lua` (the penlight test-pretty shape),
+  `tests/d54/err_06_pcall_trace_paths.lua`, `tests/capi` `oom_pcall`.
+- `FIXED` Out-of-memory error on the inline path of a fast function (stock
+  LuaJIT 2.1 too): `tostring(number)` and the string functions allocate
+  without setting `L->top`, and `lj_err_mem` pushed the message at a stale top
+  below the frame, into a live frame of a caller. Seen as a crash in the
+  interpreter when the allocator fails before the collector's threshold is
+  reached (`tests/capi` `oom_pcall`, the JIT-off arm).
 - `IMPL-DEFINED` Sparse-table border for runtime-built tables may differ: 5.4
   allows any border; LuaJIT's array-growth policy differs from PUC's alimit hint
   (`tbl_03_border_divergence`).
@@ -117,7 +127,9 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   the loop's GC check drives the collector, and the GC step at the loop head
   clears the dead stack slots, so a value the interpreter left there is not a
   GC root. A guard on the metatable and on its `__mode` field exits the trace
-  when a table becomes weak (or strong) after the trace was compiled. Cause,
+  when a table becomes weak (or strong) after the trace was compiled; the
+  guard covers the table an entry is read from, the links of an `__index`
+  chain and the metatable included (`weak_index_chain.lua`). Cause,
   fix and limits: `docs/bug-weak-table-jit-loop.md`; tests:
   `tests/d54/weak_*.lua`.
   Not a difference: a loop that allocates nothing never runs the collector, so
@@ -206,7 +218,8 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
 - `EXTENSION` `string.dump` bytecode format and `-b`/`bcsave` are
   LuaJIT-specific; `dump_03_version` records the fork format.
 - `EXTENSION` GC policy mode `LUAJIT_GC=speed|memory` (`src/lib_aux.c`,
-  `luaL_newstate`, so every embedder honours it) and the equivalent
+  read in `luaL_newstate`, so every embedder that creates its states with it
+  honours the variable; `lua_newstate` does not read it) and the equivalent
   `luajit -G speed|memory` option; `-G` overrides the environment, `-E`
   ignores it, unknown values are ignored silently. `memory` sets pause 100 /
   stepmul 200 (the Stage 0(a) row in `docs/gc-newgen-plan.md`); `speed` is the

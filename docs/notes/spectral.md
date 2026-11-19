@@ -1,106 +1,97 @@
-# SPECTRAL breadcrumbs (2026-11-19)
+# pcall/xpcall in traces: the nesting counter
 
-Worktree ~/src/LuaJIT-5.4-spectral, branch spectral, integ5 merged.
-Brief: ~/tmp/ds-spectral.txt.
+Notes for the trace-level pcall/xpcall counter (`lj_record_ccallnest`,
+`rec_ccallnest_flush` in `src/lj_record.c`). The spectral-norm measurement that
+started this branch is at the end.
 
-## DONE: pcall/xpcall JIT restoration (commits 838e414e, 87416a0a, 5a3e7d7e)
-- New IRFL_THREAD_CCALLNEST (offsetof(lua_State, ccallnest)) in lj_ir.h.
-- recff_pcall/recff_xpcall: emit FLOAD ccallnest + IR_EQ guard (==0) instead
-  of aborting. Top-level pcall/xpcall compile; nested/recursive exit to the
-  interpreter. b5_pcall: pcall 150->44ms, xpcall 150->2.9ms (x64, 2M iters).
-- err_04, gc_03, calls.lua B/R green (x64). Gates NOT yet re-run.
+## Background
 
-## TODO
-- Run ci-box + ci-local --sanitizers-only on x64 and arm64.
-- Spectral reduction: measure stock vs ours (interleaved median 7, x64+arm),
-  then -jdump=+rs of the Av/Atv inner loop with
-  LUA_PATH="$REPO/src/?.lua;;" (stock "$REPO/tmp/stock-luajit/src/?.lua;;"),
-  run from .dlcache/bench/src. Earlier x64: stock 15.4ms, ours 16.0ms (~4%).
-  Name the added IR (int32 CONVs, overflow guards) and reduce (lj_opt_fold.c,
-  lj_opt_narrow.c, lj_asm_x86.h). Tests for any fold/narrowing: 2^31-1, 2^31,
-  -2^31, 2^53, 2^63-1, mixed int/float, // and % negatives; mode B opt 0-3.
+The 5.4 bound on nested pcall/xpcall is counted in `L->ccallnest` by the
+interpreter fast paths (x64 and arm64). A compiled pcall has to keep the same
+counter exact, or the bound fires too early (leak) or pcall stops working on
+the thread (underflow). The counter is a field of the thread, not a stack slot,
+so no snapshot restores it: memory has to be right for every state a trace can
+leave to.
 
-## -jdump finding CORRECTED (x64; -jdump output is on STDOUT)
-Stock 2.1 DOES emit the `FLOAD tab.meta` + `EQ NULL` guard for the integer-key
-store too (full trace 1: 0009/0010, after the array AREF). So the guard is NOT
-an ours-only addition and (1)'s premise was wrong. The real trace-1 deltas:
-ours orders the guard before the array access and uses SLOAD flags `RI`/`TI`
-where stock uses `CRI`/`CI`; ours emits ~2x the traces (68 vs 36 dump lines).
-Measurement is ~4%, below the >10% row.
+A first version guarded `ccallnest == 0` and counted nothing; penlight's
+`tests/test-pretty.lua` (pcall inside a `for ... in` loop) ended in "C stack
+overflow" under `-jon`. A second version stored the increment before the call
+setup and the decrement on the return. That is exact only as long as nothing
+exits between a store and the next snapshot.
 
-## old (wrong) -jdump note
-Trace 1 (init loop `for i=1,N do u[i]=1 end`): ours adds
-`FLOAD tab.meta` + `EQ NULL` (the 5.4 integer-key metatable guard before a raw
-store) and different SLOAD type flags (ours RI/TI vs stock CRI/CI); stock has
-no metatable guard. More traces (ours 68 vs stock 36 dump lines).
-Measurement x64: stock 15.4ms vs ours 16.0ms (~4%, below the >10% row).
-Reduction not done. Candidate: fold/hoist the tab.meta NULL guard when the
-recorder already knows the table has no metatable.
+## What can leave a trace
 
-## pcall/xpcall trace recording — penlight cause (2026-11-19)
-Re-applied the recording (87416a0a) and ran `sh tests/corpus-ext/run.sh penlight`
-under -jon and -jon+GC-stress: `tests/test-pretty.lua` fails with
-"LUA: C stack overflow" at `./lua/pl/pretty.lua:281` (inside a `for ... in`
-loop that calls pcall) while -joff is SAME. So the top-level-only
-`ccallnest == 0` guard does not count the nesting of a pcall that a trace
-enters; the counter leaks/overflows and the interpreter's bound fires. The
-proper fix is the trace-level counter with an increment AND a matching
-decrement (and an exit near the limit), which was not implemented. The
-recording is reverted again; only the benchmark (838e414e) and this note stay.
+| way out | state the interpreter resumes in |
+|---|---|
+| guard | the last snapshot in front of the guard |
+| error raised by compiled code (out of memory in an allocation, an error from a helper) | the snapshot that covers the faulting machine code |
+| GC check at the head of a trace or loop | the snapshot at that head |
 
-## KEEP (compaction 2026-11-19 06:36)
-- Worktree ~/src/LuaJIT-5.4-spectral, branch spectral (integ5 merged, 2aad38af).
-- Commits to keep: a7a617df (spectral-measure.py + notes), f6ce1d07 (corrected
-  tab.meta finding), 1d982c7d (penlight cause note), 838e414e (b5_pcall bench).
-- Reverted recording: 87416a0a ("jit: record top-level pcall/xpcall in traces
-  again") - re-apply with `git revert --no-edit <its revert>` if needed.
-- Penlight cause: tests/test-pretty.lua, pl/pretty.lua:281 (pcall inside a
-  `for ... in` loop) -> "LUA: C stack overflow" under -jon with the
-  `ccallnest == 0` guard; the guard does not count the nesting. Prerequisite
-  for recording pcall/xpcall: a trace-level counter with increment AND
-  decrement (and exit near the limit).
-- Gates: `sh tests/ci-box.sh` AND `sh tests/ci-local.sh --sanitizers-only`,
-  both arches. Only the remote test-host wrappers (x64-box/arm-box); never
-  build or test in the development container.
-  X64_BOX_HOST only for A/B benchmarks on one box.
-- Commit tagline: "Implemented by DeepSeek-4.1-Flash (cloud); briefed by
-  Claude." + Co-Authored-By lines (noreply@example.invalid). Tests first, then
-  src, then docs.
-- (1) result: stock 2.1 emits the same tab.meta guard; real delta is SLOAD
-  flags (ours RI/TI vs stock CRI/CI) + ~2x traces; gap ~4%, no reduction done.
+Snapshots without a guard behind them are merged into the next one, in the
+recorder (`lj_snap_add`) and again in the loop copy (`loop_subst_snap`). Stock
+relies on that being invisible, because only guards use a snapshot. An error
+raised by compiled code does not go through a guard, so after a merge it
+unwinds to an older state: inside a pcall that has already returned, or in
+front of a pcall that is already running.
 
-## Trace-level pcall/xpcall counter — REASONING (before coding)
-Goal: a recorded pcall/xpcall increments L->ccallnest before entering the
-protected call and exactly one decrement happens on every path.
+## Rules the recorder follows
 
-Increment: recff_pcall/recff_xpcall, before lj_record_call:
-  th = IR_LREF IRT_THREAD; cn = FLOAD th IRFL_THREAD_CCALLNEST
-  guard IR_LT(cn, LJ_MAX_XLEVEL)   (exit to the interpreter at/over the limit;
-                                    the interpreter's lj_ffh_pcall raises
-                                    "C stack overflow", matching -joff depth 200)
-  FSTORE IRFL_THREAD_CCALLNEST = cn+1
-  ... lj_record_call ...
-The guard is on the PRE-increment value so the trace enters at cn=199 -> 200
-exactly like the interpreter fast path (which tests ccallnest >= 200 before
-incrementing).
+1. The limit guard (`ccallnest < 200`) is emitted after the call setup. It and
+   the guards of the setup (callee identity, `__call` lookup) belong to the
+   state in front of the pcall, where memory still holds the old count.
+2. The change of the counter is left pending in `J->ccallpend` and stored as
+   the first instruction behind the next snapshot: the snapshot that has the
+   pcall frame for the increment, the one without it for the decrement.
+   Anything the recorder emits before that snapshot (a pending comparison
+   guard, the rest of a concatenation) still belongs to the old state.
+3. Both stores are typed as guards. They never exit, but a guard behind a
+   snapshot keeps it from being merged, so the two boundaries stay where the
+   stores are even if the protected call has no guard of its own.
+4. Dead-store elimination never drops a store to this field
+   (`lj_opt_dse_fstore`).
+5. A trace cannot return through a pcall frame it did not enter
+   (`NYI: return to lower frame`), and it cannot end with a pending change.
+6. Only x64 and arm64 with on-trace error handling (`LJ_UNWIND_JIT`) record
+   pcall/xpcall. Elsewhere the recorder aborts as before: the other
+   interpreters do not count, and without on-trace unwinding an error would
+   leave the protected call without a decrement.
 
-Decrement (the crux): exactly one of these must run per increment.
-| path                                             | decrement site |
-|--------------------------------------------------|----------------|
-| trace returns normally from the pcall frame      | recorder, in the FRAME_PCALL return handling (rec_ret) - emit FSTORE cn-1 |
-| pcalled function errors inside the trace         | trace exits; interpreter vm_unwind_ff_eh decrements (the FSTORE already bumped memory) |
-| side exit inside the protected region            | trace exits; the pcall frame is still live, so interpreter vm_returnp/vm_unwind_ff_eh decrements when it returns |
-| trace exits after the pcall returned normally    | already decremented by the recorder on the normal return; interpreter must NOT decrement again (the frame is gone) |
-So the recorder emits the decrement only on the post-call continuation of the
-trace (the path that is reached iff the call returned inside the trace); the
-interpreter's decrements cover every exit before that point. Need to verify in
-lj_record.c rec_ret / rec_call_setup how a FRAME_PCALL frame's return is
-recorded and whether the continuation is on the same trace (no exit) - if the
-pcall frame return always exits the trace, the decrement belongs in the exit
-handler instead and the whole scheme must be re-thought.
+| path | who decrements |
+|---|---|
+| the call returns inside the trace | the store behind the snapshot that drops the frame |
+| guard fails inside the protected call | the interpreter, when the restored pcall frame returns or catches |
+| guard fails in the call setup | nobody: the increment has not been stored |
+| error raised by compiled code inside the protected call | the interpreter's catch in the restored pcall frame |
+| error raised by compiled code after the call returned | nobody: the store ran, the snapshot has no pcall frame |
+| side trace starts inside the protected call | the side trace, when it records the return (its parent stored the increment) |
+| trace is stitched or linked to the interpreter inside the protected call | the interpreter |
+| coroutine switch | separate counter per thread; `coroutine.yield` is not compiled |
+| finalizer on a GC step | its own pcalls are balanced before the step returns |
 
-RED tests (first): minimised test-pretty (pcall in a for-in loop, 1e5 iters,
--jon); recursive pcall depth probe under -jon == -joff (200); error inside the
-pcalled function from a trace; side exit inside the protected region;
-coroutine.wrap inside pcall. Modes A/B at -O0..-O3 and GC stress.
-Then b5_pcall before/after, penlight corpus-ext SAME (-jon, -jon+gcs), gates.
+## Tests
+
+- `tests/d54/err_05_pcall_trace.lua`: the penlight shape, an error in the
+  callee, a side exit, `coroutine.wrap`.
+- `tests/d54/err_06_pcall_trace_paths.lua`: a callee, callable object or
+  handler that changes between iterations (guards in the call setup), an
+  argument type that changes, an error raised by compiled code, nested
+  protected calls, pcall as `__concat`, recursion, a yield across the call, a
+  finalizer that runs pcall. Each case prints the change in usable nesting
+  depth.
+- `tests/capi/test_capi.c` `oom_pcall`: an allocator with a byte budget; the
+  out-of-memory error is raised inside a protected call with and without a
+  guard, and behind one, with the JIT on and off.
+
+## Numbers
+
+`tests/bench/b5_pcall.lua`, x64, 2M iterations each: pcall 150 ms without
+recording, 47 ms with it; xpcall 150 ms and 2.8 ms.
+
+## spectral-norm
+
+`tests/bench/spectral-measure.py` runs one classic benchmark interleaved
+against stock 2.1. x64, median of 7: stock 15.4 ms, this tree 16.0 ms (about
+4 %). The `-jdump` comparison of the first trace shows the same `tab.meta`
+guard on both sides; the differences are the order of that guard against the
+array access, SLOAD flags (`RI`/`TI` against `CRI`/`CI`) and about twice the
+number of traces. Nothing was changed for it.

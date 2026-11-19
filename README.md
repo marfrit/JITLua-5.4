@@ -37,8 +37,7 @@ Status as measured, not a compatibility claim:
   k-nucleotide
   ([docs/perf-regression-2026-11-17.md](docs/perf-regression-2026-11-17.md)).
 - **Not yet covered:** the no-op `lua_setcstacklimit` and the `__call`
-  chain VM work. `pcall`/`xpcall` are not recorded in traces since the 5.4
-  nesting bound landed. See the two files above for the exact list.
+  chain VM work. See the two files above for the exact list.
 
 ## Build
 
@@ -68,7 +67,8 @@ LUAJIT_GC=memory ./src/luajit -jon script.lua
 ```
 
 `LUAJIT_GC` is read in `luaL_newstate()` (`src/lib_aux.c`), so every embedder
-sees it. `-G` overrides the environment and `-E` ignores it; unknown values
+that creates its states with it sees the variable (`lua_newstate()` does not
+read it). `-G` overrides the environment and `-E` ignores it; unknown values
 are ignored silently. A runtime `collectgarbage("setpause", n)` or
 `"setstepmul"` overrides either, and `collectgarbage("incremental"/
 "generational")` is unaffected. `tests/gcmode.sh` checks the read-back values

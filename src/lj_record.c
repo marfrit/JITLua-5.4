@@ -1162,20 +1162,11 @@ void lj_record_call(jit_State *J, BCReg func, ptrdiff_t nargs)
     lj_trace_err(J, LJ_TRERR_STACKOV);
 }
 
-/* Record tail call. */
+/* Record tail call. The callee replaces the calling frame: what the VM does
+** for a tail call to a Lua function, and for a fast function that hands over
+** to a metamethod (vm_call_tail), whatever kind of function that is. */
 void lj_record_tailcall(jit_State *J, BCReg func, ptrdiff_t nargs)
 {
-  /* Determine whether the callee is a C function (directly or via __call). */
-  int iscfunc;
-  {
-    TValue *ftv = &J->L->base[func];
-    if (tvisfunc(ftv))
-      iscfunc = !isluafunc(funcV(ftv));
-    else {
-      cTValue *mo = lj_meta_lookup(J->L, ftv, MM_call);
-      iscfunc = (!mo || !tvisfunc(mo) || !isluafunc(funcV(mo)));
-    }
-  }
   rec_call_setup(J, func, nargs);
   if (frame_isvarg(J->L->base - 1)) {
     BCReg cbase = (BCReg)frame_delta(J->L->base - 1);
@@ -1185,32 +1176,67 @@ void lj_record_tailcall(jit_State *J, BCReg func, ptrdiff_t nargs)
     J->base -= cbase;
     func += cbase;
   }
-  if (iscfunc) {
-    /* The VM keeps the caller frame and pushes an LJ_CONT_TAILRET
-    ** continuation frame at J->base[func+4]. Mirror that layout in the
-    ** model: [func]=cont value, [func+1]=TREF_CONT, [func+2]=callee func,
-    ** [func+3]=TREF_FRAME, args at [func+4..]. Shift the func+frame+args
-    ** block up by two slots first. */
-    TRef *base = J->base + func;
-    ptrdiff_t i;
-    for (i = (ptrdiff_t)nargs + 1; i >= 0; i--)
-      base[i+2] = base[i];
-    base[0] = lj_ir_k64(J, IR_KNUM,
-			u64ptr(contptr((ASMFunction)(uintptr_t)LJ_CONT_TAILRET)));
-    base[1] = TREF_CONT;
-    J->base += func + 4;
-    J->baseslot += func + 4;
-    J->framedepth += 2;  /* The continuation contributes cont + frame. */
-  } else {
-    /* Move func + args down. */
-    if (LJ_FR2 && J->baseslot == 2)
-      J->base[func+1] = TREF_FRAME;
-    memmove(&J->base[-1-LJ_FR2], &J->base[func], sizeof(TRef)*(J->maxslot+1+LJ_FR2));
-    /* Note: the new TREF_FRAME is now at J->base[-1] (even for slot #0). */
-  }
+  /* Move func + args down. */
+  if (LJ_FR2 && J->baseslot == 2)
+    J->base[func+1] = TREF_FRAME;
+  memmove(&J->base[-1-LJ_FR2], &J->base[func], sizeof(TRef)*(J->maxslot+1+LJ_FR2));
+  /* Note: the new TREF_FRAME is now at J->base[-1] (even for slot #0). */
   /* Tailcalls can form a loop, so count towards the loop unroll limit. */
   if (++J->tailcalled > J->loopunroll)
     lj_trace_err(J, LJ_TRERR_LUNROLL);
+}
+
+#if LJ_FR2
+/* Does BC_CALLT/BC_CALLMT keep the calling frame? The x64 (GC64) and arm64
+** interpreters do so for every callee that is not a Lua function, directly or
+** through __call. Must match BC_CALLT in vm_x64.dasc and vm_arm64.dasc. */
+static int rec_callt_keepframe(jit_State *J, BCReg func)
+{
+#if LJ_TARGET_X64 || LJ_TARGET_ARM64
+  cTValue *o = &J->L->base[func];
+  if (!tvisfunc(o)) {
+    o = lj_meta_lookup(J->L, o, MM_call);
+    if (!tvisfunc(o)) return 0;  /* rec_call_setup raises the trace error. */
+  }
+  return !isluafunc(funcV(o));
+#else
+  UNUSED(J); UNUSED(func);
+  return 0;
+#endif
+}
+#endif
+
+/* Record BC_CALLT/BC_CALLMT. */
+static void rec_callt(jit_State *J, BCReg func, ptrdiff_t nargs)
+{
+#if LJ_FR2
+  if (rec_callt_keepframe(J, func)) {
+    /* The VM leaves the calling frame alone, a vararg frame included, and
+    ** puts an LJ_CONT_TAILRET continuation frame on top of it. Same layout
+    ** here: [func] = continuation id, [func+1] = TREF_CONT (the CALLT pc),
+    ** [func+2] = callee, [func+3] = TREF_FRAME, arguments from [func+4].
+    ** rec_call_setup may have added an argument for __call, so the block to
+    ** move up by two slots is given by J->maxslot, not by nargs. */
+    TRef *base;
+    ptrdiff_t i;
+    rec_call_setup(J, func, nargs);
+    base = J->base + func;
+    for (i = (ptrdiff_t)J->maxslot + 1; i >= 0; i--)
+      base[i+2] = base[i];
+    base[0] = lj_ir_k64(J, IR_KNUM, (uint64_t)LJ_CONT_TAILRET);
+    base[1] = TREF_CONT;
+    J->base += func + 4;
+    J->baseslot += func + 4;
+    J->framedepth += 2;  /* A continuation counts twice: cont + frame. */
+    if (J->baseslot + J->maxslot >= LJ_MAX_JSLOTS)
+      lj_trace_err(J, LJ_TRERR_STACKOV);
+    /* Same budget as a replaced frame: bounds the tail calls per trace. */
+    if (++J->tailcalled > J->loopunroll)
+      lj_trace_err(J, LJ_TRERR_LUNROLL);
+    return;
+  }
+#endif
+  lj_record_tailcall(J, func, nargs);
 }
 
 /* Check unroll limits for down-recursion. */
@@ -1370,6 +1396,19 @@ retry_tailret:
   } else if (frame_iscont(frame)) {  /* Return to continuation frame. */
     ASMFunction cont = frame_contf(frame);
     BCReg cbase = (BCReg)frame_delta(frame);
+    if (J->pt && J->framedepth == 2 && frame_contv(frame) == LJ_CONT_TAILRET) {
+      /* A Lua function returns through the continuation of a tail call and
+      ** then out of the frame the trace started in: a metamethod a fast
+      ** function handed over to (tostring -> __tostring). J->pc is the RET
+      ** of that function, so the trace has to end here, with the frames
+      ** still in place. Past the pop below the snapshot would pair this pc
+      ** with the base of the frame that made the tail call. */
+      for (i = 0; i < (ptrdiff_t)rbase; i++)
+	J->base[i] = 0;  /* Purge dead slots. */
+      J->maxslot = rbase + (BCReg)gotresults;
+      lj_record_stop(J, LJ_TRLINK_RETURN, 0);  /* Return to interpreter. */
+      return;
+    }
     if ((J->framedepth -= 2) < 0)
       lj_trace_err(J, LJ_TRERR_NYIRETL);
     J->baseslot -= (BCReg)cbase;
@@ -1391,6 +1430,7 @@ retry_tailret:
       ** baseslot and base to the caller frame, so just process the
       ** caller's own return. Rebase rbase to the pre-pop base. */
       rbase += cbase;
+      baseadj += cbase;
       frame = frame_prevd(frame);
       goto retry_tailret;
     } else if (cont == lj_cont_nop) {
@@ -3269,7 +3309,7 @@ void lj_record_ins(jit_State *J)
     rc = (BCReg)(J->L->top - J->L->base) - ra - LJ_FR2;
     /* fallthrough */
   case BC_CALLT:
-    lj_record_tailcall(J, ra, (ptrdiff_t)rc-1);
+    rec_callt(J, ra, (ptrdiff_t)rc-1);
     break;
 
   case BC_VARG:

@@ -144,9 +144,13 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   `collectgarbage` byte counts differ in every mode. Excluded from the default
   corpus; see `tests/known-bad.tsv`.
 - `PENDING` Classic benchmarks slower than stock 2.1 (>10%): deltablue both
-  arches (missing-metamethod trace loss), spectral-norm x64 (integer-loop
-  guards/CONVs), k-nucleotide x64 (`__index`/string-key path); see
-  `docs/perf-regression-2026-11-17.md` and `docs/bench-classic-2026-11-17.md`.
+  arches (missing-metamethod trace loss), k-nucleotide x64
+  (`__index`/string-key path); see `docs/perf-regression-2026-11-17.md` and
+  `docs/bench-classic-2026-11-17.md`. spectral-norm x64 is ~4% (interleaved
+  median of 9: stock 15.4 ms, ours 16.0 ms) and arm64 is at parity, below
+  the threshold; the extra SLOAD flags and side traces are the 5.4
+  integer/float loop model and are not redundant
+  (`docs/notes/for-intfloat.md`).
 
 
 ## Against stock LuaJIT 2.1

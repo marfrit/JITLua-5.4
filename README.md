@@ -20,11 +20,11 @@ Status as measured, not a compatibility claim:
 
 - Differential gates against PUC Lua 5.4.9 pass on the tested platforms.
   Measured on Linux arm64 and x86_64, identical on both, on the `tests/d54`
-  edge-case corpus: A+B **144 PASS / 0 FAIL / 5 XFAIL**, JIT optimization
-  levels 0–3 **316**, R (dump/reload round-trip) **76**; the ASan/UBSan run
-  of A+B+R is **220 PASS / 0 FAIL / 5 XFAIL**; C API checks **204 + 14**.
+  edge-case corpus: A+B **183 PASS / 0 FAIL / 5 XFAIL**, JIT optimization
+  levels 0–3 **404**, R (dump/reload round-trip) **101**; the ASan/UBSan run
+  of A+B+R is **284 PASS / 0 FAIL / 5 XFAIL**; C API checks **222 + 92 + 18**.
 - Full corpus (PUC 5.4.9 test suite plus `tests/d54`) with `--strict`, the
-  exact command of the public CI: **276 PASS / 0 FAIL / 9 XFAIL / 12 SKIP /
+  exact command of the public CI: **342 PASS / 0 FAIL / 7 XFAIL / 12 SKIP /
   0 TIMEOUT**. Every XFAIL has its reason in one of two lists:
   [tests/known-bad.tsv](tests/known-bad.tsv) for real defects, and
   [tests/known-different.tsv](tests/known-different.tsv) for deliberate or

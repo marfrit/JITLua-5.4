@@ -73,6 +73,11 @@ metamethod up in the constant metatable, so the folder CSEs the two guards and
 the loop over many receivers of one class hoists the rest. Merging that
 (`f51a7608`) is what moved deltablue from 0.878-0.906 to >= 0.96.
 
+## Gates (merged tree, no source change)
+
+- `sh tests/ci-box.sh` (x86_64 and aarch64): all stages passed.
+- `sh tests/ci-local.sh --sanitizers-only` (x86_64 and aarch64): OK.
+
 ## Left open
 
 - **spectral-norm 0.499** in the classic set is a separate regression, not a

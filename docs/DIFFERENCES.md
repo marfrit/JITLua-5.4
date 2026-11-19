@@ -33,7 +33,8 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   innermost first, until the first plain function, in the interpreter and in
   the recorder. The chain is bounded by the Lua stack like PUC (no fixed
   depth limit), so a cyclic or over-long chain raises the ordinary catchable
-  "stack overflow". calls.lua mode A now differs only in the `string.dump`
+  "stack overflow", which pcall/xpcall directly on the chain catch like any
+  other runtime error. calls.lua mode A now differs only in the `string.dump`
   private-format FORK at its binary-chunk section (line 474), which is listed
   in tests/known-different.tsv; mode B passes. See docs/notes/callchain.md.
 - `FIXED` pcall/xpcall C-call nesting bound: nested pcall/xpcall calls are

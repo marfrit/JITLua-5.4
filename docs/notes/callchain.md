@@ -60,6 +60,16 @@ The VM rebases from the returned func slot:
   `L->top = top+n`, which is wrong for this contract; the explicit
   `metanargs` field replaced it.
 
+The stack reservation asks for `top-L->top + n` slots, not just `n`, because
+`L->top` can sit below the call's argument top (it does for BC_CALLT). When
+that request cannot be satisfied, no target frame exists yet, so a fast
+pcall/xpcall does not recognize the protected call and the overflow used to
+escape. `lj_meta_call` now installs the same dummy frame that
+`lj_err_optype_call` uses for a non-callable target when the current C-frame
+pc is not a Lua frame, then forces the overflow through
+`lj_state_growstack`; the error unwinds into pcall/xpcall and the handler
+runs, on both arches. The ordinary Lua-frame recursion path is unchanged.
+
 Recorder: `rec_call_setup` loops the chain in its slot model exactly like the
 VM (depth 1 unchanged), and stops with `LJ_TRERR_STACKOV` once
 `baseslot+func+nargs+2*LJ_FR2` reaches `LJ_MAX_JSLOTS`. `rec_callt_keepframe`
@@ -79,11 +89,17 @@ back to the interpreter, with identical results.
   false with a "stack overflow" message, never crashes, and -joff/-jon agree.
 - `tests/d54/call_03_chain_trace.lua` (B only): depth-1/depth-2 chains in hot
   loops (plain and tail), depth-100 chain exceeds the recorder budget.
+- `tests/d54/call_04_chain_pcall_catch.lua` (B only): pcall and xpcall are
+  called directly on a 70000-object chain and must return false with the
+  overflow message, then the script continues. coroutine.wrap and the xpcall
+  handler reject the same table as a non-function before resolution, like
+  PUC, in both arms.
 
 Red evidence on the unchanged tree: calls.lua aborts at line 187 under
 `-joff` and `-jon` with `attempt to call a table value`; call_01 fails mode A
 at the depth-2 call; call_02 fails both arms because the chain stops at the
-first non-function level.
+first non-function level; call_04 fails both arms with an uncaught
+`lua: stack overflow` from the first direct pcall.
 
 ## Micro-benchmark (one pinned x64 box, base main 7e8e4bf9 vs head, interleaved)
 
@@ -99,22 +115,19 @@ Depth 1 is the unchanged single-level path.
 
 - `tests/ci-box.sh`: all stages passed on x86_64 (pve pool) and aarch64.
 - `tests/ci-local.sh --sanitizers-only`: `ci-local: OK` on both arches;
-  d54 all modes: 295 PASS, 0 FAIL, 5 XFAIL.
-- `tests/harness.sh --strict --mode all --timeout 120`: 353 PASS, 0 FAIL,
+  d54 all modes: 296 PASS, 0 FAIL, 5 XFAIL.
+- `tests/harness.sh --strict --mode all --timeout 120`: 354 PASS, 0 FAIL,
   7 XFAIL, 12 SKIP.
-- d54: A+B 191 PASS / 5 XFAIL; B@0..3 424; R 104.
+- d54: A+B 192 PASS / 5 XFAIL; B@0..3 428; R 104.
 - calls.lua: mode B passes; mode A differs only in the private dump format at
   line 474 (verified by removing the binary-chunk block, then 0 diff), so the
   row moved to tests/known-different.tsv.
 
 ## Remaining risks
 
-- Near the stack limit, `pcall(chainObject)` (the chain object as pcall's
-  target, not a wrapper) can propagate "stack overflow" uncaught: the fast
-  pcall has not installed its target frame when `vmeta_call` raises, while
-  ordinary non-callable targets are caught by `lj_err_optype_call`'s dummy
-  frame. The limit test therefore protects the call in a wrapper. Fixing this
-  would need a comparable dummy frame for the stack-overflow path.
+- `coroutine.wrap(chainObject)` and a chain object as the xpcall handler are
+  rejected as non-functions before any resolution, as in PUC; only a direct
+  pcall/xpcall target can reach the overflow path.
 - A GC finalizer that mutates a metatable between the two passes could make
   the prepended objects differ from PUC's per-level retry view. No allocation
   happens in either pass, so only a stack-growing GC step could interleave;

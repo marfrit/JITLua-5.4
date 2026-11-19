@@ -158,7 +158,7 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   freed with the thread; `tests/capi` `test_extraspace`), and the layout keeps
   the GC object pointer and every assembler offset unchanged. A module compiled
   against PUC's `lua.h` and linked against JITLua reads the wrong bytes and must
-  be rebuilt against JITLua's headers (same ABI class as the `luaL_Buffer` note
+  be rebuilt against JITLua's headers (see the source-compatible FORK row
   above).
 - `FIXED` A state created without the base library (`luaL_newstate()` with no
   `luaopen_base`) segfaulted in `var_lookup` on any chunk that names a global:
@@ -250,15 +250,30 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   `lua_getlocaledecpoint`, `LUAI_MAXCCALLS` and `luai_likely`/`luai_unlikely`
   (`l_likely`/`l_unlikely` under `LUA_CORE`/`LUA_LIB`); `lua.h` has
   `LUA_NUMTYPES`/`LUA_NUMTAGS`; `lauxlib.h` has `LUA_GNAME`,
-  `LUA_PRELOAD_TABLE` and `LUAL_NUMSIZES`. `lua_number2str` takes PUC's
+  `LUA_PRELOAD_TABLE` and `LUAL_NUMSIZES`; `luaconf.h` has `LUAMOD_API`, and
+  `lua_number2str` takes PUC's
   `(s, sz, n)` form and `lua_integer2str` uses `snprintf`. `luaL_checkversion`
-  passes `LUAL_NUMSIZES` and `luaL_checkversion_` raises PUC's mismatch errors
-  (it was a release-build no-op). The check does not tell a module compiled
-  against PUC's own headers apart: it passes, and works only as long as it
-  uses neither the pseudo-indices (`LUA_REGISTRYINDEX`, `lua_upvalueindex`)
-  nor `luaL_Buffer`, which differ. Build modules against these headers. `lua_setcstacklimit` is the PUC 5.4
+  passes the fork ABI stamp (see the FORK row below) and
+  `luaL_checkversion_` raises PUC's mismatch errors (it was a release-build
+  no-op). `lua_setcstacklimit` is the PUC 5.4
   deprecated no-op returning `LUAI_MAXCCALLS` (200). The full comparison is in
   [docs/notes/capi-header-compat.md](notes/capi-header-compat.md).
+- `FORK` The C API is **source-compatible** with PUC Lua 5.4, **not
+  binary-compatible**: C modules must be rebuilt against JITLua's headers. The
+  pseudo-indices keep LuaJIT's values (`LUA_REGISTRYINDEX` = -10000,
+  `lua_upvalueindex(i)` = -10002-i, vs PUC's -LUAI_MAXSTACK-1000 and
+  `LUA_REGISTRYINDEX-(i)`), `luaL_Buffer` is larger (`LUAL_BUFFERSIZE` is
+  8192/BUFSIZ vs PUC's `16*sizeof(void*)*sizeof(lua_Number)`), and
+  `lua_getextraspace` is a function with the area after `struct lua_State`.
+  `luaL_checkversion()` passes a fork-specific ABI stamp
+  (`LUAL_NUMABI` = `LUAL_NUMSIZES` + `LUAL_ABISTAMP`), so a module built
+  against PUC 5.4's headers that calls it (`luaL_newlib` does) is rejected at
+  load with "module built for a different Lua ABI; rebuild it against JITLua
+  headers" instead of silently using the wrong slots. A raw `luaopen_*` that
+  never calls `luaL_checkversion` cannot be caught; rebuild every module. The
+  corpus C fixtures are built once per arm, PUC headers for the reference arm
+  and JITLua headers for this fork (`tests/ref/build-puc54-libs.sh`), and each
+  arm loads only its own build.
 - `EXTENSION` `lua_getfenv`/`setfenv` remain present as LuaJIT extensions;
   PUC 5.4 removed them.
 

@@ -25,10 +25,19 @@
 #define LUA_PRELOAD_TABLE	"_PRELOAD"
 #define LUAL_NUMSIZES	(sizeof(lua_Integer)*16 + sizeof(lua_Number))
 
-/* 5.4 binary-compatibility check; we accept the same version only. */
+/* Fork ABI stamp, mixed into the size argument of luaL_checkversion_.  PUC 5.4's
+** own LUAL_NUMSIZES has the same value here, so without this mark a module
+** compiled against PUC's headers would pass and then use LuaJIT's
+** pseudo-indices (LUA_REGISTRYINDEX, lua_upvalueindex).  The numeric-type
+** stamp LUAL_NUMSIZES keeps PUC's value; LUAL_NUMABI is what
+** luaL_checkversion() passes. */
+#define LUAL_ABISTAMP	0x4a49544c  /* "JITL" */
+#define LUAL_NUMABI	(LUAL_NUMSIZES + LUAL_ABISTAMP)
+
+/* 5.4 compatibility check: version, numeric types, and this fork's ABI. */
 LUALIB_API void (luaL_checkversion_) (lua_State *L, lua_Number ver, size_t sz);
 #define luaL_checkversion(L) \
-	luaL_checkversion_(L, LUA_VERSION_NUM, LUAL_NUMSIZES)
+	luaL_checkversion_(L, LUA_VERSION_NUM, LUAL_NUMABI)
 
 typedef struct luaL_Buffer luaL_Buffer;
 

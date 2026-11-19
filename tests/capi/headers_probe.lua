@@ -15,6 +15,8 @@ assert(type(c.maxstack) == "number" and c.maxstack > 0, "LUAI_MAXSTACK")
 assert(c.idsize == 60, "LUA_IDSIZE must be 60")
 assert(c.bufsize > 0, "LUAL_BUFFERSIZE")
 assert(c.numsizes > 0, "LUAL_NUMSIZES")
+assert(c.abistamp ~= 0 and c.abistamp ~= c.numsizes, "LUAL_ABISTAMP")
+assert(c.numabi == c.numsizes + c.abistamp, "LUAL_NUMABI")
 assert(c.numtypes == 9, "LUA_NUMTYPES must be 9")
 assert(c.gname == "_G", "LUA_GNAME")
 assert(c.preload == "_PRELOAD", "LUA_PRELOAD_TABLE")
@@ -52,10 +54,15 @@ ok, msg = pcall(p.checkversion, 504, 1)
 assert(not ok and msg:find("incompatible numeric types", 1, true),
        "luaL_checkversion_ must reject other numeric type sizes: " .. tostring(msg))
 
--- The stamp is PUC's own value: the corpus fixtures (tests/corpus/puc54/libs)
--- are compiled against PUC's headers and loaded by both interpreters.
+-- The numeric stamp itself is PUC's own value (source compatibility); the
+-- fork ABI mark is separate and a module built against PUC's headers passes
+-- exactly PUC's LUAL_NUMSIZES, which must be recognised and rejected.
 assert(c.numsizes == p.puc_numsizes, "LUAL_NUMSIZES must have PUC 5.4's value")
-assert(pcall(p.checkversion, 504, p.puc_numsizes))
+assert(c.numabi ~= p.puc_numsizes, "the fork ABI stamp must differ from PUC's")
+ok, msg = pcall(p.checkversion, 504, p.puc_numsizes)
+assert(not ok and msg:find("different Lua ABI", 1, true) and
+       msg:find("rebuild it against JITLua headers", 1, true),
+       "a PUC-built module must be rejected with the rebuild hint: " .. tostring(msg))
 
 print("headers_probe: OK maxinteger=" .. c.maxinteger ..
       " int_max=" .. c.int_max .. " numtypes=" .. c.numtypes)

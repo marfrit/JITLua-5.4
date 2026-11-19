@@ -23,6 +23,10 @@ Status as measured, not a compatibility claim:
   edge-case corpus: A+B **187 PASS / 0 FAIL / 5 XFAIL**, JIT optimization
   levels 0–3 **412**, R (dump/reload round-trip) **103**; the ASan/UBSan run
   of A+B+R is **290 PASS / 0 FAIL / 5 XFAIL**; C API checks **231 + 92 + 18**.
+- The C API is **source-compatible** with PUC Lua 5.4, **not
+  binary-compatible**: C modules must be rebuilt against JITLua's headers.
+  A module built against PUC's headers that calls `luaL_checkversion` (as
+  `luaL_newlib` does) is rejected at load.
 - Full corpus (PUC 5.4.9 test suite plus `tests/d54`) with `--strict`, the
   exact command of the public CI: **348 PASS / 0 FAIL / 7 XFAIL / 12 SKIP /
   0 TIMEOUT**. Every XFAIL has its reason in one of two lists:

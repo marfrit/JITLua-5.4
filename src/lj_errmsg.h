@@ -14,6 +14,7 @@ ERRDEF(ERRCPP,	"C++ exception")
 ERRDEF(STROV,	"string length overflow")
 ERRDEF(UDATAOV,	"userdata length overflow")
 ERRDEF(STKOV,	"stack overflow")
+ERRDEF(CSTKOV,	"C stack overflow")
 ERRDEF(STKOVM,	"stack overflow (%s)")
 ERRDEF(TABOV,	"table overflow")
 

@@ -408,6 +408,10 @@ static void build_subroutines(BuildCtx *ctx)
   |  jz ->cont_dispatch
   |
   |  // Return from pcall or xpcall fast func.
+  |  mov L:RB, SAVE_L
+  |  mov TMPRd, L:RB->ccallnest
+  |  sub TMPRd, 1
+  |  mov L:RB->ccallnest, TMPRd
   |  and PC, -8
   |  sub BASE, PC			// Restore caller base.
   |  lea RA, [RA+PC-8]			// Rebase RA and prepend one result.
@@ -545,6 +549,13 @@ static void build_subroutines(BuildCtx *ctx)
   |->vm_unwind_ff_eh:			// Landing pad for external unwinder.
   |  endbr
   |  mov L:RB, SAVE_L
+  |  mov TMPRd, L:RB->ccallnest
+  |  mov CARG3d, L:RB->status
+  |  cmp CARG3d, LUA_ERRERR
+  |  je >5				// Keep depth while chaining handlers.
+  |  sub TMPRd, 1
+  |5:
+  |  mov L:RB->ccallnest, TMPRd
   |  mov BASE, L:RB->base
   |  mov DISPATCH, L:RB->glref		// Setup pointer to dispatch table.
   |  add DISPATCH, GG_G2DISP
@@ -1607,6 +1618,11 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov L:RB, SAVE_L
   |  lea RA, [BASE+NARGS:RD*8]
   |  cmp RA, L:RB->maxstack; ja ->fff_fallback
+  |  mov TMPRd, L:RB->ccallnest
+  |  cmp TMPRd, LJ_MAX_XLEVEL
+  |  jae ->fff_fallback
+  |  add TMPRd, 1
+  |  mov L:RB->ccallnest, TMPRd
   |  lea RA, [BASE+16]
   |  sub NARGS:RDd, 1
   |  mov PCd, 16+FRAME_PCALL
@@ -1628,6 +1644,11 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov L:RB, SAVE_L
   |  lea RA, [BASE+NARGS:RD*8]
   |  cmp RA, L:RB->maxstack; ja ->fff_fallback
+  |  mov TMPRd, L:RB->ccallnest
+  |  cmp TMPRd, LJ_MAX_XLEVEL
+  |  jae ->fff_fallback
+  |  add TMPRd, 1
+  |  mov L:RB->ccallnest, TMPRd
   |  mov LFUNC:RA, [BASE+8]
   |  checktp_nc LFUNC:RA, LJ_TFUNC, ->fff_fallback
   |  mov LFUNC:RB, [BASE]		// Swap function and traceback.

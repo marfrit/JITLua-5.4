@@ -1163,21 +1163,15 @@ void lj_record_call(jit_State *J, BCReg func, ptrdiff_t nargs)
 /* Record tail call. */
 void lj_record_tailcall(jit_State *J, BCReg func, ptrdiff_t nargs)
 {
-  /* A tail call to a C function (directly or via __call) keeps the Lua caller
-  ** frame alive and pushes an LJ_CONT_TAILRET continuation frame in the VM.
-  ** The recorder does not model that continuation frame (it would have to
-  ** synthesize the caller's return after the C function), so bail out and let
-  ** the interpreter run the call. This also keeps the error path in the
-  ** interpreter, which resolves the C function's short name correctly. */
+  /* Determine whether the callee is a C function (directly or via __call). */
+  int iscfunc;
   {
     TValue *ftv = &J->L->base[func];
-    if (tvisfunc(ftv)) {
-      if (!isluafunc(funcV(ftv)))
-	lj_trace_err(J, LJ_TRERR_NYIRETL);
-    } else {
+    if (tvisfunc(ftv))
+      iscfunc = !isluafunc(funcV(ftv));
+    else {
       cTValue *mo = lj_meta_lookup(J->L, ftv, MM_call);
-      if (!mo || !tvisfunc(mo) || !isluafunc(funcV(mo)))
-	lj_trace_err(J, LJ_TRERR_NYIRETL);
+      iscfunc = (!mo || !tvisfunc(mo) || !isluafunc(funcV(mo)));
     }
   }
   rec_call_setup(J, func, nargs);
@@ -1189,11 +1183,29 @@ void lj_record_tailcall(jit_State *J, BCReg func, ptrdiff_t nargs)
     J->base -= cbase;
     func += cbase;
   }
-  /* Move func + args down. */
-  if (LJ_FR2 && J->baseslot == 2)
-    J->base[func+1] = TREF_FRAME;
-  memmove(&J->base[-1-LJ_FR2], &J->base[func], sizeof(TRef)*(J->maxslot+1+LJ_FR2));
-  /* Note: the new TREF_FRAME is now at J->base[-1] (even for slot #0). */
+  if (iscfunc) {
+    /* The VM keeps the caller frame and pushes an LJ_CONT_TAILRET
+    ** continuation frame at J->base[func+4]. Mirror that layout in the
+    ** model: [func]=cont value, [func+1]=TREF_CONT, [func+2]=callee func,
+    ** [func+3]=TREF_FRAME, args at [func+4..]. Shift the func+frame+args
+    ** block up by two slots first. */
+    TRef *base = J->base + func;
+    ptrdiff_t i;
+    for (i = (ptrdiff_t)nargs + 1; i >= 0; i--)
+      base[i+2] = base[i];
+    base[0] = lj_ir_k64(J, IR_KNUM,
+			u64ptr(contptr((ASMFunction)(uintptr_t)LJ_CONT_TAILRET)));
+    base[1] = TREF_CONT;
+    J->base += func + 4;
+    J->baseslot += func + 4;
+    J->framedepth += 2;  /* The continuation contributes cont + frame. */
+  } else {
+    /* Move func + args down. */
+    if (LJ_FR2 && J->baseslot == 2)
+      J->base[func+1] = TREF_FRAME;
+    memmove(&J->base[-1-LJ_FR2], &J->base[func], sizeof(TRef)*(J->maxslot+1+LJ_FR2));
+    /* Note: the new TREF_FRAME is now at J->base[-1] (even for slot #0). */
+  }
   /* Tailcalls can form a loop, so count towards the loop unroll limit. */
   if (++J->tailcalled > J->loopunroll)
     lj_trace_err(J, LJ_TRERR_LUNROLL);
@@ -1246,6 +1258,7 @@ void lj_record_ret(jit_State *J, BCReg rbase, ptrdiff_t gotresults)
     frame = frame_prevd(frame);
     J->needsnap = 1;  /* Stop catching on-trace errors. */
   }
+retry_tailret:
   /* Return to lower frame via interpreter for unhandled cases. */
   if (J->framedepth == 0 && J->pt && bc_isret(bc_op(*J->pc)) &&
        (!frame_islua(frame) ||
@@ -1332,11 +1345,14 @@ void lj_record_ret(jit_State *J, BCReg rbase, ptrdiff_t gotresults)
     } else if (cont == lj_cont_tbc) {
       lj_trace_err(J, LJ_TRERR_NYIRETL);  /* 5.4 __close return: not recorded. */
     } else if (frame_contv(frame) == LJ_CONT_TAILRET) {
-      /* A tail call to a C function keeps the caller frame and pushes an
-      ** LJ_CONT_TAILRET continuation frame in the VM. lj_record_tailcall()
-      ** bails out on such a call, so this is a defensive guard against
-      ** mis-recording the continuation frame. */
-      lj_trace_err(J, LJ_TRERR_NYIRETL);
+      /* The C function was tail-called from the frame below: the
+      ** continuation returns the C results from that kept caller frame.
+      ** The generic continuation pop above already restored framedepth,
+      ** baseslot and base to the caller frame, so just process the
+      ** caller's own return. Rebase rbase to the pre-pop base. */
+      rbase += cbase;
+      frame = frame_prevd(frame);
+      goto retry_tailret;
     } else if (cont == lj_cont_nop) {
       /* Nothing to do here. */
     } else if (cont == lj_cont_cat) {

@@ -1208,6 +1208,23 @@ static int check_downrec_unroll(jit_State *J, GCproto *pt)
 static TRef rec_cat(jit_State *J, BCReg baseslot, BCReg topslot);
 
 /* Record return. */
+/* Trace-level pcall/xpcall C-call counter. delta=+1 emits the increment and
+** the exit-near-the-limit guard; delta=-1 emits the decrement. */
+void lj_record_ccallnest(jit_State *J, int delta)
+{
+  TRef th = emitir(IRT(IR_LREF, IRT_THREAD), 0, 0);
+  TRef cn = emitir(IRT(IR_FLOAD, IRT_INT), th, IRFL_THREAD_CCALLNEST);
+  TRef nv;
+  if (delta > 0) {
+    emitir(IRTG(IR_LT, IRT_INT), cn, lj_ir_kint(J, LJ_MAX_XLEVEL));
+    nv = emitir(IRTI(IR_ADD), cn, lj_ir_kint(J, 1));
+  } else {
+    nv = emitir(IRTI(IR_SUB), cn, lj_ir_kint(J, 1));
+  }
+  emitir(IRT(IR_FSTORE, IRT_INT),
+         emitir(IRT(IR_FREF, IRT_PGC), th, IRFL_THREAD_CCALLNEST), nv);
+}
+
 void lj_record_ret(jit_State *J, BCReg rbase, ptrdiff_t gotresults)
 {
   TValue *frame = J->L->base - 1;
@@ -1226,6 +1243,7 @@ void lj_record_ret(jit_State *J, BCReg rbase, ptrdiff_t gotresults)
     J->baseslot -= (BCReg)cbase;
     J->base -= cbase;
     J->base[--rbase] = TREF_TRUE;  /* Prepend true to results. */
+    lj_record_ccallnest(J, -1);  /* Leave the protected region. */
     frame = frame_prevd(frame);
     J->needsnap = 1;  /* Stop catching on-trace errors. */
   }

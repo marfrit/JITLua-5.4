@@ -193,6 +193,7 @@ IRFPMDEF(FPMENUM)
 #define IRFLDEF(_) \
   _(STR_LEN,	offsetof(GCstr, len)) \
   _(FUNC_ENV,	offsetof(GCfunc, l.env)) \
+  _(FUNC_ENVV,	offsetof(GCfunc, l.envv)) \
   _(FUNC_PC,	offsetof(GCfunc, l.pc)) \
   _(FUNC_FFID,	offsetof(GCfunc, l.ffid)) \
   _(THREAD_ENV,	offsetof(lua_State, env)) \

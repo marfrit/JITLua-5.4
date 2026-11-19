@@ -1276,6 +1276,20 @@ static int l_closefrom(lua_State *L)
   return 0;
 }
 
+/* Like l_closefrom, but keeps the status and the error object for the test. */
+static int l_closestat(lua_State *L)
+{
+  lua_State *co = lua_tothread(L, 1);
+  lua_pushinteger(L, lua_closethread(co, L));
+  lua_setglobal(L, "close_status");
+  if (lua_gettop(co) > 0 && lua_isstring(co, -1))
+    lua_pushstring(L, lua_tostring(co, -1));
+  else
+    lua_pushnil(L);
+  lua_setglobal(L, "close_msg");
+  return 0;
+}
+
 static lua_Integer thread_depth(lua_State *L, lua_State *co)
 {
   int nres = 0;
@@ -1404,6 +1418,76 @@ static void test_closethread(void)
     ok(lua_pcall(L, 3, 0, 0) == LUA_OK, "coroutine.close from 100 nested pcalls");
     d = thread_depth(L, co);
     ok(d == fresh, "coroutine.close: closer's nesting does not stay on the thread");
+    lua_pop(L, 2);
+  }
+
+  /* A thread resumed from C that yields inside pcall frames and is resumed
+  ** again: the frames that were pending at the yield return after the
+  ** resume has set the count anew (PUC lua_resume). The count must not go
+  ** below what the resume set, or the thread's next pcall fails. */
+  luaL_dostring(L,
+    "function yield_then_probe(n)\n"
+    "  nest(n)\n"
+    "  return depthprobe()\n"
+    "end");
+  {
+    int nres = 0;
+    lua_Integer fresh0 = -1, d = -2;
+    lua_State *fr = lua_newthread(L);
+    lua_getglobal(fr, "depthprobe");
+    if (lua_resume(fr, NULL, 0, &nres) == LUA_OK && nres == 1)
+      fresh0 = lua_tointeger(fr, -1);
+    ok(fresh0 > 100, "resume: a new thread resumed from C has the full pcall depth");
+    co = lua_newthread(L);
+    lua_getglobal(co, "yield_then_probe"); lua_pushinteger(co, 10);
+    ok(lua_resume(co, NULL, 1, &nres) == LUA_YIELD, "resume: suspended in 10 pcalls");
+    if (lua_resume(co, NULL, 0, &nres) == LUA_OK && nres == 1)
+      d = lua_tointeger(co, -1);
+    ok(d == fresh0, "resume: pcall depth is intact after yielding inside pcalls");
+    lua_pop(L, 2);
+  }
+
+  /* A close refused at the C-call bound (the closer is at the bound and a
+  ** __close handler is pending) calls no handler, like PUC, and must leave
+  ** no pending to-be-closed slot behind: the reset thread is used again, and
+  ** a stale slot would close a value of the next function a second time. */
+  luaL_dostring(L,
+    "bound_closed = 0\n"
+    "function tbcbody()\n"
+    "  local x <close> = setmetatable({}, {__close=function() bound_closed = bound_closed + 1 end})\n"
+    "  coroutine.yield()\n"
+    "  return 'done'\n"
+    "end");
+  {
+    int nres = 0, st;
+    lua_Integer room;
+    lua_getglobal(L, "depthprobe");
+    lua_call(L, 0, 1);
+    room = lua_tointeger(L, -1);  /* pcalls from here to the bound */
+    lua_pop(L, 1);
+    co = lua_newthread(L);
+    lua_getglobal(co, "tbcbody");
+    ok(lua_resume(co, L, 0, &nres) == LUA_YIELD, "close at the bound: suspended with a pending slot");
+    lua_getglobal(L, "closer_at");
+    lua_pushinteger(L, room);
+    lua_pushcfunction(L, l_closestat);
+    lua_pushthread(co); lua_xmove(co, L, 1);
+    ok(lua_pcall(L, 3, 0, 0) == LUA_OK, "close at the bound: closer ran");
+    lua_getglobal(L, "close_status");
+    ok(lua_tointeger(L, -1) == LUA_ERRRUN, "close at the bound: lua_closethread returns LUA_ERRRUN");
+    lua_getglobal(L, "close_msg");
+    ok(lua_isstring(L, -1) && strcmp(lua_tostring(L, -1), "C stack overflow") == 0,
+       "close at the bound: the error is C stack overflow");
+    lua_getglobal(L, "bound_closed");
+    ok(lua_tointeger(L, -1) == 0, "close at the bound: no handler was called");
+    lua_pop(L, 3);
+    lua_settop(co, 0);
+    lua_getglobal(co, "tbcbody");
+    st = lua_resume(co, L, 0, &nres);
+    if (st == LUA_YIELD) st = lua_resume(co, L, 0, &nres);
+    ok(st == LUA_OK && nres == 1, "close at the bound: the reset thread runs again");
+    lua_getglobal(L, "bound_closed");
+    ok(lua_tointeger(L, -1) == 1, "close at the bound: no stale slot, one handler call");
     lua_pop(L, 2);
   }
 

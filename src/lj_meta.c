@@ -722,6 +722,23 @@ void lj_meta_istype(lua_State *L, BCReg ra, BCReg tp)
   else lj_err_argtype(L, ra, lj_obj_itypename[tp]);
 }
 
+/* A stack overflow raised while resolving a call has no target frame yet. If
+** the caller is a fast pcall/xpcall (its C-frame pc is not a Lua frame), put
+** the same dummy frame in the func slot that lj_err_optype_call installs for
+** a non-callable target, so the overflow unwinds into the protected call
+** instead of escaping it. The VM's pcall path depends on this frame shape.
+*/
+static void stkov_callframe(lua_State *L, TValue *func)
+{
+  const BCIns *pc = cframe_Lpc(L);
+  if (((ptrdiff_t)pc & FRAME_TYPE) != FRAME_LUA) {
+    setframe_gc(func, obj2gco(L), LJ_TTHREAD);
+    if (LJ_FR2) func++;
+    setframe_pc(func, pc);
+    L->top = L->base = func+1;
+  }
+}
+
 /* Helper for calls. __call metamethod chain (PUC 5.4 luaD_tryfuncTM retry).
 ** Every callable object on the chain is prepended as an argument, innermost
 ** first, and the func slot finally holds the first plain function. The chain
@@ -729,8 +746,9 @@ void lj_meta_istype(lua_State *L, BCReg ra, BCReg tp)
 ** stack and a cyclic or over-long chain raises the usual "stack overflow"
 ** instead of a fixed depth limit. The stack may move while growing, so the
 ** caller gets the (possibly moved) func slot back and rebases its own
-** addresses; nargs is then derived from L->top. The prepends are done in one
-** linear shift here, unlike PUC's per-level shift, which is quadratic.
+** addresses; the number of prepended objects is reported through metanargs.
+** The prepends are done in one linear shift here, unlike PUC's per-level
+** shift, which is quadratic.
 */
 TValue *lj_meta_call(lua_State *L, TValue *func, TValue *top)
 {
@@ -747,7 +765,21 @@ TValue *lj_meta_call(lua_State *L, TValue *func, TValue *top)
       lj_err_optype_call(L, func);
     }
     n++;
-    lj_state_checkstack(L, n);  /* Reserve n extra slots; may move the stack. */
+    func = restorestack(L, fofs);
+    top = restorestack(L, tofs);
+    {
+      /* The call top may sit above L->top (L->top is frame-relative), so ask
+      ** for that distance plus the n slots this chain has added. */
+      MSize extra = (top > L->top) ? (MSize)(top - L->top) : 0;
+      MSize need = n + extra;
+      if ((mref(L->maxstack, char) - (char *)L->top) <=
+	  (ptrdiff_t)need*(ptrdiff_t)sizeof(TValue) &&
+	  L->stacksize + need >= LUAI_MAXSTACK) {
+	stkov_callframe(L, func);  /* Make the overflow catchable by pcall. */
+	lj_state_growstack(L, need);  /* No room left: raises stack overflow. */
+      }
+      lj_state_checkstack(L, need);  /* May move the stack. */
+    }
     if (tvisfunc(mo)) break;
     copyTV(L, &cur, mo);
   }

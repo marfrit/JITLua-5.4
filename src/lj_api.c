@@ -1581,11 +1581,13 @@ LUA_API int lua_setmetatable(lua_State *L, int idx)
   }
   g = G(L);
   if (tvistab(o)) {
-    setgcref(tabV(o)->metatable, obj2gco(mt));
+    if (mt) setgcref(tabV(o)->metatable, obj2gco(mt));
+    else setgcrefnull(tabV(o)->metatable);
     if (mt)
       lj_gc_objbarriert(L, tabV(o), mt);
   } else if (tvisudata(o) && !tvisi64(o)) {  /* boxed int64 is a number */
-    setgcref(udataV(o)->metatable, obj2gco(mt));
+    if (mt) setgcref(udataV(o)->metatable, obj2gco(mt));
+    else setgcrefnull(udataV(o)->metatable);
     if (mt)
       lj_gc_objbarrier(L, udataV(o), mt);
   } else {
@@ -1595,11 +1597,17 @@ LUA_API int lua_setmetatable(lua_State *L, int idx)
     o = index2adr(L, idx);  /* Stack may have been reallocated. */
     if (tvisbool(o)) {
       /* NOBARRIER: basemt is a GC root. */
-      setgcref(basemt_it(g, LJ_TTRUE), obj2gco(mt));
-      setgcref(basemt_it(g, LJ_TFALSE), obj2gco(mt));
+      if (mt) {
+	setgcref(basemt_it(g, LJ_TTRUE), obj2gco(mt));
+	setgcref(basemt_it(g, LJ_TFALSE), obj2gco(mt));
+      } else {
+	setgcrefnull(basemt_it(g, LJ_TTRUE));
+	setgcrefnull(basemt_it(g, LJ_TFALSE));
+      }
     } else {
       /* NOBARRIER: basemt is a GC root. */
-      setgcref(basemt_obj(g, o), obj2gco(mt));
+      if (mt) setgcref(basemt_obj(g, o), obj2gco(mt));
+      else setgcrefnull(basemt_obj(g, o));
     }
   }
   L->top--;

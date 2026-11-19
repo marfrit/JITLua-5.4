@@ -49,6 +49,8 @@ int LJ_FASTCALL lj_obj_equal(cTValue *o1, cTValue *o2)
 const void * LJ_FASTCALL lj_obj_ptr(global_State *g, cTValue *o)
 {
   UNUSED(g);
+  if (tvisi64(o))
+    return NULL;  /* a boxed int64 is a number, not a pointer */
   if (tvisudata(o))
     return uddata(udataV(o));
   else if (tvislightud(o))

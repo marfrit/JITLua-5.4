@@ -4,11 +4,11 @@
 # Reasons are triaged by root cause and tagged with the phase that fixes them.
 # Refresh with: tests/harness.sh --mode all --update-known-bad (keeps reasons).
 tests/corpus/puc54/calls.lua	*	PENDING VM WORK: pcall/xpcall nesting bound and __call-chain argument prepending are on branch wip-calls-vm; mode A also stops at line 359 (arbitrary _ENV). The message-handler re-entry bound is in this commit.
-tests/corpus/puc54/closure.lua	B	PERF: JIT-on arm exceeds 600s while A (JIT-off) passes; JIT slowdown to triage
 tests/corpus/puc54/db.lua	A	P5: debug.getinfo(1,"t").istailcall must be true without a hook; Fable tail marks exist only while a call hook is installed (db.lua:619). nups/getlocal now match.
-tests/corpus/puc54/heavy.lua	A	PERF/memory: reference needs near 8G and OOM-kills the box; excluded from the default corpus discovery, run alone with --include-heavy on a >8G box.
+tests/corpus/puc54/heavy.lua	*	IMPL-DEFINED: under a 4GiB RLIMIT_AS (--include-heavy) both sides end in an allowed resource error but cannot match: measured on x86_64 and aarch64, PUC reports "not enough memory" at #a=134217728 (peak ~2.0GiB RSS; the stop size varies with allocator fragmentation) while LuaJIT reports "heavy.lua:154: table overflow" at #a=201326592 (peak ~3.3GiB); collectgarbage'count' bytes and the per-MiB stderr counters differ in every mode.
 tests/d54/dump_02_border.lua	A	IMPL-DEFINED: dump/reload border bug FIXED and rawlen added; only the runtime-built sparse-table border differs (any border is legal per the 5.4 manual)
 tests/d54/err_02_tailname.lua	A	P1.8b: tail-call error names -- LuaJIT reuses the caller frame, so the loaded-module fallback reports 'string.rep' where 5.4 reports the short 'rep'. Non-tail and pcall paths match.
-tests/d54/gc_01_tbc_gc.lua	A	IMPL-DEFINED: LuaJIT runs __gc only for userdata, not tables (PUC 5.4 finalizes tables); gc options now match
+tests/d54/gc_01_tbc_gc.lua	A	PENDING: LuaJIT runs __gc only for userdata, not tables (PUC 5.4 finalizes tables, manual 2.5.3; named VM gap); gc options now match
 tests/d54/tbl_03_border_divergence.lua	A	IMPL-DEFINED: runtime-built sparse tables may report any legal border (5.4 manual 3.4.7); LuaJIT's array-growth policy differs from PUC's alimit hint
 tests/d54/dump_03_version.lua	A	FORK: private dump format (JITLua-5.4 fork); PUC 5.4.9 cannot round-trip it, mode R checks ours
+tests/d54/env_05_envvalue.lua	A	PENDING: load()/loadfile() must accept any value as the environment (PUC stores it as the _ENV upvalue); table-only env is VM work on wip-calls-vm

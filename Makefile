@@ -167,9 +167,17 @@ amalg:
 	$(MAKE) -C src amalg
 	@echo "==== Successfully built LuaJIT $(MMVERSION) (amalgamation) ===="
 
+# Differential checks: builds if needed, then compares this fork against the
+# PUC-Lua 5.4.9 reference and itself (JIT on/off) over tests/d54.  Without a
+# local reference tarball it falls back to the JIT-vs-interpreter mode alone.
+check: $(INSTALL_DEP)
+	@echo "==== Checking LuaJIT $(MMVERSION) (differential harness, modes A+B) ===="
+	@sh tests/check.sh
+	@echo "==== Differential checks passed ===="
+
 clean:
 	$(MAKE) -C src clean
 
-.PHONY: all install amalg clean
+.PHONY: all install amalg check clean
 
 ##############################################################################

@@ -1168,6 +1168,13 @@ static void build_subroutines(BuildCtx *ctx)
   |  ccmn ITYPE, #-LJ_TUDATA, #4, ne
   |   and TAB:CARG1, CARG1, #LJ_GCVMASK
   |  bne >6
+  |  cmn ITYPE, #-LJ_TTAB
+  |  beq >1
+  |  ldrb TMP2w, UDATA:CARG1->udtype
+  |  cmp TMP2w, #UDTYPE_I64BOX
+  |  bne >1
+  |  ldr TAB:RB, GL->gcroot[GCROOT_BASEMT_NUM]
+  |  b >2
   |1:  // Field metatable must be at same offset for GCtab and GCudata!
   |  ldr TAB:RB, TAB:CARG1->metatable
   |2:

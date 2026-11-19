@@ -397,6 +397,8 @@ lua_State *lj_state_new(lua_State *L)
   L1->errnestofs = 0;
   setmrefr(L1->glref, L->glref);
   setgcrefr(L1->env, L->env);
+  /* PUC lua_newthread: the area starts as a copy of the MAIN thread's. */
+  L1->extraspace = mainthread(G(L))->extraspace;
   stack_init(L1, L);  /* init stack */
   lj_assertL(iswhite(obj2gco(L1)), "new thread object is not white");
   return L1;

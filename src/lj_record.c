@@ -1383,14 +1383,7 @@ int lj_record_mm_lookup(jit_State *J, RecordIndex *ix, MMS mm)
   if (tref_istab(ix->tab)) {
     mt = tabref(tabV(&ix->tabv)->metatable);
     mix.tab = emitir(IRT(IR_FLOAD, IRT_TAB), ix->tab, IRFL_TAB_META);
-  } else if (tvisi64(&ix->tabv)) {
-    /* ADR-001b step 4: a boxed int64 is an immutable number -- it has no
-    ** metatable, and taking the "special userdata" branch below dereferenced
-    ** the NULL metatable (segfault measured on a traced tostring). */
-    ix->mt = TREF_NIL;
-    ix->mtv = NULL;  /* no metatable */
-    return 0;  /* No metamethod. */
-  } else if (tref_isudata(ix->tab)) {
+  } else if (tref_isudata(ix->tab) && !tvisi64(&ix->tabv)) {
     int udtype = udataV(&ix->tabv)->udtype;
     mt = tabref(udataV(&ix->tabv)->metatable);
     mix.tab = emitir(IRT(IR_FLOAD, IRT_TAB), ix->tab, IRFL_UDATA_META);
@@ -1877,8 +1870,49 @@ static int nommstr(jit_State *J, TRef key)
   return 1;  /* CANNOT be a metamethod name. */
 }
 
+static TRef rec_idx(jit_State *J, RecordIndex *ix, int tabguard);
+
+/* Runtime guard for a table that a trace reads entries from.
+**
+** A trace is shaped by the weakness of its tables at record time: a trace
+** that read a weak table keeps its allocations and clears dead stack slots
+** at the loop's GC check (GCtrace.weak), any other trace does neither. So
+** guard the metatable and the value of its __mode field. The field is looked
+** up like any other constant key, with the metatable as a constant: one
+** invariant check per metatable and trace. Do not use the negative metamethod
+** cache (nomm) for this: every string-keyed store to the metatable clears it.
+*/
+static void rec_tabguard(jit_State *J, TRef tab, GCtab *t)
+{
+  GCtab *mt = tabref(t->metatable);
+  TRef mtref = emitir(IRT(IR_FLOAD, IRT_TAB), tab, IRFL_TAB_META);
+  if (mt == NULL) {
+    emitir(IRTG(IR_EQ, IRT_TAB), mtref, lj_ir_knull(J, IRT_TAB));
+  } else {
+    GCstr *mmstr = mmname_str(J2G(J), MM_mode);
+    cTValue *mode = lj_tab_getstr(mt, mmstr);
+    TRef kmt = lj_ir_ktab(J, mt);
+    RecordIndex mix;
+    TRef trmode;
+    emitir(IRTG(IR_EQ, IRT_TAB), mtref, kmt);
+    mix.tab = kmt;
+    settabV(J->L, &mix.tabv, mt);
+    mix.key = lj_ir_kstr(J, mmstr);
+    setstrV(J->L, &mix.keyv, mmstr);
+    mix.val = 0;
+    mix.idxchain = 0;
+    trmode = rec_idx(J, &mix, 0);  /* Guards the type or the absence. */
+    if (mode && tvisstr(mode)) {
+      GCstr *str = strV(mode);
+      emitir(IRTG(IR_EQ, IRT_STR), trmode, lj_ir_kstr(J, str));
+      if (strchr(strdata(str), 'k') || strchr(strdata(str), 'v'))
+	J->cur.weak = 1;
+    }
+  }
+}
+
 /* Record indexed load/store. */
-TRef lj_record_idx(jit_State *J, RecordIndex *ix)
+static TRef rec_idx(jit_State *J, RecordIndex *ix, int tabguard)
 {
   TRef xref;
   IROp xrefop, loadop;
@@ -1926,6 +1960,10 @@ TRef lj_record_idx(jit_State *J, RecordIndex *ix)
     if (--ix->idxchain == 0)
       lj_trace_err(J, LJ_TRERR_IDXLOOP);
   }
+
+  /* Guard the weakness of this table operand (not for the guard's lookup). */
+  if (tabguard)
+    rec_tabguard(J, ix->tab, tabV(&ix->tabv));
 
   /* First catch nil and NaN keys for tables. */
   if (tvisnil(&ix->keyv) || (tvisnum(&ix->keyv) && tvisnan(&ix->keyv))) {
@@ -2051,11 +2089,17 @@ static IRType rec_next_types(GCtab *t, uint32_t idx)
   return IRT_NIL + (IRT_NIL << 8);
 }
 
+TRef lj_record_idx(jit_State *J, RecordIndex *ix)
+{
+  return rec_idx(J, ix, 1);
+}
+
 /* Record a table traversal step aka next(). */
 int lj_record_next(jit_State *J, RecordIndex *ix)
 {
   IRType t, tkey, tval;
   TRef trvk;
+  rec_tabguard(J, ix->tab, tabV(&ix->tabv));
   t = rec_next_types(tabV(&ix->tabv), ix->keyv.u32.lo);
   tkey = (t & 0xff); tval = (t >> 8);
   trvk = lj_ir_call(J, IRCALL_lj_vm_next, ix->tab, ix->key);
@@ -3355,6 +3399,7 @@ void lj_record_setup(jit_State *J)
     GCtrace *T = traceref(J, J->parent);
     TraceNo root = T->root ? T->root : J->parent;
     J->cur.root = (uint16_t)root;
+    J->cur.weak = T->weak;  /* Keep allocations in side traces, too. */
     J->cur.startins = BCINS_AD(BC_JMP, 0, 0);
     /* Check whether we could at least potentially form an extra loop. */
     if (J->exitno == 0 && T->snap[0].nent == 0) {

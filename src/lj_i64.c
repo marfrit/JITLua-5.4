@@ -430,8 +430,10 @@ int LJ_FASTCALL lj_i64_compare(cTValue *a, cTValue *b, int op, int *res)
     return 1;
   }
   /* int64 against a float: compare mathematically exactly via long double
-  ** (aarch64/x86-64 long double has a 64-bit mantissa, so int64 is exact). */
-  if ((ka || kb) && (tvisnumber(a) || tvisnumber(b))) {
+  ** (aarch64/x86-64 long double has a 64-bit mantissa, so int64 is exact).
+  ** tvisnum, not tvisnumber: a widened inline integer is itself "a number",
+  ** and reading the other operand as a float then would be garbage. */
+  if ((ka || kb) && (tvisnum(a) || tvisnum(b))) {
     long double x = ka ? (long double)ia : (long double)numberVnum(a);
     long double y = kb ? (long double)ib : (long double)numberVnum(b);
     *res = (op == 0) ? (x == y) : (op == 1) ? (x < y) : (x <= y);

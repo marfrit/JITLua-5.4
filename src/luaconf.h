@@ -103,6 +103,9 @@
 #define LUAI_GCMUL	200	/* Run GC at 200% of allocation speed. */
 #define LUA_MAXCAPTURES	32	/* Max. pattern captures. */
 
+/* Raw per-thread memory area reachable through lua_getextraspace (Lua 5.4). */
+#define LUA_EXTRASPACE	(sizeof(void *))
+
 /* Configuration for the frontend (the luajit executable). */
 #if defined(luajit_c)
 #define LUA_PROGNAME	"luajit"  /* Fallback frontend name. */

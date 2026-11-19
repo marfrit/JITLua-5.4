@@ -411,6 +411,7 @@ LUA_API lua_Integer lua_tointegerx (lua_State *L, int idx, int *isnum);
 LUA_API int lua_isyieldable (lua_State *L);
 
 /* From Lua 5.4. */
+LUA_API void *lua_getextraspace (lua_State *L);
 LUA_API void *lua_newuserdatauv (lua_State *L, size_t sz, int nuvalue);
 LUA_API int lua_getiuservalue (lua_State *L, int idx, int n);
 LUA_API int lua_setiuservalue (lua_State *L, int idx, int n);

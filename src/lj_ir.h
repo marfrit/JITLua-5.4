@@ -608,6 +608,11 @@ static LJ_AINLINE int ir_sideeff(IRIns *ir)
   return (((ir->t.irt | ~IRT_GUARD) & lj_ir_mode[ir->o]) >= IRM_S);
 }
 
+/* Allocate a GC object (the assembler raises a GC step for these). */
+#define ir_isalloc(o) \
+  ((o) == IR_SNEW || (o) == IR_XSNEW || (o) == IR_TNEW || (o) == IR_TDUP || \
+   (o) == IR_CNEW || (o) == IR_CNEWI || (o) == IR_TOSTR || (o) == IR_BUFSTR)
+
 LJ_STATIC_ASSERT((int)IRT_GUARD == (int)IRM_W);
 
 /* Replace IR instruction with NOP. */

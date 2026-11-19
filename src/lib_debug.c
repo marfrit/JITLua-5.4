@@ -276,7 +276,7 @@ LJLIB_CF(debug_upvaluejoin)
 LJLIB_CF(debug_getuservalue)
 {
   int n = (int)luaL_optinteger(L, 2, 1);
-  if (!(L->base < L->top && tvisudata(L->base))) {
+  if (!(L->base < L->top && tvisudata(L->base) && !tvisi64(L->base))) {
     lua_pushnil(L);  /* luaL_pushfail: a non-userdata is not an error. */
     return 1;
   }
@@ -292,7 +292,7 @@ LJLIB_CF(debug_getuservalue)
 LJLIB_CF(debug_setuservalue)
 {
   int n;
-  if (!(L->base < L->top && tvisudata(L->base)))
+  if (!(L->base < L->top && tvisudata(L->base) && !tvisi64(L->base)))
     lj_err_argt(L, 1, LUA_TUSERDATA);
   luaL_checkany(L, 2);
   n = (int)luaL_optinteger(L, 3, 1);

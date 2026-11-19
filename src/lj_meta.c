@@ -70,7 +70,7 @@ cTValue *lj_meta_lookup(lua_State *L, cTValue *o, MMS mm)
   GCtab *mt;
   if (tvistab(o))
     mt = tabref(tabV(o)->metatable);
-  else if (tvisudata(o))
+  else if (tvisudata(o) && !tvisi64(o))  /* boxed int64 is a number */
     mt = tabref(udataV(o)->metatable);
   else
     mt = tabref(basemt_obj(G(L), o));

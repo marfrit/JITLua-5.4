@@ -1810,9 +1810,9 @@ static void build_subroutines(BuildCtx *ctx)
   |  test byte [DISPATCH+DISPATCH_GL(hookmask)], LUA_MASKRET
   |  jz >1
   |  mov L:RB, SAVE_L
+  |  mov CARG2, BASE			// Before CARG3 (= BASE on SysV).
   |  mov CARG3d, 1
   |  xor CARG4d, CARG4d
-  |  mov CARG2, BASE
   |  mov CARG1, L:RB
   |  call extern lj_dispatch_pret	// (lua_State *L, TValue *res, int n, int prepend)
   |  mov BASE, L:RB->base

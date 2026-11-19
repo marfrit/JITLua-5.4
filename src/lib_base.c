@@ -863,11 +863,10 @@ LUALIB_API int luaopen_base(lua_State *L)
   settabV(L, lj_tab_setstr(L, env, lj_str_newlit(L, "_G")), env);
   /* Lua 5.4: the chunk environment is _ENV. LuaJIT resolves globals through
   ** the function env; the VM special-cases the interned "_ENV" key so reads
-  ** yield the env and writes retarget it (function scope, see docs). */
-  { GCstr *envstr = lj_str_newlit(L, "_ENV");
-    setgcref(G(L)->gcroot[GCROOT_ENVSTR], obj2gco(envstr));
-    /* No _G._ENV entry: PUC's _ENV is an upvalue, not a global. */
-  }
+  ** yield the env and writes retarget it (function scope, see docs).
+  ** The interned string itself is created at state creation (lj_state.c), so
+  ** a state without the base library can parse and record global accesses.
+  ** No _G._ENV entry: PUC's _ENV is an upvalue, not a global. */
   lua_pushliteral(L, LUA_VERSION);  /* top-3. */
   newproxy_weaktable(L);  /* top-2. */
   LJ_LIB_REG(L, "_G", base);

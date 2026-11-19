@@ -296,7 +296,11 @@ LUA_API lua_State *lua_newstate(lua_Alloc allocf, void *allocd)
   setmref(L->hookff, NULL);
   L->errnest = 0;
   L->errnestofs = 0;
-  L->ccallnest = 0;
+  /* PUC's nCcalls includes the C frames that entered the main chunk
+  ** (lua_cpcall/lua_pcall etc.); ccallnest only counts the pcall/xpcall
+  ** fast paths, so a fixed baseline stands in for the standalone embedding
+  ** and makes the absolute depth match PUC. Deltas are unaffected. */
+  L->ccallnest = LJ_CCALLNEST_BASE;
   setmref(L->glref, g);
   g->gc.currentwhite = LJ_GC_WHITE0 | LJ_GC_FIXED;
   g->strempty.marked = LJ_GC_WHITE0;

@@ -1876,14 +1876,25 @@ LUA_API int lua_yieldk(lua_State *L, int nresults, lua_KContext ctx,
   return lua_yield(L, nresults);
 }
 
-/* Lua 5.4 signature: from is the resuming thread (ignored here; LuaJIT resumes
-** on the state itself) and *nres receives the number of results. */
+/* Lua 5.4 signature: from is the resuming thread and *nres receives the
+** number of results. Besides the state itself, PUC's lua_resume uses from for
+** the C-call count: the resumed thread inherits the resumer's nesting plus one
+** (its own resume call), so only 200 - nesting C calls remain usable. At the
+** bound the resume itself is the error, with the same stack shape as PUC's
+** resume_error. */
 LUA_API int lua_resume(lua_State *L, lua_State *from, int nargs, int *nres)
 {
   int st;
-  UNUSED(from);
   if (nres) *nres = 0;
   if (L->cframe == NULL && L->status <= LUA_YIELD) {
+    L->ccallnest = from ? from->ccallnest : 0;  /* PUC lua_resume */
+    if (L->ccallnest >= LJ_MAX_XLEVEL) {  /* PUC resume_error */
+      L->top -= nargs;  /* remove args from the stack */
+      setstrV(L, L->top, lj_err_str(L, LJ_ERR_CSTKOV));
+      incr_top(L);
+      return LUA_ERRRUN;
+    }
+    L->ccallnest++;
     st = lj_vm_resume(L,
       L->status == LUA_OK ? api_call_base(L, nargs) : L->top - nargs,
       0, 0);

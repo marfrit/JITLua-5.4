@@ -893,6 +893,15 @@ int lj_meta_tbccloseall(lua_State *L, TValue *level, TValue *err)
   int errinstack = (err >= tvref(L->stack) && err < tvref(L->maxstack));
   ptrdiff_t eofs = errinstack ? savestack(L, err) : 0;
   int status = LUA_OK;
+  /* The call sites set L->ccallnest to the closer's count + 1, which is the
+  ** count PUC's C call into the first __close handler adds. PUC errors when
+  ** that handler call would reach the bound; mirror it here without the C
+  ** call. Only a pending handler can hit it: closing a thread with no
+  ** to-be-closed slots never calls a handler, so PUC does not error there. */
+  if (L->tbcn > 0 && L->ccallnest > LJ_MAX_XLEVEL) {
+    setstrV(L, err, lj_err_str(L, LJ_ERR_CSTKOV));
+    return LUA_ERRRUN;
+  }
   while (L->tbcn > 0) {
     int32_t *list = mref(L->tbclist, int32_t);
     TValue *o = restorestack(L, list[L->tbcn-1]);

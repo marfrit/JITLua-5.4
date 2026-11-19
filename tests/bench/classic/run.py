@@ -123,8 +123,9 @@ def main():
     if not OURS.is_file() or not REF.is_file():
         sys.exit("need src/luajit and tests/ref/bin/lua54ref (build/fetch first)")
     stock = STOCK / "src" / "luajit"
-    arms = [("stock", [str(stock), "-jon"]), ("ours", [str(OURS), "-jon"]),
-            ("puc", [str(REF)])]
+    arms = [("stock", [str(stock), "-jon"]), ("ours", [str(OURS), "-jon"])]
+    if os.environ.get("BENCH_PUC", "1") != "0":
+        arms.append(("puc", [str(REF)]))
     rows = []
     for name, (script, argv, stdin_name, compare) in BENCHES.items():
         if name == "deltablue":
@@ -132,27 +133,29 @@ def main():
         else:
             cwd = SRC
         stdin_file = str(BENCH / stdin_name) if stdin_name else None
-        data = {}
-        for label, prefix in arms:
-            vals, outs, errs = [], [], []
-            for _ in range(REPS):
+        data = {label: {"vals": [], "outs": [], "errs": []} for label, _ in arms}
+        # Interleave the arms: stock, ours, puc, stock, ours, puc, ... so a
+        # thermal or load drift on the box hits every arm, not just the last.
+        for _ in range(REPS):
+            for label, prefix in arms:
                 dt, out, err = run_one(prefix + [script] + argv, cwd, stdin_file)
-                if dt is None:
-                    vals.append(None); outs.append(out); errs.append(err)
-                else:
-                    vals.append(dt); outs.append(out); errs.append(err)
-            ok_vals = [v for v in vals if v is not None]
-            med = median(ok_vals) if ok_vals else None
-            data[label] = {"median_ms": med, "stdout": outs[0] if outs else b"",
-                           "stderr": errs[-1] if errs else b"", "runs": vals}
+                d = data[label]
+                d["vals"].append(dt); d["outs"].append(out); d["errs"].append(err)
+        for label, _ in arms:
+            d = data[label]
+            ok_vals = [v for v in d["vals"] if v is not None]
+            d["median_ms"] = median(ok_vals) if ok_vals else None
+            d["stdout"] = d["outs"][0] if d["outs"] else b""
+            d["stderr"] = d["errs"][-1] if d["errs"] else b""
+            d["runs"] = d["vals"]
         so, oo = data["stock"]["median_ms"], data["ours"]["median_ms"]
-        po = data["puc"]["median_ms"]
+        po = data["puc"]["median_ms"] if "puc" in data else None
         ratio = (so / oo) if (so and oo) else None
         ratio_puc = (po / oo) if (po and oo) else None
         diff = ""
         if compare and data["stock"]["stdout"] != data["ours"]["stdout"]:
             diff = "stock!=ours"
-        if compare and data["puc"]["stdout"] != data["ours"]["stdout"]:
+        if po and compare and data["puc"]["stdout"] != data["ours"]["stdout"]:
             diff = (diff + ",puc!=ours").strip(",")
         rows.append({"bench": name, "stock": so, "ours": oo, "puc": po,
                      "stock_ours_ratio": ratio, "puc_ours_ratio": ratio_puc,

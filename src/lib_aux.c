@@ -9,6 +9,8 @@
 #include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #define lib_aux_c
 #define LUA_LIB
@@ -486,6 +488,24 @@ static int panic(lua_State *L)
   return 0;
 }
 
+/* Opt-in GC policy mode, read once when the state is created so that every
+** embedder using luaL_newstate() honours LUAJIT_GC.  Unknown values are
+** ignored silently.  Runtime collectgarbage("setpause"/"setstepmul")
+** overrides this.  Default is the unchanged stock policy (200/200).
+*/
+static void gc_policy_mode(lua_State *L)
+{
+  const char *mode = getenv("LUAJIT_GC");
+  if (mode == NULL) return;
+  if (strcmp(mode, "memory") == 0) {
+    lua_gc(L, LUA_GCSETPAUSE, LUAI_GCMEM_PAUSE);
+    lua_gc(L, LUA_GCSETSTEPMUL, LUAI_GCMEM_MUL);
+  } else if (strcmp(mode, "speed") == 0) {
+    lua_gc(L, LUA_GCSETPAUSE, LUAI_GCPAUSE);
+    lua_gc(L, LUA_GCSETSTEPMUL, LUAI_GCMUL);
+  }
+}
+
 #ifndef LUAJIT_DISABLE_VMEVENT
 /* PUC luaE_warnerror(L, "__gc"): an error in a finalizer becomes a warning
 ** (off by default, like PUC), never a propagated error. */
@@ -522,6 +542,7 @@ LUALIB_API lua_State *luaL_newstate(void)
   lua_State *L = lua_newstate(mem_alloc, NULL);
   if (L) {
     G(L)->panic = panic;
+    gc_policy_mode(L);
 #ifndef LUAJIT_DISABLE_VMEVENT
     luaL_findtable(L, LUA_REGISTRYINDEX, LJ_VMEVENTS_REGKEY, LJ_VMEVENTS_HSIZE);
     lua_pushcfunction(L, error_finalizer);
@@ -545,6 +566,7 @@ LUALIB_API lua_State *luaL_newstate(void)
 #endif
   if (L) {
     G(L)->panic = panic;
+    gc_policy_mode(L);
 #ifndef LUAJIT_DISABLE_VMEVENT
     luaL_findtable(L, LUA_REGISTRYINDEX, LJ_VMEVENTS_REGKEY, LJ_VMEVENTS_HSIZE);
     lua_pushcfunction(L, error_finalizer);

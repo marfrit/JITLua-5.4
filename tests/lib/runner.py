@@ -7,6 +7,8 @@ Modes
   R  our LuaJIT direct run    vs  string.dump -> load -> run (serializer round-trip)
 
 A test passes when exit status, normalized stdout and normalized stderr agree.
+A test whose `--! modes:` line excludes A has no reference arm and must also
+end with status 0: two arms that fail the same assertion prove nothing.
 Normalization is deliberately conservative (see canon/canon_err): whitespace,
 absolute paths, heap addresses and the program-name prefix of error messages.
 Number formatting, error wording and error line numbers are NOT normalized --

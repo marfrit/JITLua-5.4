@@ -129,7 +129,9 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   GC root. A guard on the metatable and on its `__mode` field exits the trace
   when a table becomes weak (or strong) after the trace was compiled; the
   guard covers the table an entry is read from, the links of an `__index`
-  chain and the metatable included (`weak_index_chain.lua`). Cause,
+  chain and the metatable included (`weak_index_chain.lua`), and a side trace
+  that reads a weak table makes its root trace clear the dead slots too
+  (`weak_metatable_mode.lua`). Cause,
   fix and limits: `docs/bug-weak-table-jit-loop.md`; tests:
   `tests/d54/weak_*.lua`.
   Not a difference: a loop that allocates nothing never runs the collector, so

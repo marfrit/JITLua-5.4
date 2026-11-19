@@ -20,16 +20,16 @@ Status as measured, not a compatibility claim:
 
 - Differential gates against PUC Lua 5.4.9 pass on the tested platforms.
   Measured on Linux arm64 and x86_64, identical on both, on the `tests/d54`
-  edge-case corpus: A+B **212 PASS / 0 FAIL / 4 XFAIL**, JIT optimization
-  levels 0–3 **468**, R (dump/reload round-trip) **114**; the ASan/UBSan run
-  of A+B+R is **326 PASS / 0 FAIL / 4 XFAIL**; C API checks **258 + 92 + 18**
+  edge-case corpus: A+B **216 PASS / 0 FAIL / 4 XFAIL**, JIT optimization
+  levels 0–3 **480**, R (dump/reload round-trip) **117**; the ASan/UBSan run
+  of A+B+R is **333 PASS / 0 FAIL / 4 XFAIL**; C API checks **258 + 92 + 18**
   plus the `udfinal` probe, which prints the same counters as the PUC binary.
 - The C API is **source-compatible** with PUC Lua 5.4, **not
   binary-compatible**: C modules must be rebuilt against JITLua's headers.
   A module built against PUC's headers that calls `luaL_checkversion` (as
   `luaL_newlib` does) is rejected at load.
 - Full corpus (PUC 5.4.9 test suite plus `tests/d54`) with `--strict`, the
-  exact command of the public CI: **382 PASS / 0 FAIL / 8 XFAIL / 12 SKIP /
+  exact command of the public CI: **389 PASS / 0 FAIL / 8 XFAIL / 12 SKIP /
   0 TIMEOUT**. Every XFAIL has its reason in one of two lists:
   [tests/known-bad.tsv](tests/known-bad.tsv) for real defects, and
   [tests/known-different.tsv](tests/known-different.tsv) for deliberate or

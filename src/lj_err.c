@@ -899,6 +899,11 @@ LJ_NOINLINE void lj_err_mem(lua_State *L)
       L->top = L->base;
       setframe_gc(L->base - 1 - LJ_FR2, obj2gco(L), LJ_TTHREAD);
     }
+  } else if (L->top < L->base) {
+    /* A fast function that allocates on its inline path (tostring of a
+    ** number, the string functions) sets L->base, but not L->top. A stale
+    ** top below the frame would put the message into a live frame. */
+    L->top = L->base;
   }
   setstrV(L, L->top++, lj_err_str(L, LJ_ERR_ERRMEM));
   lj_err_throw(L, LUA_ERRMEM);

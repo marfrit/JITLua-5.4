@@ -1136,6 +1136,138 @@ static void test_toclose(void)
   lua_close(L);
 }
 
+/* Wraps the allocator of a state: allocation fails once an armed byte
+** budget is used up. Wrapping keeps the built-in allocator, so this works on
+** targets where the system heap is outside the GC address range. */
+static lua_Alloc lim_orig;
+static void *lim_origud;
+static long long lim_used, lim_max;
+static int lim_on;
+static void *limalloc(void *ud, void *ptr, size_t osize, size_t nsize)
+{
+  long long old = ptr ? (long long)osize : 0;
+  void *q;
+  (void)ud;
+  if (nsize == 0) { lim_used -= old; return lim_orig(lim_origud, ptr, osize, 0); }
+  if (lim_on && (long long)nsize > old && lim_used - old + (long long)nsize > lim_max)
+    return NULL;
+  q = lim_orig(lim_origud, ptr, osize, nsize);
+  if (q) lim_used += (long long)nsize - old;
+  return q;
+}
+
+static int lim_arm_c(lua_State *L)
+{
+  lim_max = lim_used + (long long)lua_tointeger(L, 1);
+  lim_on = 1;
+  return 0;
+}
+
+static int lim_disarm_c(lua_State *L)
+{
+  (void)L;
+  lim_on = 0;
+  return 0;
+}
+
+/* An out-of-memory error raised inside pcall/xpcall is caught by that call
+** and leaves the pcall nesting counter unchanged, with the loop compiled or
+** interpreted. The allocation that fails is the tostring() of a number: the
+** only allocation of the loop, with and without a guard after it in the
+** protected call. The third case fails after the protected call returned. */
+static const char *oom_pcall_src =
+  "local function depth()\n"
+  "  local n = 0\n"
+  "  local function rec() n = n + 1; pcall(rec) end\n"
+  "  pcall(rec)\n"
+  "  return n\n"
+  "end\n"
+  "local d0 = depth()\n"
+  "local out = {}\n"
+  "local function case(spin)\n"
+  "  spin(300)\n"
+  "  collectgarbage()\n"
+  "  arm(32768)\n"
+  "  local ok, bad = pcall(spin, 10000000)\n"
+  "  disarm()\n"
+  "  collectgarbage()\n"
+  "  out[#out + 1] = tostring(ok) .. ' ' .. tostring(bad) .. ' ' .. (depth() - d0)\n"
+  "end\n"
+  "case(function(n)\n"
+  "  local bad, s = 0, 0.5\n"
+  "  for i = 1, n do\n"
+  "    local ok, v = pcall(tostring, i + 0.5)\n"
+  "    if not ok then bad = bad + 1; break end\n"
+  "    s = s + #v\n"
+  "  end\n"
+  "  return bad\n"
+  "end)\n"
+  "local xs = {}\n"
+  "for i = 1, 64 do xs[i] = i end\n"
+  "local function g(x) local s = tostring(x + 0.5); return #s + xs[(x & 63) + 1] end\n"
+  "case(function(n)\n"
+  "  local bad, s = 0, 0.5\n"
+  "  for i = 1, n do\n"
+  "    local ok, v = pcall(g, i)\n"
+  "    if not ok then bad = bad + 1; break end\n"
+  "    s = s + v\n"
+  "  end\n"
+  "  return bad\n"
+  "end)\n"
+  "case(function(n)\n"
+  "  local bad, s = 0, 0.5\n"
+  "  for i = 1, n do\n"
+  "    local ok, v = xpcall(tostring, print, i + 0.5)\n"
+  "    if not ok then bad = bad + 1; break end\n"
+  "    s = s + #v\n"
+  "  end\n"
+  "  return bad\n"
+  "end)\n"
+  "local function id(x) return x end\n"
+  "case(function(n)\n"
+  "  local s = 0.5\n"
+  "  for i = 1, n do\n"
+  "    local ok, v = pcall(id, i)\n"
+  "    s = s + #tostring(v + 0.5)\n"
+  "  end\n"
+  "  return 'no error'\n"
+  "end)\n"
+  "out[#out + 1] = tostring(pcall(pcall, pcall, tostring, 'x'))\n"
+  "return table.concat(out, '; ')\n";
+
+static void test_oom_pcall(void)
+{
+  static const char *want =
+    "true 1 0; true 1 0; true 1 0; false not enough memory 0; true";
+  int jiton;
+  for (jiton = 1; jiton >= 0; jiton--) {
+    lua_State *L;
+    const char *res;
+    L = newL();
+    lim_used = 0; lim_on = 0;
+    lim_orig = lua_getallocf(L, &lim_origud);
+    lua_setallocf(L, limalloc, NULL);
+    lua_pushcfunction(L, lim_arm_c); lua_setglobal(L, "arm");
+    lua_pushcfunction(L, lim_disarm_c); lua_setglobal(L, "disarm");
+    if (!jiton) luaL_dostring(L, "if jit then jit.off() end");
+    if (luaL_dostring(L, oom_pcall_src)) {
+      lim_on = 0;
+      printf("oom_pcall (%s): %s\n", jiton ? "jit on" : "jit off",
+	     lua_tostring(L, -1));
+      ok(0, jiton ? "oom in pcall, jit on: script" : "oom in pcall, jit off: script");
+    } else {
+      res = lua_tostring(L, -1);
+      if (res == NULL || strcmp(res, want) != 0)
+	printf("oom_pcall (%s): got '%s'\n", jiton ? "jit on" : "jit off",
+	       res ? res : "(nil)");
+      ok(res != NULL && strcmp(res, want) == 0,
+	 jiton ? "oom in pcall is caught, counter exact (jit on)"
+	       : "oom in pcall is caught, counter exact (jit off)");
+    }
+    lua_close(L);
+  }
+}
+
 static void test_closethread(void)
 {
   lua_State *L = newL();
@@ -1404,6 +1536,7 @@ int main(void)
   if (want("buffer")) test_buffer_api();
   if (want("toclose")) test_toclose();
   if (want("closethread")) test_closethread();
+  if (want("oom_pcall")) test_oom_pcall();
   if (want("lauxlib")) test_lauxlib54();
   if (want("bare_state")) test_bare_state();
   printf("== capi: %d checks, %d failures ==\n", checks, failures);

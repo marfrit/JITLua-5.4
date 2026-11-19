@@ -573,6 +573,8 @@ void lj_record_stop(jit_State *J, TraceLink linktype, TraceNo lnk)
   if (J->retryrec)
     lj_trace_err(J, LJ_TRERR_RETRY);
 #endif
+  if (J->ccallpend)  /* No snapshot left to count a pcall in or out. */
+    lj_trace_err(J, LJ_TRERR_NYIRETL);
   lj_trace_end(J);
   J->cur.linktype = (uint8_t)linktype;
   J->cur.link = (uint16_t)lnk;
@@ -1207,24 +1209,44 @@ static int check_downrec_unroll(jit_State *J, GCproto *pt)
 
 static TRef rec_cat(jit_State *J, BCReg baseslot, BCReg topslot);
 
-/* Record return. */
-/* Trace-level pcall/xpcall C-call counter. delta=+1 emits the increment and
-** the exit-near-the-limit guard; delta=-1 emits the decrement. */
-void lj_record_ccallnest(jit_State *J, int delta)
+/* Trace-level pcall/xpcall nesting counter (the 5.4 C-call bound).
+**
+** L->ccallnest is not part of a snapshot, so memory has to agree with the
+** frames of every state a trace can leave to: by a guard, or by an error
+** raised in compiled code, which unwinds to the snapshot that covers the
+** faulting machine code. The counter therefore changes exactly at the two
+** snapshots that add and drop the pcall frame:
+** - recff_pcall/recff_xpcall emit the limit guard after the call setup. It
+**   belongs to the state in front of the pcall, like the setup's own guards.
+** - The change itself is left pending (J->ccallpend) and stored as the first
+**   instruction after the next snapshot: the one with the pcall frame for the
+**   increment, the one without it for the decrement. Whatever the recorder
+**   emits in between still belongs to the old state.
+** - Both stores are typed as guards. That keeps their snapshots from being
+**   merged into a later one, so the boundary stays where the store is even
+**   if the protected call has no guard of its own. Neither store is ever
+**   eliminated (see lj_opt_dse_fstore).
+*/
+void lj_record_ccallnest(jit_State *J)
 {
   TRef th = emitir(IRT(IR_LREF, IRT_THREAD), 0, 0);
   TRef cn = emitir(IRT(IR_FLOAD, IRT_INT), th, IRFL_THREAD_CCALLNEST);
-  TRef nv;
-  if (delta > 0) {
-    emitir(IRTG(IR_LT, IRT_INT), cn, lj_ir_kint(J, LJ_MAX_XLEVEL));
-    nv = emitir(IRTI(IR_ADD), cn, lj_ir_kint(J, 1));
-  } else {
-    nv = emitir(IRTI(IR_SUB), cn, lj_ir_kint(J, 1));
-  }
-  emitir(IRT(IR_FSTORE, IRT_INT),
-         emitir(IRT(IR_FREF, IRT_PGC), th, IRFL_THREAD_CCALLNEST), nv);
+  emitir(IRTG(IR_LT, IRT_INT), cn, lj_ir_kint(J, LJ_MAX_XLEVEL));
+  J->ccallpend++;
 }
 
+/* Store a pending change of the pcall nesting counter. */
+static void rec_ccallnest_flush(jit_State *J)
+{
+  TRef th = emitir(IRT(IR_LREF, IRT_THREAD), 0, 0);
+  TRef cn = emitir(IRT(IR_FLOAD, IRT_INT), th, IRFL_THREAD_CCALLNEST);
+  TRef nv = emitir(IRTI(IR_ADD), cn, lj_ir_kint(J, J->ccallpend));
+  TRef fref = emitir(IRT(IR_FREF, IRT_PGC), th, IRFL_THREAD_CCALLNEST);
+  J->ccallpend = 0;
+  emitir(IRTG(IR_FSTORE, IRT_INT), fref, nv);
+}
+
+/* Record return. */
 void lj_record_ret(jit_State *J, BCReg rbase, ptrdiff_t gotresults)
 {
   TValue *frame = J->L->base - 1;
@@ -1243,9 +1265,9 @@ void lj_record_ret(jit_State *J, BCReg rbase, ptrdiff_t gotresults)
     J->baseslot -= (BCReg)cbase;
     J->base -= cbase;
     J->base[--rbase] = TREF_TRUE;  /* Prepend true to results. */
-    lj_record_ccallnest(J, -1);  /* Leave the protected region. */
     frame = frame_prevd(frame);
     J->needsnap = 1;  /* Stop catching on-trace errors. */
+    J->ccallpend--;  /* Count the pcall out at that snapshot. */
   }
   /* Return to lower frame via interpreter for unhandled cases. */
   if (J->framedepth == 0 && J->pt && bc_isret(bc_op(*J->pc)) &&
@@ -1394,7 +1416,6 @@ static BCReg rec_mm_prep(jit_State *J, ASMFunction cont)
 }
 
 /* Record metamethod lookup. */
-static TRef rec_idx(jit_State *J, RecordIndex *ix, int tabguard);
 int lj_record_mm_lookup(jit_State *J, RecordIndex *ix, MMS mm)
 {
   RecordIndex mix;
@@ -1452,6 +1473,10 @@ int lj_record_mm_lookup(jit_State *J, RecordIndex *ix, MMS mm)
   ** and the class idiom does not pay two guards on one metatable load. */
   emitir(IRTG(IR_EQ, IRT_TAB), mix.tab,
 	 mt ? lj_ir_ktab(J, mt) : lj_ir_knull(J, IRT_TAB));
+  /* The identity is guarded, so look the metamethod up in the constant:
+  ** the lookup, the metaobject and their weakness guards no longer depend on
+  ** the table operand and are hoisted out of a loop over many objects. */
+  if (mt) mix.tab = lj_ir_ktab(J, mt);
 nocheck:
   if (mt) {
     GCstr *mmstr = mmname_str(J2G(J), mm);
@@ -1464,11 +1489,10 @@ nocheck:
     mix.key = lj_ir_kstr(J, mmstr);
     mix.val = 0;
     mix.idxchain = 0;
-    /* The metaobject is a one-time metamethod resolution, not the loop's
-    ** table operand: its entries are already guarded by the shape guards
-    ** (HREFK/HLOAD/EQ), so it needs no weakness guard. Guarding it added a
-    ** metatable load and compare per iteration for the class idiom. */
-    ix->mobj = rec_idx(J, &mix, 0);
+    /* The trace reads an entry of the metatable: guard its weakness like
+    ** that of any other table operand (a weak-valued metatable can lose its
+    ** metaobject). */
+    ix->mobj = lj_record_idx(J, &mix);
     return !tref_isnil(ix->mobj);  /* 1 if metamethod found, 0 if not. */
   }
   return 0;  /* No metamethod. */
@@ -1932,8 +1956,15 @@ static void rec_tabguard(jit_State *J, TRef tab, GCtab *t)
     if (mode && tvisstr(mode)) {
       GCstr *str = strV(mode);
       emitir(IRTG(IR_EQ, IRT_STR), trmode, lj_ir_kstr(J, str));
-      if (strchr(strdata(str), 'k') || strchr(strdata(str), 'v'))
+      if (strchr(strdata(str), 'k') || strchr(strdata(str), 'v')) {
 	J->cur.weak = 1;
+	/* A side trace that reads a weak table makes its root weak, too. The
+	** root's GC check runs first on every iteration and is at the start
+	** bytecode: it has to clear the dead slots (gc_jit_cleardead), or the
+	** side trace's check never gets to do it. */
+	if (J->cur.root && traceref(J, J->cur.root))
+	  traceref(J, J->cur.root)->weak = 1;
+      }
     }
   }
 }
@@ -1946,7 +1977,6 @@ static TRef rec_idx(jit_State *J, RecordIndex *ix, int tabguard)
   IRRef rbref;
   IRType1 rbguard;
   cTValue *oldv;
-  int guardtab = tabguard;  /* guard only the original table operand */
 
   while (!tref_istab(ix->tab)) { /* Handle non-table lookup. */
     /* Never call raw lj_record_idx() on non-table. */
@@ -1985,13 +2015,14 @@ static TRef rec_idx(jit_State *J, RecordIndex *ix, int tabguard)
     /* Otherwise retry lookup with metaobject. */
     ix->tab = ix->mobj;
     copyTV(J->L, &ix->tabv, &ix->mobjv);
-    guardtab = 0;  /* a metaobject, not the loop's table operand */
     if (--ix->idxchain == 0)
       lj_trace_err(J, LJ_TRERR_IDXLOOP);
   }
 
-  /* Guard the weakness of the table operand (not of a metaobject). */
-  if (guardtab)
+  /* Guard the weakness of the table the entry is read from: the operand or
+  ** the last link of its __index chain (but not for the guard's own lookup).
+  */
+  if (tabguard)
     rec_tabguard(J, ix->tab, tabV(&ix->tabv));
 
   /* First catch nil and NaN keys for tables. */
@@ -2703,6 +2734,8 @@ void lj_record_ins(jit_State *J)
     lj_snap_add(J);
     J->mergesnap = 1;
   }
+  if (LJ_UNLIKELY(J->ccallpend))  /* Right behind the snapshot. */
+    rec_ccallnest_flush(J);
 
   /* Skip some bytecodes. */
   if (LJ_UNLIKELY(J->bcskip > 0)) {
@@ -3426,6 +3459,7 @@ void lj_record_setup(jit_State *J)
   J->maxslot = 0;
   J->framedepth = 0;
   J->retdepth = 0;
+  J->ccallpend = 0;
 
   J->instunroll = J->param[JIT_P_instunroll];
   J->loopunroll = J->param[JIT_P_loopunroll];

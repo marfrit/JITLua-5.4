@@ -19,21 +19,32 @@ lookup). Fixed receiver: the guard is hoisted (0%).
 
 ## Changes
 
-1. rec_idx guards only the original table operand, not the metamethod-chain
-   metaobjects (guardtab flag); lj_record_mm_lookup uses rec_idx(..., 0).
-   A metaobject's entries are already guarded by the shape guards
-   (HREFK/HLOAD/EQ).
-2. lj_record_mm_lookup guards the metatable identity (EQ ktab(mt)) instead of
+1. lj_record_mm_lookup guards the metatable identity (EQ ktab(mt)) instead of
    NE NULL. The folder CSEs it with rec_tabguard's identity guard, so the
    class idiom pays one guard on the metatable load the __index chain already
    does, not two.
+2. With the identity guarded, the metamethod is looked up in the constant
+   metatable, not in the loaded one. The lookup, the metaobject it yields and
+   the weakness guards on both no longer depend on the receiver, so a loop
+   over many objects of one class hoists them.
 
-Result loop (x64): `ALOAD; FLOAD meta; EQ {Class}; HREF "get"; EQ; FLOAD
-meta.hmask; ...` = the base loop's instruction count (the base's `NE NULL` is
-replaced by the identity guard); the `__mode` lookup is hoisted to the
-prologue.
+A first version of this branch dropped the weakness guard for the links of an
+`__index` chain instead (a `guardtab` flag in rec_idx). That is wrong: a
+weak table behind `__index`, or a weak-valued metatable, is read by the loop
+like any other operand, and the loop then never sees the entry collected
+(`tests/d54/weak_index_chain.lua`). Every table an entry is read from is
+guarded again; only the guard's own `__mode` lookup is exempt.
 
-## Numbers (interleaved in one job, median of 7, pinned x64)
+Result loop (x64, rotating receivers): `ALOAD; FLOAD meta; EQ {Class}; HREF
+"get"; EQ` plus the call; the `__index`, method and `__mode` lookups are in
+the prologue.
+
+## Numbers with the constant-metatable lookup (same method, x64)
+
+Against the first version of this branch (chain links unguarded):
+  plain 0.0%   field 0.0%   fixed 0.0%   rotating -41.3%   ownmt -8.8%
+
+## Numbers of the first version (interleaved in one job, median of 7, pinned x64)
 
 method_call, base 7b85747e -> head:
   plain 0.0%   field +1.1%   fixed -0.5%   rotating -2.4% (was +11.4%)
@@ -48,10 +59,23 @@ ownmt +118%. Treat the arm deltas under ~10% as noise.
 
 ## Tests / gates
 
-tests/d54/weak_metatable_mode.lua is RED on 7b85747e (a strong class metatable
-gains __mode after the loop was compiled, by rawset, TSETS, setmetatable swap
-and a shared metatable; the weak entry must still be collected). weak_* 23/23,
-env_* 24/24. ci-box and ci-local --sanitizers-only pass on x64 and arm64.
+tests/d54/weak_metatable_mode.lua: a strong class metatable gains __mode after
+the loop was compiled, by rawset, TSETS, setmetatable swap and a shared
+metatable; the weak entry must still be collected.
+
+As first committed the test proved nothing. Its loop built the same constant
+string every time, which is interned and allocates nothing, so the collector
+never ran and the assertion failed in every arm, the interpreter and PUC
+included. The harness compares the two arms of mode B and passed it, because
+both failed alike. The loop now allocates a new, live string, and the harness
+requires status 0 from a test that has no reference arm.
+
+With a loop that allocates, the test found one more defect, older than this
+branch: at -O0 and -O1 the entry was not collected. The trace compiled before
+the change is not weak but keeps its GC check; it runs first on every
+iteration, without clearing the loop's dead stack slots, and the weak side
+trace's own check never gets its turn. A side trace that reads a weak table
+now marks its root weak as well.
 
 ## Merged main
 

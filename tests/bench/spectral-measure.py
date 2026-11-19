@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Interleaved stock-vs-ours measurement for one classic benchmark.
-Untracked scratch; not part of any commit."""
+Run from the repository root; BENCH_NAME and REPS select benchmark and count."""
 import os, sys, time, statistics, subprocess
 from pathlib import Path
 

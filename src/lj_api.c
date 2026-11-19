@@ -1240,10 +1240,6 @@ LUA_API void lua_warning(lua_State *L, const char *msg, int tocont)
   lj_api_warn_emit(L, msg, tocont);
 }
 
-#ifndef LUAI_MAXCCALLS
-#define LUAI_MAXCCALLS 200
-#endif
-
 LUA_API int lua_setcstacklimit(lua_State *L, unsigned int limit)
 {
   UNUSED(L); UNUSED(limit);
@@ -1346,13 +1342,6 @@ LUA_API int lua_getmetatable(lua_State *L, int idx)
   settabV(L, L->top, mt);
   incr_top(L);
   return 1;
-}
-
-LUALIB_API void luaL_checkversion_(lua_State *L, lua_Number ver, size_t sz)
-{
-  UNUSED(L);
-  lj_assertL((lua_Integer)ver == LUA_VERSION_NUM && sz == LUAL_BUFFERSIZE,
-	     "C library built for another Lua version");
 }
 
 LUALIB_API int luaL_getmetafield(lua_State *L, int idx, const char *field)

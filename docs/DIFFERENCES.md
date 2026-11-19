@@ -193,6 +193,18 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   PUC. The `luaL_Buffer` layout matches PUC 5.4 and `luaL_prepbuffer` is a
   macro over `luaL_prepbuffsize`; this changed the auxlib ABI, so C modules
   compiled against an older JITLua-5.4 auxlib must be recompiled.
+- `EXTENSION` module-facing macros from PUC 5.4's headers are exported for C
+  modules: `luaconf.h` also has `lua_numbertointeger`, `lua_str2number`/
+  `lua_strx2number`, `lua_pointer2str`, `lua_number2strx`,
+  `lua_getlocaledecpoint`, `LUAI_MAXCCALLS` and `luai_likely`/`luai_unlikely`
+  (`l_likely`/`l_unlikely` under `LUA_CORE`/`LUA_LIB`); `lua.h` has
+  `LUA_NUMTYPES`/`LUA_NUMTAGS`; `lauxlib.h` has `LUA_GNAME`,
+  `LUA_PRELOAD_TABLE` and `LUAL_NUMSIZES`. `lua_number2str` takes PUC's
+  `(s, sz, n)` form and `lua_integer2str` uses `snprintf`. `luaL_checkversion`
+  passes `LUAL_NUMSIZES` and `luaL_checkversion_` raises PUC's mismatch errors
+  (it was a release-build no-op). `lua_setcstacklimit` is the PUC 5.4
+  deprecated no-op returning `LUAI_MAXCCALLS` (200). The full comparison is in
+  [docs/notes/capi-header-compat.md](notes/capi-header-compat.md).
 - `EXTENSION` `lua_getfenv`/`setfenv` remain present as LuaJIT extensions;
   PUC 5.4 removed them.
 

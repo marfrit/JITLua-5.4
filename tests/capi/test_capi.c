@@ -1379,7 +1379,14 @@ static void test_lauxlib54(void)
   luaL_pushfail(L);
   ok(lua_isnil(L, -1), "luaL_pushfail pushes nil");
   lua_pop(L, 1);
-  ok(lua_setcstacklimit(L, 200) == 200, "lua_setcstacklimit returns the previous limit (PUC 200)");
+  /* lua_setcstacklimit is a deprecated no-op in PUC 5.4.9: it always returns
+  ** LUAI_MAXCCALLS (200) and ignores the requested limit. */
+  ok(lua_setcstacklimit(L, 0) == 200,
+     "lua_setcstacklimit(0) returns 200 (PUC no-op)");
+  ok(lua_setcstacklimit(L, 5) == 200,
+     "lua_setcstacklimit(5) keeps returning 200");
+  ok(lua_setcstacklimit(L, 1000000) == 200,
+     "lua_setcstacklimit(1000000) keeps returning 200");
   lua_close(L);
 }
 

@@ -988,6 +988,7 @@ LJ_NOINLINE void LJ_FASTCALL lj_err_run(lua_State *L)
 	setstrV(L, top-1, lj_err_str(L, LJ_ERR_ERRERR));
 	L->errnest = 0;
 	L->errnestofs = 0;
+	L->ccallnest = 0;
 	lj_err_throw(L, LUA_ERRERR);
       }
     }
@@ -1066,6 +1067,12 @@ LJ_NOINLINE void lj_err_msgv(lua_State *L, ErrMsg em, ...)
 LJ_NOINLINE void lj_err_msg(lua_State *L, ErrMsg em)
 {
   err_msgv(L, em);
+}
+
+/* 5.4: C-call nesting limit for pcall/xpcall. */
+LJ_NOINLINE void lj_err_cstack(lua_State *L)
+{
+  err_msgv(L, LJ_ERR_CSTKOV);
 }
 
 /* Lexer error. */

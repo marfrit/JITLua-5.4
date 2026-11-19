@@ -411,6 +411,8 @@ LJLIB_CF(error)
 
 LJLIB_ASM(pcall)		LJLIB_REC(.)
 {
+  if (L->ccallnest >= LJ_MAX_XLEVEL)  /* Fast-path C-call limit reached. */
+    lj_err_cstack(L);
   lj_lib_checkany(L, 1);
   lj_lib_checkfunc(L, 2);  /* For xpcall only. */
   return FFH_UNREACHABLE;

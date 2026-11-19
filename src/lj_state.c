@@ -296,6 +296,7 @@ LUA_API lua_State *lua_newstate(lua_Alloc allocf, void *allocd)
   setmref(L->hookff, NULL);
   L->errnest = 0;
   L->errnestofs = 0;
+  L->ccallnest = 0;
   setmref(L->glref, g);
   g->gc.currentwhite = LJ_GC_WHITE0 | LJ_GC_FIXED;
   g->strempty.marked = LJ_GC_WHITE0;
@@ -395,6 +396,7 @@ lua_State *lj_state_new(lua_State *L)
   setmref(L1->hookff, NULL);
   L1->errnest = 0;
   L1->errnestofs = 0;
+  L1->ccallnest = 0;
   setmrefr(L1->glref, L->glref);
   setgcrefr(L1->env, L->env);
   /* PUC lua_newthread: the area starts as a copy of the MAIN thread's. */

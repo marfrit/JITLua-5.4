@@ -761,6 +761,11 @@ struct lua_State {
   /* Arguments prepended by the __call chain, consumed by vmeta_call. Kept
   ** after extraspace so no existing offset moves. */
   MSize metanargs;
+  /* The value the last resume (or close) gave ccallnest. A pcall frame that
+  ** returns does not count ccallnest below it: the frames a coroutine was
+  ** suspended in are not part of the count the next resume sets (PUC's
+  ** nCcalls after lua_resume). Equal to the initial ccallnest otherwise. */
+  MSize ccallbase;
 };
 
 #define G(L)			(mref(L->glref, global_State))

@@ -297,7 +297,7 @@ LUA_API lua_State *lua_newstate(lua_Alloc allocf, void *allocd)
   ** (lua_cpcall/lua_pcall etc.); ccallnest only counts the pcall/xpcall
   ** fast paths, so a fixed baseline stands in for the standalone embedding
   ** and makes the absolute depth match PUC. Deltas are unaffected. */
-  L->ccallnest = LJ_CCALLNEST_BASE;
+  L->ccallnest = L->ccallbase = LJ_CCALLNEST_BASE;
   setmref(L->glref, g);
   g->gc.currentwhite = LJ_GC_WHITE0 | LJ_GC_FIXED;
   g->strempty.marked = LJ_GC_WHITE0;
@@ -396,7 +396,7 @@ lua_State *lj_state_new(lua_State *L)
   setmref(L1->hookff, NULL);
   L1->errnest = 0;
   L1->errnestofs = 0;
-  L1->ccallnest = 0;
+  L1->ccallnest = L1->ccallbase = 0;
   setmrefr(L1->glref, L->glref);
   setgcrefr(L1->env, L->env);
   /* PUC lua_newthread: the area starts as a copy of the MAIN thread's. */

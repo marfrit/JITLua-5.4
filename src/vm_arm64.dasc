@@ -399,8 +399,13 @@ static void build_subroutines(BuildCtx *ctx)
   |  tbz PC, #2, ->cont_dispatch	// (PC & FRAME_P) == 0?
   |
   |  // Return from pcall or xpcall fast func.
+  |  // The frame counts out, but not below the value the last resume set:
+  |  // a frame the coroutine was suspended in is not part of that count.
   |  ldr TMP2w, L->ccallnest
-  |  sub TMP2w, TMP2w, #1
+  |  ldr TMP3w, L->ccallbase
+  |  cmp TMP2w, TMP3w
+  |  cset TMP3w, hi
+  |  sub TMP2w, TMP2w, TMP3w
   |  str TMP2w, L->ccallnest
   |  ldr PC, [RB, FRAME_PC]		// Fetch PC of previous frame.
   |  ldrb TMP2w, GL->hookmask
@@ -516,8 +521,11 @@ static void build_subroutines(BuildCtx *ctx)
   |   ldr GL, L->glref			// Setup pointer to global state.
   |->vm_unwind_ff_eh:			// Landing pad for external unwinder.
   |  bti_tailcall
-  |  ldr TMP2w, L->ccallnest
-  |  sub TMP2w, TMP2w, #1
+  |  ldr TMP2w, L->ccallnest		// Count out like vm_returnp.
+  |  ldr TMP3w, L->ccallbase
+  |  cmp TMP2w, TMP3w
+  |  cset TMP3w, hi
+  |  sub TMP2w, TMP2w, TMP3w
   |  str TMP2w, L->ccallnest
   |  ldr BASE, L->base
   |  ldr PC, [BASE, FRAME_PC]		// Fetch PC of previous frame.
@@ -1462,11 +1470,14 @@ static void build_subroutines(BuildCtx *ctx)
   |  // 5.4: the resumed thread inherits the resumer's C-call count plus one
   |  // for this resume. The resume itself is the error if the bound is already
   |  // reached, so check before any coroutine state is mutated.
+  |  // ccallbase gets the same value: the pcall frames the coroutine is
+  |  // suspended in do not count below it when they return (vm_returnp).
   |  ldr TMP0w, L->ccallnest
   |  cmp TMP0w, #LJ_MAX_XLEVEL
   |  bhs ->fff_fallback
   |  add TMP0w, TMP0w, #1
   |  str TMP0w, L:CARG1->ccallnest
+  |  str TMP0w, L:CARG1->ccallbase
   |.if resume
   |  sub CARG3, CARG3, #8		// Keep resumed thread in stack for GC.
   |  add BASE, BASE, #8

@@ -1887,14 +1887,16 @@ LUA_API int lua_resume(lua_State *L, lua_State *from, int nargs, int *nres)
   int st;
   if (nres) *nres = 0;
   if (L->cframe == NULL && L->status <= LUA_YIELD) {
-    L->ccallnest = from ? from->ccallnest : 0;  /* PUC lua_resume */
-    if (L->ccallnest >= LJ_MAX_XLEVEL) {  /* PUC resume_error */
+    MSize nest = from ? from->ccallnest : 0;  /* PUC lua_resume */
+    if (nest >= LJ_MAX_XLEVEL) {  /* PUC resume_error */
       L->top -= nargs;  /* remove args from the stack */
       setstrV(L, L->top, lj_err_str(L, LJ_ERR_CSTKOV));
       incr_top(L);
       return LUA_ERRRUN;
     }
-    L->ccallnest++;
+    /* Pending pcall frames of a suspended thread are not counted again and
+    ** do not count below this value when they return (see vm_returnp). */
+    L->ccallnest = L->ccallbase = nest + 1;
     st = lj_vm_resume(L,
       L->status == LUA_OK ? api_call_base(L, nargs) : L->top - nargs,
       0, 0);
@@ -1925,9 +1927,11 @@ LUA_API int lua_closethread(lua_State *L, lua_State *from)
   else
     setnilV(eslot);
   L->status = LUA_OK;
-  L->ccallnest = from ? from->ccallnest + 1 : 1;  /* Closer's nesting + 1. */
+  /* Closer's nesting + 1. */
+  L->ccallnest = L->ccallbase = from ? from->ccallnest + 1 : 1;
   st = lj_meta_tbccloseall(L, tvref(L->stack), eslot);
-  L->ccallnest = 0;  /* The reset thread has no frames: nothing is nested. */
+  /* The reset thread has no frames: nothing is nested. */
+  L->ccallnest = L->ccallbase = 0;
   eslot = L->top-1;  /* close calls may grow the stack */
   lj_func_closeuv(L, tvref(L->stack));
   L->cframe = NULL;

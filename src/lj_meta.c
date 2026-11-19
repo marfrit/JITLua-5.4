@@ -991,6 +991,15 @@ int lj_meta_tbccloseall(lua_State *L, TValue *level, TValue *err)
   ** call. Only a pending handler can hit it: closing a thread with no
   ** to-be-closed slots never calls a handler, so PUC does not error there. */
   if (L->tbcn > 0 && L->ccallnest > LJ_MAX_XLEVEL) {
+    /* PUC fails every one of these handler calls and has dropped all the
+    ** slots when it returns the error. They must not stay registered here
+    ** either: the callers reset the thread, and a thread reset by
+    ** lua_closethread is used again. */
+    while (L->tbcn > 0 &&
+	   restorestack(L, mref(L->tbclist, int32_t)[L->tbcn-1]) >=
+	   restorestack(L, lofs))
+      L->tbcn--;
+    if (errinstack) err = restorestack(L, eofs);
     setstrV(L, err, lj_err_str(L, LJ_ERR_CSTKOV));
     return LUA_ERRRUN;
   }

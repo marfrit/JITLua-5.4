@@ -408,9 +408,13 @@ static void build_subroutines(BuildCtx *ctx)
   |  jz ->cont_dispatch
   |
   |  // Return from pcall or xpcall fast func.
+  |  // The frame counts out, but not below the value the last resume set:
+  |  // a frame the coroutine was suspended in is not part of that count.
   |  mov L:RB, SAVE_L
   |  mov TMPRd, L:RB->ccallnest
-  |  sub TMPRd, 1
+  |  mov ITYPEd, L:RB->ccallbase
+  |  cmp ITYPEd, TMPRd			// Carry if ccallbase < ccallnest.
+  |  sbb TMPRd, 0
   |  mov L:RB->ccallnest, TMPRd
   |  and PC, -8
   |  sub BASE, PC			// Restore caller base.
@@ -549,8 +553,10 @@ static void build_subroutines(BuildCtx *ctx)
   |->vm_unwind_ff_eh:			// Landing pad for external unwinder.
   |  endbr
   |  mov L:RB, SAVE_L
-  |  mov TMPRd, L:RB->ccallnest
-  |  sub TMPRd, 1
+  |  mov TMPRd, L:RB->ccallnest		// Count out like vm_returnp.
+  |  mov ITYPEd, L:RB->ccallbase
+  |  cmp ITYPEd, TMPRd			// Carry if ccallbase < ccallnest.
+  |  sbb TMPRd, 0
   |  mov L:RB->ccallnest, TMPRd
   |  mov BASE, L:RB->base
   |  mov DISPATCH, L:RB->glref		// Setup pointer to dispatch table.
@@ -1699,12 +1705,15 @@ static void build_subroutines(BuildCtx *ctx)
   |  // for this resume. The resume itself is the error if the bound is already
   |  // reached, so check before any coroutine state is mutated. Do not use
   |  // KBASE here: it is the caller's constants base and survives the resume.
+  |  // ccallbase gets the same value: the pcall frames the coroutine is
+  |  // suspended in do not count below it when they return (vm_returnp).
   |  mov TMPR, SAVE_L
   |  mov TMPRd, L:TMPR->ccallnest
   |  cmp TMPRd, LJ_MAX_XLEVEL
   |  jae ->fff_fallback
   |  add TMPRd, 1
   |  mov L:RB->ccallnest, TMPRd
+  |  mov L:RB->ccallbase, TMPRd
   |  cmp byte L:RB->status, LUA_YIELD	// Restore flags for the branch below.
   |  mov RA, L:RB->top
   |  je >1				// Status != LUA_YIELD (i.e. 0)?

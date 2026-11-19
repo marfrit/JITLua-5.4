@@ -704,7 +704,7 @@ LJLIB_CF(coroutine_close)
     /* 5.4: the __close handlers of a closed thread run with the closer's
     ** C-call nesting plus one (PUC lua_closethread, then the C call into the
     ** handler that LuaJIT does not count). */
-    co->ccallnest = L->ccallnest + 1;
+    co->ccallnest = co->ccallbase = L->ccallnest + 1;
     st = lj_meta_tbccloseall(co, tvref(co->stack), eslot);
     eslot = co->top-1;  /* The stack may have been reallocated. */
     if (st != LUA_OK || !tvisnil(eslot)) {
@@ -719,7 +719,8 @@ LJLIB_CF(coroutine_close)
     co->status = LUA_OK;
     co->base = co->top = tvref(co->stack) + 1 + LJ_FR2;
     co->cframe = NULL;
-    co->ccallnest = 0;  /* No frames left: the closer's nesting ends here. */
+    /* No frames left: the closer's nesting ends here. */
+    co->ccallnest = co->ccallbase = 0;
     return nres;
   }
   if (strcmp(s, "dead") == 0) {  /* Finished without error. */
@@ -775,16 +776,18 @@ static int ffh_resume(lua_State *L, lua_State *co, int wrap)
     setstrV(L, L->base-LJ_FR2, lj_err_str(L, em));
     return FFH_RES(2);
   }
-  /* PUC lua_resume: the resumed thread inherits the resumer's C-call count
-  ** plus one for the resume itself, so only 200-(count+1) pcall levels remain
-  ** usable inside the coroutine. At the bound the resume is the error. */
+  /* PUC lua_resume: the resumed thread gets the resumer's C-call count plus
+  ** one for the resume itself, so only 200-(count+1) pcall levels remain
+  ** usable inside the coroutine. At the bound the resume is the error. The
+  ** pcall frames the coroutine is suspended in are not counted again and
+  ** take nothing back when they return (ccallbase, see vm_returnp). */
   if (L->ccallnest >= LJ_MAX_XLEVEL) {
     if (wrap) lj_err_caller(L, LJ_ERR_CSTKOV);
     setboolV(L->base-1-LJ_FR2, 0);
     setstrV(L, L->base-LJ_FR2, lj_err_str(L, LJ_ERR_CSTKOV));
     return FFH_RES(2);
   }
-  co->ccallnest = L->ccallnest + 1;
+  co->ccallnest = co->ccallbase = L->ccallnest + 1;
   if (lj_state_cpgrowstack(co, (MSize)(L->top - L->base)) != LUA_OK) {
     cTValue *msg = --co->top;
     lj_err_callermsg(L, strVdata(msg));
@@ -816,7 +819,8 @@ void LJ_FASTCALL lj_ffh_coroutine_wrap_err(lua_State *L, lua_State *co)
 {
   if (co->tbcn > 0) {  /* 5.4: an error in a wrapped coroutine closes it. */
     co->status = LUA_OK;
-    co->ccallnest = L->ccallnest + 1;  /* Closer's nesting, as in close(). */
+    /* Closer's nesting, as in close(). */
+    co->ccallnest = co->ccallbase = L->ccallnest + 1;
     lj_meta_tbccloseall(co, tvref(co->stack), co->top-1);
     co->status = LUA_ERRRUN;
   }

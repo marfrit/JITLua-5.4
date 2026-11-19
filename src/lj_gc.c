@@ -252,7 +252,63 @@ void lj_gc_stats_free(GCSize osz)
   gcstats.free_calls++; gcstats.free_bytes += osz;
 }
 
+/* Live-object census by GC type, printed when a GC cycle completes.  Strings
+** live in the intern table, not on the root list, so they are walked there.
+** Measurement only (LUAJIT_GC_STATS). */
+static void gcstats_census(global_State *g)
+{
+  GCobj *o;
+  uint64_t ntab = 0, nfunc = 0, nproto = 0, nudata = 0, nthr = 0, nother = 0;
+  uint64_t tab_asize = 0, tab_hnodes = 0, tab_bytes = 0, str_bytes = 0;
+  MSize i;
+  for (o = gcref(g->gc.root); o != NULL; o = gcnext(o)) {
+    switch (o->gch.gct) {
+    case ~LJ_TTAB: {
+      GCtab *t = gco2tab(o);
+      uint64_t hn = t->hmask ? (uint64_t)t->hmask + 1 : 0;
+      ntab++; tab_asize += t->asize; tab_hnodes += hn;
+      tab_bytes += sizeof(GCtab) + (uint64_t)t->asize * sizeof(TValue) +
+		   hn * sizeof(Node);
+      break;
+      }
+    case ~LJ_TFUNC: nfunc++; break;
+    case ~LJ_TPROTO: nproto++; break;
+    case ~LJ_TUDATA: nudata++; break;
+    case ~LJ_TTHREAD: nthr++; break;
+    default: nother++; break;
+    }
+  }
+  for (i = 0; i <= g->str.mask; i++) {
+    GCobj *s = gcref(g->str.tab[i]);
+    while (s != NULL) { str_bytes += lj_str_size(gco2str(s)->len); s = gcnext(s); }
+  }
+  fprintf(stderr, "GCCENSUS total_kb=%.1f str_num=%u str_mask=%u str_bytes=%llu "
+	  "tab=%llu tab_asize=%llu tab_hnodes=%llu tab_bytes=%llu "
+	  "func=%llu proto=%llu udata=%llu thread=%llu other=%llu\n",
+	  (double)g->gc.total / 1024.0, (unsigned)g->str.num, (unsigned)g->str.mask,
+	  (unsigned long long)str_bytes,
+	  (unsigned long long)ntab, (unsigned long long)tab_asize,
+	  (unsigned long long)tab_hnodes, (unsigned long long)tab_bytes,
+	  (unsigned long long)nfunc, (unsigned long long)nproto,
+	  (unsigned long long)nudata, (unsigned long long)nthr,
+	  (unsigned long long)nother);
+}
+
+/* Called when a GC cycle completes: the cheap per-cycle line (or the full
+** census under -DLUAJIT_GC_CENSUS).  Kept out of the macro below because a
+** preprocessor conditional cannot appear inside a macro definition. */
+static void gcstats_cycle_hook(global_State *g)
+{
+#ifdef LUAJIT_GC_CENSUS
+  gcstats_census(g);
+#else
+  fprintf(stderr, "GCCYC total_kb=%.1f str_num=%u str_mask=%u\n",
+	  (double)g->gc.total / 1024.0, (unsigned)g->str.num, (unsigned)g->str.mask);
+#endif
+}
+
 #define GCSTATS_STEP_RET(v) do { \
+  if ((v) == 1) gcstats_cycle_hook(g); \
   gcstats_pause(); \
   uint64_t _t = gcstats_now() - gcstats_t0; \
   gcstats.steps++; gcstats.step_ns += _t; \

@@ -64,10 +64,9 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   function in tail position names the object (`err_02_tailname`,
   `err_04_tailcall_c`). Tail calls to Lua functions keep the frame-replacement
   path (constant stack depth); tail calls to C functions consume Lua stack,
-  bounded by the C-call limit, like PUC. The trace recorder does not model the
-  continuation frame, so a trace whose recording reaches a tail call to a C
-  function aborts and that loop runs in the interpreter: a performance
-  regression for loops that end in such a tail call, correctness unaffected.
+  bounded by the C-call limit, like PUC. The trace recorder mirrors the same
+  continuation frame, so traces keep recording such tail calls inline; the
+  mechanism and the model layout are in `docs/notes/tailname.md`.
 - `PENDING` `debug.getinfo(1,"t").istailcall` is not true without a call hook;
   PUC reports true (`db.lua` line 619; Fable tail marks need a hook).
 - `IMPL-DEFINED` Inside a `__close` handler on an error path, debug level 2 is

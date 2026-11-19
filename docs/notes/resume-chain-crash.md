@@ -11,9 +11,33 @@ falls back to the C handler (`->fff_fallback` -> `ffh_resume` ->
 nest as deep as the inline fast path. The fix is **not finished**; the
 evidence and the open leads are below.
 
-Repro: `docs/notes/resume-chain-crash.lua` (also the intended
-`tests/d54/err_07_resume_chain.lua`; it is not committed there because
-`tests/lib/runner.py` never XFAILs crashes, so it would make the gate red).
+## Consolidation decision (this round)
+
+The resume-nesting inheritance does **not** ship. The resume-inheritance part of
+`453787f2` (the x64/arm64 `coroutine_resume`/`coroutine_wrap_aux` fast-path
+code, the `ffh_resume` bound and the `lua_resume` `from` inheritance) was
+reverted on branch `fixresume` (commit `d7e31723`); the close-time finalizer
+part of the same commit (`GCState.closing`) and `f3eb7ec0` (closethread /
+`coroutine.close` inherit the closer's nesting) are kept.
+
+* Regression guard: `tests/d54/err_07_resume_chain.lua` runs depths 1..300 and
+  asserts every depth returns ("bottom" or a caught error) and prints nothing
+  depth-specific, so PUC (which stops at 198) and this fork (which runs the
+  chain to completion) produce the same output. It SIGSEGVs on the
+  pre-revert tree, so it catches a re-introduction without the fix.
+* `tests/d54/err_06_coro_ccallnest.lua` is back to failing in mode A and is
+  listed in `tests/known-bad.tsv` (mode `A`) with this reason.
+* `docs/notes/resume-chain-crash.lua` is the standalone repro script.
+
+## Can the kept closethread change crash the same way? No
+
+A chain of `coroutine.close` calls from `__close` handlers (each level closes a
+suspended coroutine whose `__close` builds and closes the next one) was run to
+depth 300 on x86_64 and aarch64, `-joff` and `-jon`: no crash, no error, the
+chain completes (depth `d` reaches `d+1` levels). PUC 5.4.9 stops the same
+chain at 198 with a clean "C stack overflow", so the kept change diverges in
+that it only *counts* the closer's nesting without enforcing the bound on this
+path. That divergence is open (see below); it is not a crash.
 
 ## Red evidence (fresh `git archive integ7` = d28858b7)
 
@@ -61,19 +85,23 @@ avoid the crash: the C fallback path is already unusable at ~197.
 
 ## Open (next round)
 
-1. **Raise the bound error without the generic C fallback.** A dedicated VM
-   helper (in the style of the `->vm_*` entries) that sets the coroutine's
-   error and returns would avoid `ffh_resume`/`lj_vm_resume` frames at depth
-   and should remove the crash. This is the most promising route.
+1. **Raise the bound error without the generic C fallback** (the route chosen
+   by the consolidation). A dedicated VM helper in the style of the `->vm_*`
+   entries that sets the coroutine's error and returns would avoid
+   `ffh_resume`/`lj_vm_resume` frames at depth and should remove the crash;
+   then the resume inheritance can be re-applied. This is the most promising
+   route.
 2. Or find out why the C fallback path consumes so much more C stack per level
    than the inline fast path (LuaJIT switches to the coroutine's own stack
    region in `lj_vm_resume`) and reduce it.
 3. Move the check before `mov L:RB->top, PC` in `vm_x64.dasc` regardless — it
    is a real hazard independent of the crash.
-4. aarch64 reaches 3 levels deeper than PUC (no crash). The same baseline
+4. Enforce the bound on the kept closethread path, where PUC errors at 198 and
+   this fork currently runs on (no crash, see above).
+5. aarch64 reaches 3 levels deeper than PUC (no crash). The same baseline
    question applies: PUC's `nCcalls` includes the embedding's C frames, while
    `ccallnest` is 0-based, so a fixed baseline only approximates it.
-5. Keep `LJ_MAX_XLEVEL`/`LJ_CCALLNEST_BASE` consistent across the interpreter,
+6. Keep `LJ_MAX_XLEVEL`/`LJ_CCALLNEST_BASE` consistent across the interpreter,
    the trace counter (`lj_record_ccallnest`), the C API and both arches.
 
 ## Trap for the next attempt

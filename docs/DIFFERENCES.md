@@ -37,6 +37,23 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   bounded at PUC's LUAI_MAXCCALLS (200) with "C stack overflow" and a
   repeatedly erroring message handler ends in "error in error handling"
   (`tests/d54/err_04_ccall_bound.lua`).
+- `PENDING` Cross-coroutine C-call nesting. PUC's `lua_resume` gives the
+  resumed thread the resumer's C-call count + 1 (`lua_closethread` the
+  closer's), so the usable pcall depth inside a coroutine is lower by the
+  resume nesting. The resume fast paths (`vm_x64`/`vm_arm64`
+  `coroutine_resume`/`coroutine_wrap_aux`), `ffh_resume` and the C API
+  `lua_resume` do not inherit it. Implementing the inheritance made a deep
+  chain of nested `coroutine.resume` calls take the fast path's
+  `->fff_fallback` at ~200 levels, and the C handler (`ffh_resume` ->
+  `lj_vm_resume`) SIGSEGVed on x86_64 (`and 0xc(%rax),%r10d` with `rax=0xb`,
+  ~200 identical VM frames) where PUC 5.4.9 raises a clean "C stack
+  overflow" at 198. Reverted until the bound error can be raised without
+  re-entering the C handler (a dedicated VM helper). The closethread side is
+  kept and does not crash (checked to depth 300 on both arches), but it only
+  counts, so a deep close chain is not bounded where PUC errors.
+  `tests/d54/err_07_resume_chain.lua` guards the crash;
+  `tests/d54/err_06_coro_ccallnest.lua` is the XFAIL for the inheritance.
+  Evidence and open leads: `docs/notes/resume-chain-crash.md`.
 - `FIXED` pcall/xpcall are recorded in traces with an exact C-call counter
   (x64 and arm64; other targets keep them out of traces). The recorder emits
   the limit guard after the call setup and stores each change of `ccallnest`

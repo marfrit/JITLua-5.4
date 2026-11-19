@@ -28,9 +28,15 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   in the VM (a NULL env table fed to the GGET/GSET lookup). `calls.lua` line
   359 now passes; tests `env_05_envvalue`, `env_06_nilenv` (the nil-env crash),
   `env_07_udenv` (userdata env, modes B,R).
-- `PENDING` pcall/xpcall C-call nesting bound and `__call` chain argument
-  prepending (calls.lua A/B; VM work on `wip-calls-vm`; handler-reentry bound is
-  already on main).
+- `PENDING` `__call` chain argument prepending (calls.lua lines 171/193;
+  VM work). A chain of callable tables must prepend one callable object per
+  chain level. Mode A of calls.lua also hits the `string.dump` private-format
+  FORK at its binary-chunk section (line 474), so calls.lua stays XFAIL in
+  mode A for that reason too.
+- `FIXED` pcall/xpcall C-call nesting bound: nested pcall/xpcall calls are
+  bounded at PUC's LUAI_MAXCCALLS (200) with "C stack overflow" and a
+  repeatedly erroring message handler ends in "error in error handling"
+  (`tests/d54/err_04_ccall_bound.lua`).
 - `IMPL-DEFINED` Sparse-table border for runtime-built tables may differ: 5.4
   allows any border; LuaJIT's array-growth policy differs from PUC's alimit hint
   (`tbl_03_border_divergence`).

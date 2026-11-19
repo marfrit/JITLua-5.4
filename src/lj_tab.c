@@ -343,14 +343,16 @@ static uint32_t countint(cTValue *key, uint32_t *bins)
 {
   if (tvisint(key)) {
     int32_t k = intV(key);
-    if (!tvisi47w(key) && (uint32_t)k < LJ_MAX_ASIZE) {
+    if (!tvisi47w(key) && (uint64_t)(uint32_t)k < LJ_MAX_ASIZE) {
       bins[(k > 2 ? lj_fls((uint32_t)(k-1)) : 0)]++;
       return 1;
     }
   } else if (tvisnum(key)) {
     int64_t i64;
     int32_t k;
-    if (lj_num2int_cond(numV(key), i64, k, (uint32_t)i64 < LJ_MAX_ASIZE)) {
+    /* uint64 cast: a negative or > 2^31 integral float key is not an array
+    ** key, even when its truncated uint32 form would look small. */
+    if (lj_num2int_cond(numV(key), i64, k, (uint64_t)i64 < LJ_MAX_ASIZE)) {
       bins[(k > 2 ? lj_fls((uint32_t)(k-1)) : 0)]++;
       return 1;
     }
@@ -398,11 +400,27 @@ static uint32_t counthash(const GCtab *t, uint32_t *bins, uint32_t *narray)
 static uint32_t bestasize(uint32_t bins[], uint32_t *narray)
 {
   uint32_t b, sum, na = 0, sz = 0, nn = *narray;
-  for (b = 0, sum = 0; 2*nn > (1u<<b) && sum != nn; b++)
-    if (bins[b] > 0 && 2*(sum += bins[b]) > (1u<<b)) {
-      sz = (2u<<b)+1;
-      na = sum;
+  uint64_t nn2 = (uint64_t)nn * 2;  /* nn may exceed 2^31: do not wrap 2*nn. */
+  for (b = 0, sum = 0; b < LJ_MAX_ABITS && nn2 > ((uint64_t)1u << b) &&
+			sum != nn; b++) {
+    if (bins[b] > 0) {
+      uint64_t sum2;
+      sum += bins[b];
+      sum2 = (uint64_t)sum * 2;
+      if (sum2 > ((uint64_t)1u << b)) {
+	uint64_t szv = ((uint64_t)2u << b) + 1;
+#if LJ_GC64
+	/* Bin 30's top is 2^31 slots, past the asize limit; clamp it so keys
+	** up to 2^31-2 still get the full array part. Non-GC64 keeps the old
+	** behaviour: the oversized proposal reaches lj_tab_resize and reports
+	** table overflow there. */
+	if (szv > LJ_MAX_ASIZE) szv = LJ_MAX_ASIZE;
+#endif
+	sz = (uint32_t)szv;
+	na = sum;
+      }
     }
+  }
   *narray = sz;
   return na;
 }

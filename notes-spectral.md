@@ -67,3 +67,39 @@ recording is reverted again; only the benchmark (838e414e) and this note stay.
   src, then docs.
 - (1) result: stock 2.1 emits the same tab.meta guard; real delta is SLOAD
   flags (ours RI/TI vs stock CRI/CI) + ~2x traces; gap ~4%, no reduction done.
+
+## Trace-level pcall/xpcall counter — REASONING (before coding)
+Goal: a recorded pcall/xpcall increments L->ccallnest before entering the
+protected call and exactly one decrement happens on every path.
+
+Increment: recff_pcall/recff_xpcall, before lj_record_call:
+  th = IR_LREF IRT_THREAD; cn = FLOAD th IRFL_THREAD_CCALLNEST
+  guard IR_LT(cn, LJ_MAX_XLEVEL)   (exit to the interpreter at/over the limit;
+                                    the interpreter's lj_ffh_pcall raises
+                                    "C stack overflow", matching -joff depth 200)
+  FSTORE IRFL_THREAD_CCALLNEST = cn+1
+  ... lj_record_call ...
+The guard is on the PRE-increment value so the trace enters at cn=199 -> 200
+exactly like the interpreter fast path (which tests ccallnest >= 200 before
+incrementing).
+
+Decrement (the crux): exactly one of these must run per increment.
+| path                                             | decrement site |
+|--------------------------------------------------|----------------|
+| trace returns normally from the pcall frame      | recorder, in the FRAME_PCALL return handling (rec_ret) - emit FSTORE cn-1 |
+| pcalled function errors inside the trace         | trace exits; interpreter vm_unwind_ff_eh decrements (the FSTORE already bumped memory) |
+| side exit inside the protected region            | trace exits; the pcall frame is still live, so interpreter vm_returnp/vm_unwind_ff_eh decrements when it returns |
+| trace exits after the pcall returned normally    | already decremented by the recorder on the normal return; interpreter must NOT decrement again (the frame is gone) |
+So the recorder emits the decrement only on the post-call continuation of the
+trace (the path that is reached iff the call returned inside the trace); the
+interpreter's decrements cover every exit before that point. Need to verify in
+lj_record.c rec_ret / rec_call_setup how a FRAME_PCALL frame's return is
+recorded and whether the continuation is on the same trace (no exit) - if the
+pcall frame return always exits the trace, the decrement belongs in the exit
+handler instead and the whole scheme must be re-thought.
+
+RED tests (first): minimised test-pretty (pcall in a for-in loop, 1e5 iters,
+-jon); recursive pcall depth probe under -jon == -joff (200); error inside the
+pcalled function from a trace; side exit inside the protected region;
+coroutine.wrap inside pcall. Modes A/B at -O0..-O3 and GC stress.
+Then b5_pcall before/after, penlight corpus-ext SAME (-jon, -jon+gcs), gates.

@@ -757,6 +757,7 @@ struct lua_State {
   MRef hookff;		/* ASM fast function that got the last call hook. */
   uint8_t errnest;	/* Nested message-handler invocations (5.4 ERRERR bound). */
   MSize errnestofs;	/* Stack offset at the first handler invocation. */
+  MSize ccallnest;	/* Nested pcall/xpcall fast calls (5.4 C-call bound). */
   /* 5.4 lua_getextraspace area. Appended after every field the GC, the IR
   ** and the assembler know, so no existing offset moves. A new thread copies
   ** it from the main thread (lj_state_new); it is freed with the object. */

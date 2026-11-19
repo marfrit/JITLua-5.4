@@ -213,6 +213,7 @@ LJLIB_CF(setfenv)
   setgcref(fn->l.env, obj2gco(t));
   settabV(L, &fn->l.envv, t);
   lj_gc_objbarrier(L, obj2gco(fn), t);
+  lj_func_flushenv(L);  /* compiled traces baked/loaded the old env */
   setfuncV(L, L->top++, fn);
   return 1;
 }
@@ -411,6 +412,8 @@ LJLIB_CF(error)
 
 LJLIB_ASM(pcall)		LJLIB_REC(.)
 {
+  if (L->ccallnest >= LJ_MAX_XLEVEL)  /* Fast-path C-call limit reached. */
+    lj_err_cstack(L);
   lj_lib_checkany(L, 1);
   lj_lib_checkfunc(L, 2);  /* For xpcall only. */
   return FFH_UNREACHABLE;

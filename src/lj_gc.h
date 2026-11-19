@@ -22,6 +22,9 @@ enum {
 #define LJ_GC_WEAKVAL	0x10
 #define LJ_GC_CDATA_FIN	0x10
 #define LJ_GC_TABFIN	0x80	/* Table marked for finalization (5.4 __gc). */
+#define LJ_GC_TABMM	0x20	/* Table in the mmudata list (being finalized).
+			** 0x20 is otherwise unused for tables (only strings and the
+			** main thread use FIXED/SFIXED). */
 #define LJ_GC_FIXED	0x20
 #define LJ_GC_SFIXED	0x40
 

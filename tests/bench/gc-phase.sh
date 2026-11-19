@@ -1,4 +1,5 @@
 #!/bin/sh
+# x64-box/arm-box are private wrappers that run a command on a remote x86_64/arm64 test host.
 # Per-phase GC split (Stage 0b) runner for JITLua-5.4.  Measurement only.
 #
 # Builds the default tree (macro off) and runs the harness to prove default

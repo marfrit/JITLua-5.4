@@ -2964,7 +2964,9 @@ static void asm_stack_restore(ASMState *as, SnapShot *snap)
 	  Reg tmp = ra_scratch(as, rset_exclude(allow, src));
 	  emit_rmro(as, XO_MOVto, tmp|REX_64, RID_BASE, ofs);
 	  emit_rr(as, XO_OR, tmp|REX_64, src|REX_64);
-	  emit_loadu64(as, tmp, (uint64_t)irt_toitype(ir->t) << 47);
+	  /* A tail-called frame has a marked function slot (lj_frame.h). */
+	  emit_loadu64(as, tmp, (uint64_t)((sn & SNAP_TAIL) ? LJ_TTRACE :
+					   irt_toitype(ir->t)) << 47);
 	}
 #else
 	emit_movtomro(as, REX_64IR(ir, src), RID_BASE, ofs);
@@ -2978,6 +2980,7 @@ static void asm_stack_restore(ASMState *as, SnapShot *snap)
 	  emit_rmro(as, XO_MOVmi, REX_64, RID_BASE, ofs);
 	} else {
 	  Reg tmp = ra_scratch(as, rset_exclude(RSET_GPR, RID_BASE));
+	  if ((sn & SNAP_TAIL)) k.u64 &= FRAME_TAILCLR;
 	  emit_rmro(as, XO_MOVto, tmp|REX_64, RID_BASE, ofs);
 	  emit_loadu64(as, tmp, k.u64);
 	}

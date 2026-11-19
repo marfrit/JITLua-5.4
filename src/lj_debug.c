@@ -247,67 +247,6 @@ static TValue *debug_localname(lua_State *L, const lua_Debug *ar,
   return frame+slot1;
 }
 
-/* -- 5.4 tail-call frame marks ------------------------------------------- */
-
-/* Marks are kept per thread while a call hook is installed: the "tail call"
-** event marks the callee's base slot, a plain call clears everything from
-** its base upwards. Frames entered while no call hook was set are never
-** marked, so istailcall is exact under a debugger and false otherwise.
-*/
-static void debug_tailclear(lua_State *L, MSize ofs)
-{
-  MSize hi = L->tailhi;
-  if (ofs < hi) {
-    uint32_t *bits = mref(L->tailbits, uint32_t);
-    MSize w = ofs >> 5, wend = (hi + 31) >> 5;
-    bits[w] &= (1u << (ofs & 31)) - 1u;
-    for (w++; w < wend; w++) bits[w] = 0;
-    L->tailhi = ofs;
-  }
-}
-
-void lj_debug_tailmark(lua_State *L, MSize ofs, int tail)
-{
-  global_State *g = G(L);
-  if (L->tailepoch != g->hookepoch) {  /* Marks from an earlier hook phase. */
-    if (L->tailbitsz)
-      memset(mref(L->tailbits, void), 0, L->tailbitsz*sizeof(uint32_t));
-    L->tailhi = 0;
-    L->tailepoch = g->hookepoch;
-  }
-  if (tail) {
-    uint32_t *bits;
-    MSize need = (ofs >> 5) + 1;
-    if (need > L->tailbitsz) {
-      MSize nsz = need < 8 ? 8 : need * 2;
-      bits = (uint32_t *)lj_mem_realloc(L, mref(L->tailbits, void),
-				       L->tailbitsz*sizeof(uint32_t),
-				       nsz*sizeof(uint32_t));
-      memset(bits + L->tailbitsz, 0, (nsz - L->tailbitsz)*sizeof(uint32_t));
-      setmref(L->tailbits, bits);
-      L->tailbitsz = nsz;
-    }
-    debug_tailclear(L, ofs+1);
-    mref(L->tailbits, uint32_t)[ofs >> 5] |= 1u << (ofs & 31);
-    if (L->tailhi <= ofs) L->tailhi = ofs+1;
-  } else {
-    debug_tailclear(L, ofs);
-  }
-}
-
-int lj_debug_istailcall(lua_State *L, cTValue *frame)
-{
-  MSize ofs = (MSize)((frame+1) - tvref(L->stack));
-  return L->tailepoch == G(L)->hookepoch && ofs < L->tailhi &&
-	 ((mref(L->tailbits, uint32_t)[ofs >> 5] >> (ofs & 31)) & 1u);
-}
-
-void lj_debug_tailfree(global_State *g, lua_State *L)
-{
-  if (L->tailbitsz)
-    lj_mem_freevec(g, mref(L->tailbits, void), L->tailbitsz, uint32_t);
-}
-
 /* Get name of upvalue. */
 const char *lj_debug_uvname(GCproto *pt, uint32_t idx)
 {
@@ -666,7 +605,10 @@ int lj_debug_getinfo(lua_State *L, const char *what, lj_Debug *ar, int ext)
 	}
       }
     } else if (*what == 'n') {
-      ar->namewhat = frame ? lj_debug_funcname(L, frame, &ar->name) : NULL;
+      /* 5.4: no name for a function entered by a tail call, the call site
+      ** in the frame below belongs to the function it replaced. */
+      ar->namewhat = (frame && !frame_istail(frame)) ?
+		     lj_debug_funcname(L, frame, &ar->name) : NULL;
       if (ar->namewhat == NULL) {
 	ar->namewhat = "";
 	ar->name = NULL;
@@ -676,7 +618,7 @@ int lj_debug_getinfo(lua_State *L, const char *what, lj_Debug *ar, int ext)
     } else if (*what == 'L') {
       opt_L = 1;
     } else if (*what == 't') {  /* 5.4 */
-      ar->istailcall = frame ? (unsigned char)lj_debug_istailcall(L, frame) : 0;
+      ar->istailcall = frame ? (unsigned char)frame_istail(frame) : 0;
     } else if (*what == 'r') {  /* 5.4: only meaningful inside a hook. */
       if (!frame || !hook_active(G(L)) ||
 	  (MSize)(frame - tvref(L->stack)) != G(L)->hookbase) {
@@ -864,7 +806,7 @@ LUALIB_API void luaL_traceback (lua_State *L, lua_State *L1, const char *msg,
       lim = 2147483647;
       continue;
     }
-    lua_getinfo(L1, "Snlf", &ar);
+    lua_getinfo(L1, "Snlft", &ar);
     fn = funcV(L1->top-1); L1->top--;
     if (isffunc(fn) && !*ar.namewhat)
       lua_pushfstring(L, "\n\t[builtin#%d]:", fn->c.ffid);
@@ -896,6 +838,8 @@ LUALIB_API void luaL_traceback (lua_State *L, lua_State *L1, const char *msg,
       else
 	lua_pushliteral(L, " in ?");
     }
+    if (ar.istailcall)
+      lua_pushliteral(L, "\n\t(...tail calls...)");
     if ((int)(L->top - L->base) - top >= 15)
       lua_concat(L, (int)(L->top - L->base) - top);
   }

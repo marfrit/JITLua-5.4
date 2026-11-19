@@ -1975,6 +1975,20 @@ static void asm_stack_restore(ASMState *as, SnapShot *snap)
     } else if (irt_isnum(ir->t)) {
       Reg src = ra_alloc1(as, ref, RSET_FPR);
       emit_lso(as, A64I_STRd, (src & 31), RID_BASE, ofs);
+    } else if ((sn & SNAP_TAIL)) {
+      /* A tail-called frame has a marked function slot (lj_frame.h). */
+      RegSet allow = rset_exclude(RSET_GPR, RID_BASE);
+      if (irref_isk(ref)) {
+	TValue k;
+	lj_ir_kvalue(as->J->L, &k, ir);
+	emit_lso(as, A64I_STRx, ra_allock(as, k.u64 & FRAME_TAILCLR, allow),
+		 RID_BASE, ofs);
+      } else {
+	Reg src = ra_alloc1(as, ref, allow);
+	Reg type = ra_allock(as, (int32_t)LJ_TTRACE, rset_exclude(allow, src));
+	emit_lso(as, A64I_STRx, RID_TMP, RID_BASE, ofs);
+	emit_dnm(as, A64I_ADDx | A64F_SH(A64SH_LSL, 47), RID_TMP, src, type);
+      }
     } else {
       asm_tvstore64(as, RID_BASE, ofs, ref);
     }

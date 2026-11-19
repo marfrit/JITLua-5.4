@@ -353,7 +353,9 @@ static void gcstats_cycle_hook(global_State *g)
 
 /* Mark a TValue (if needed). */
 #define gc_marktv(g, tv) \
-  { lj_assertG(!tvisgcv(tv) || (~itype(tv) == gcval(tv)->gch.gct), \
+  { lj_assertG(!tvisgcv(tv) || (~itype(tv) == gcval(tv)->gch.gct) || \
+	       (LJ_FRAME_TAILMARK && itype(tv) == LJ_TTRACE && \
+		gcval(tv)->gch.gct == ~LJ_TFUNC),  /* Tail-called frame. */ \
 	       "TValue and GC type mismatch"); \
     if (tviswhite(tv)) gc_mark(g, gcV(tv)); }
 

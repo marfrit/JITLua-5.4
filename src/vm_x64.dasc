@@ -4613,7 +4613,12 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  test PCd, FRAME_TYPE
     |  jnz >7
     |1:
-    |  mov [BASE-16], LFUNC:RB		// Copy func+tag down, reloaded below.
+    |  // The frame of a Lua function entered by a tail call is marked in the
+    |  // tag of its function slot: LJ_TFUNC -> LJ_TTRACE (see lj_frame.h).
+    |  // The dispatch below takes the untagged LFUNC from TMPR, so the mark
+    |  // (and the store) are not on its path.
+    |  btr RB, 47
+    |  mov [BASE-16], LFUNC:RB		// Copy func+mark down.
     |  mov MULTRES, NARGS:RDd
     |  sub NARGS:RDd, 1
     |  jz >3
@@ -4624,10 +4629,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  add KBASE, 8
     |  sub NARGS:RDd, 1
     |  jnz <2
-    |
-    |  mov LFUNC:RB, [BASE-16]
     |3:
-    |  cleartp LFUNC:RB
+    |  mov LFUNC:RB, TMPR
     |  mov NARGS:RDd, MULTRES
     |4:
     |  ins_callt

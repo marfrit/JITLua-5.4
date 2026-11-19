@@ -84,6 +84,30 @@ enum {
 #define frame_delta(f)		(frame_ftsz(f) >> 3)
 #define frame_sized(f)		(frame_ftsz(f) & ~FRAME_TYPEP)
 
+/* Tail-call mark (5.4 debug.getinfo 't' and the "tail call" hook event).
+** BC_CALLT/BC_CALLMT to a Lua function replaces the calling frame. The
+** function slot of the new frame then carries the tag LJ_TTRACE instead of
+** LJ_TFUNC: the two tags differ in bit 47 only, and LJ_TTRACE is in no other
+** frame's function slot (its one other use on the stack is the trace that
+** trace stitching parks in a value slot of the calling frame). Every reader
+** of a frame's function slot masks the tag off (frame_gc, cleartp in the VM,
+** untagged SLOAD in traces), the GC marks the slot by the object's own type,
+** and bytecode cannot address the slot. Frames set up by anything else
+** (calls, C functions, a fast function that hands over to a metamethod) have
+** the plain LJ_TFUNC tag.
+** Implemented by the x64 (GC64) and arm64 interpreters and their backends.
+*/
+#if LJ_FR2 && (LJ_TARGET_X64 || LJ_TARGET_ARM64)
+#define LJ_FRAME_TAILMARK	1
+#define FRAME_TAILBIT		((uint64_t)1 << 47)
+#define FRAME_TAILCLR		(~FRAME_TAILBIT)
+#define frame_istail(f)		(itype((f)-1) == LJ_TTRACE)
+LJ_STATIC_ASSERT((LJ_TFUNC ^ LJ_TTRACE) == 1u);
+#else
+#define LJ_FRAME_TAILMARK	0
+#define frame_istail(f)		(UNUSED(f), 0)
+#endif
+
 /* Special continuations. LJ_CONT_TAILRET returns the results of a C function
 ** that was entered from a tail call to the frame that made the tail call.
 */

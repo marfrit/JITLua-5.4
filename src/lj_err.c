@@ -835,7 +835,6 @@ LJ_NOINLINE void LJ_FASTCALL lj_err_throw(lua_State *L, int errcode)
 {
   global_State *g = G(L);
   lj_trace_abort(g);
-  g->tailofs = 0;  /* A CALLT that never reached its callee (5.4 hooks). */
   g->ffretry = 0;
   if (errcode == LUA_ERRERR) {  /* A handler episode is over. */
     L->errnest = 0;

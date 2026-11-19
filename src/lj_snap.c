@@ -99,6 +99,14 @@ static MSize snapshot_slots(jit_State *J, SnapEntry *map, BCReg nslots)
 	    (ir->op2 & (IRSLOAD_READONLY|IRSLOAD_PARENT)) != IRSLOAD_PARENT)
 	  sn |= SNAP_NORESTORE;
       }
+#if LJ_FRAME_TAILMARK
+      /* The root frame's function slot may carry a tail-call mark the trace
+      ** does not know about (the frame existed before the trace). Only a
+      ** tail call recorded in this frame changes the slot; a function ref
+      ** that merely got specialized must not be written back. */
+      if (s == 0 && !(tr & TREF_TAIL))
+	sn |= SNAP_NORESTORE;
+#endif
       if (LJ_SOFTFP32 && irt_isnum(ir->t))
 	sn |= SNAP_SOFTFPNUM;
       map[n++] = sn;
@@ -465,7 +473,8 @@ static TRef snap_dedup(jit_State *J, SnapEntry *map, MSize nmax, IRRef ref)
   MSize j;
   for (j = 0; j < nmax; j++)
     if (snap_ref(map[j]) == ref)
-      return J->slot[snap_slot(map[j])] & ~(SNAP_KEYINDEX|SNAP_CONT|SNAP_FRAME);
+      return J->slot[snap_slot(map[j])] &
+	     ~(SNAP_TAIL|SNAP_KEYINDEX|SNAP_CONT|SNAP_FRAME);
   return 0;
 }
 
@@ -545,7 +554,7 @@ void lj_snap_replay(jit_State *J, GCtrace *T)
     }
   setslot:
     /* Same as TREF_* flags. */
-    J->slot[s] = tr | (sn&(SNAP_KEYINDEX|SNAP_CONT|SNAP_FRAME));
+    J->slot[s] = tr | (sn&(SNAP_TAIL|SNAP_KEYINDEX|SNAP_CONT|SNAP_FRAME));
     J->framedepth += ((sn & (SNAP_CONT|SNAP_FRAME)) && (s != LJ_FR2));
     if ((sn & SNAP_FRAME))
       J->baseslot = s+1;
@@ -1023,6 +1032,12 @@ const BCIns *lj_snap_restore(jit_State *J, void *exptr)
 	/* A IRT_INT key index slot is restored as a number. Undo this. */
 	o->u32.lo = (uint32_t)(LJ_DUALNUM ? intV(o) : lj_num2int(numV(o)));
 	o->u32.hi = LJ_KEYINDEX;
+#if LJ_FRAME_TAILMARK
+      } else if ((sn & SNAP_TAIL)) {
+	/* Function slot of a frame entered by a tail call: restore the mark. */
+	lj_assertJ(tvisfunc(o), "tail mark on a non-function slot");
+	o->u64 &= FRAME_TAILCLR;
+#endif
       }
     }
   }

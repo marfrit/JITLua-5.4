@@ -106,6 +106,10 @@ The local CI equivalent, including C API and fuzz runs:
 tests/ci-box.sh
 ```
 
+`make layout-check` compiles the GC object headers for x86_64 in both the GC64
+and the non-GC64 reference layout (no VM, no JIT, a fraction of a second). It
+is also a stage of `tests/ci-box.sh`.
+
 The box scripts are thin wrappers around private remote build hosts: they copy
 the working tree, run the command there and return stdout; the wrappers
 themselves are not part of this repository.

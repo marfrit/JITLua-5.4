@@ -12,6 +12,17 @@ in tests/known-bad.tsv when a test shows it), `EXTENSION` (kept LuaJIT feature).
 Platforms: all VM and JIT changes target **x86_64 (GC64) and arm64** on Linux,
 the two tested platforms. The other LuaJIT backends (x86, arm, ppc, mips and
 non-GC64 builds) are not maintained and may lack individual 5.4 changes.
+For x86_64 without GC64 that is concrete: `src/Makefile` picks `vm_x86.dasc`
+(the VM for 32 bit GC references) whenever `LJ_FR2` is off, and that VM has no
+handler for `BC_IDIV`, `BC_KI64`, `BC_TBC` or `BC_TBCCLO` and no `cont_tbc` or
+`cont_tailret`, so `make CFLAGS=-DLUAJIT_DISABLE_GC64` stops in buildvm with
+`Error: undefined opcode BC_IDIV`. The *object layout* of that configuration
+is maintained: `make layout-check` (`tests/nogc64-layout.sh`, a stage of
+`tests/ci-box.sh`) compiles the GC object headers for x86_64 in both reference
+layouts, so a field added to a GC object cannot move a `GChead`-shared offset
+again.  The 47-bit widened inline integers (ADR-001b step 6) are a GC64-only
+representation: with 32 bit GC references the tag word has no payload bits, so
+integers outside int32 always use the interned box there.
 
 Fixed divergences, i.e. former known bugs with their technical notes, are in
 [docs/CHANGELOG-VM.md](CHANGELOG-VM.md).

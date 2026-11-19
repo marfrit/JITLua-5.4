@@ -240,10 +240,13 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
 - `IMPL-DEFINED` `heavy.lua` runs under a 4 GiB `RLIMIT_AS` cap in the
   `--include-heavy` stage; both sides then end in an allowed resource error
   (Lua 5.4 manual 3.4.7), but the reports differ: PUC stops with "not enough
-  memory" at `#a=134217728` (peak ~2.0 GiB RSS) while LuaJIT stops with
-  `heavy.lua:154: table overflow` at `#a=201326592` (peak ~3.3 GiB), and the
-  `collectgarbage` byte counts differ in every mode. Excluded from the default
-  corpus; see `tests/known-different.tsv`.
+  memory" at `#a=134217728` (peak ~2.0 GiB RSS) and LuaJIT also stops with
+  "not enough memory", at `#a=268435456` (`collectgarbage'count'` ~2.15 GiB).
+  With a 14 GiB cap PUC stops at `#a=536870912` and LuaJIT at
+  `#a=1073741824` (~8.59 GiB counted on both sides). The array part now grows
+  past the old 2^27+1 limit under GC64 (up to 2^31-1 slots, PUC MAXABITS=31);
+  the remaining difference is only the stop size and the per-MiB counters.
+  Excluded from the default corpus; see `tests/known-different.tsv`.
 - `PENDING` Classic benchmarks slower than stock 2.1 (>10%): deltablue both
   arches (missing-metamethod trace loss), k-nucleotide x64
   (`__index`/string-key path); see `docs/perf-regression-2026-11-17.md` and

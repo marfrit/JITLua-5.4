@@ -213,7 +213,6 @@ LJLIB_CF(setfenv)
   setgcref(fn->l.env, obj2gco(t));
   settabV(L, &fn->l.envv, t);
   lj_gc_objbarrier(L, obj2gco(fn), t);
-  lj_func_flushenv(L);  /* compiled traces baked/loaded the old env */
   setfuncV(L, L->top++, fn);
   return 1;
 }

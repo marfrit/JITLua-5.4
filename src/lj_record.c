@@ -3102,18 +3102,27 @@ void lj_record_ins(jit_State *J)
       settabV(J->L, &ix.tabv, tabref(J->fn->l.env));
       ix.tab = emitir(IRT(IR_FLOAD, IRT_TAB), getcurrf(J), IRFL_FUNC_ENV);
       /* A trace is keyed on the prototype, not the closure: a sibling
-      ** closure of the same proto may have a non-table env (FUNC_ENV NULL).
-      ** Guard non-NULL so it exits instead of dereferencing NULL. */
+      ** closure of the same proto may have a non-table env (FUNC_ENV NULL),
+      ** and an env setter may put one in later. Guard non-NULL so the trace
+      ** exits instead of dereferencing NULL. */
       emitir(IRTG(IR_NE, IRT_TAB), ix.tab, lj_ir_knull(J, IRT_TAB));
-    } else {  /* Non-table env: the value is baked in as a constant, so this
-	      ** trace may only run for the recorded closure; a sibling has a
-	      ** different env. An env change on the same closure flushes. */
+    } else {  /* Non-table env: the value is baked in as a constant. */
+#if LJ_64
+      TRef trenv;
       copyTV(J->L, &ix.tabv, &J->fn->l.envv);
       ix.tab = tvisnil(&ix.tabv) ? lj_ir_knull(J, IRT_NIL) :
 	       lj_record_constify(J, &ix.tabv);
       if (!ix.tab)
 	lj_trace_err(J, LJ_TRERR_NYIBC);  /* lightuserdata: no IR const */
-      emitir(IRTG(IR_EQ, IRT_FUNC), getcurrf(J), lj_ir_kfunc(J, J->fn));
+      /* Guard the raw env value of the running closure against the baked-in
+      ** one. This covers a sibling closure with another env as well as a
+      ** later env change on the same closure, without relying on a trace
+      ** flush (which is refused inside a __gc finalizer). */
+      trenv = emitir(IRT(IR_FLOAD, IRT_U64), getcurrf(J), IRFL_FUNC_ENVV);
+      emitir(IRTG(IR_EQ, IRT_U64), trenv, lj_ir_kint64(J, ix.tabv.u64));
+#else
+      lj_trace_err(J, LJ_TRERR_NYIBC);  /* No 64 bit field load. */
+#endif
     }
     ix.idxchain = LJ_MAX_IDXCHAIN;
     rc = lj_record_idx(J, &ix);

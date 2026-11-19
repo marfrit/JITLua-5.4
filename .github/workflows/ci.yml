@@ -11,6 +11,7 @@ jobs:
       - run: for j in -joff -jon; do timeout 120 ./src/luajit $j tests/lib/bit-checkint.lua || exit 1; done
       - run: for j in -joff -O0 -O3; do timeout 120 ./src/luajit $j tests/lib/math-random-jit.lua || exit 1; done
       - run: for j in -joff -jon; do timeout 120 ./src/luajit $j tests/lib/ffrec-54.lua || exit 1; done
+      - run: for j in -joff -jon; do timeout 120 ./src/luajit $j tests/lib/env-noflush.lua || exit 1; done
       - run: python3 tests/fuzz/fuzz.py --seed 1 --count 500 --mode B --opt-levels 0,1,2,3 --gc
       - run: python3 tests/fuzz/fuzz.py --seed 1 --count 200 --mode R --gc
   linux-arm64:
@@ -23,6 +24,7 @@ jobs:
       - run: for j in -joff -jon; do timeout 120 ./src/luajit $j tests/lib/bit-checkint.lua || exit 1; done
       - run: for j in -joff -O0 -O3; do timeout 120 ./src/luajit $j tests/lib/math-random-jit.lua || exit 1; done
       - run: for j in -joff -jon; do timeout 120 ./src/luajit $j tests/lib/ffrec-54.lua || exit 1; done
+      - run: for j in -joff -jon; do timeout 120 ./src/luajit $j tests/lib/env-noflush.lua || exit 1; done
   linux-x64-sanitizers:
     runs-on: ubuntu-latest
     steps:

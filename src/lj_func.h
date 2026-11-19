@@ -16,7 +16,6 @@ LJ_FUNCA void LJ_FASTCALL lj_func_closeuv(lua_State *L, TValue *level);
 /* 5.4: set the function's environment value (any type) and refresh the
 ** table cache used by the GGET/GSET fast path. No barrier, no trace flush. */
 LJ_FUNC void lj_func_setenvv(GCfunc *fn, cTValue *v);
-LJ_FUNC void lj_func_flushenv(lua_State *L);
 /* 5.4: retarget the current function's environment (implicit _ENV write). */
 LJ_FUNC void LJ_FASTCALL lj_func_setenv(lua_State *L, TValue *v);
 LJ_FUNC void LJ_FASTCALL lj_func_getenv(lua_State *L, TValue *dst);

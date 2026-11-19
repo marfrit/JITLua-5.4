@@ -417,7 +417,7 @@ LUA_API int lua_lessthan(lua_State *L, int idx1, int idx2)
     /* Inline integers: table.sort's default comparator lands here, so the
     ** int32 case stays the one compare it was; a widened 47-bit operand
     ** (payload bits 32..46 set) takes the exact 64-bit path. */
-    if (LJ_LIKELY(((o1->it | o2->it) & 0x7fffu) == 0))
+    if (LJ_LIKELY(!LJ_GC64 || ((o1->it | o2->it) & 0x7fffu) == 0))
       return intV(o1) < intV(o2);
     a = tvisi47w(o1) ? intV47(o1) : (int64_t)intV(o1);
     b = tvisi47w(o2) ? intV47(o2) : (int64_t)intV(o2);

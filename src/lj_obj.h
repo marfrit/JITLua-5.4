@@ -391,11 +391,17 @@ typedef struct GCproto {
   uint8_t numparams;	/* Number of parameters. */
   uint8_t framesize;	/* Fixed frame size. */
   MSize sizebc;		/* Number of bytecode instructions. */
+#if LJ_GC64
   /* 5.4 debug view: 0 = no _ENV upvalue, else 1 + the position at which PUC
   ** would have created the _ENV upvalue (first global access, in upvalue
   ** creation order). The debug API inserts a synthesized "_ENV" there,
-  ** backed by fn->l.env; the bytecode has no such upvalue (GGET model). */
+  ** backed by fn->l.env; the bytecode has no such upvalue (GGET model).
+  ** Placement: this is the 4 byte hole that GC64 has between sizebc and
+  ** gclist; the 32 bit GCRef layout has no hole there, so the field goes
+  ** after 'trace' instead. Both placements keep gclist at the GChead offset
+  ** (lj_obj.h asserts this) and keep the GC64 layout byte-identical. */
   uint32_t envuv;
+#endif
   GCRef gclist;
   MRef k;		/* Split constant array (points to the middle). */
   MRef uv;		/* Upvalue list. local slot|0x8000 or parent uv idx. */
@@ -405,6 +411,9 @@ typedef struct GCproto {
   uint8_t sizeuv;	/* Number of upvalues. */
   uint8_t flags;	/* Miscellaneous flags (see below). */
   uint16_t trace;	/* Anchor for chain of root traces. */
+#if !LJ_GC64
+  uint32_t envuv;	/* 5.4 debug view, see the GC64-only slot above. */
+#endif
   /* ------ The following fields are for debugging/tracebacks only ------ */
   GCRef chunkname;	/* Name of the chunk this function was defined in. */
   BCLine firstline;	/* First line of the function definition. */
@@ -1060,7 +1069,17 @@ static LJ_AINLINE int64_t intV47(cTValue *o)
 /* True if an inline integer uses the widened form (payload bits 32..46). */
 static LJ_AINLINE int tvisi47w(cTValue *o)
 {
+#if LJ_GC64
   return tvisint(o) && (o->it & 0x7fffu) != 0;
+#else
+  /* The widened 47-bit form only exists in the GC64 NaN-box. With 32 bit GC
+  ** references the tag word keeps its full 32 bits (LJ_TISNUM = 0xfffeffff),
+  ** so the bit test would answer true for *every* inline integer. No widened
+  ** value is ever created in this mode: every setint47V call site is guarded
+  ** by LJ_GC64 and lj_i64_iswidened() is constant false. */
+  UNUSED(o);
+  return 0;
+#endif
 }
 
 

@@ -23,4 +23,9 @@ if [ ! -x "$LUAJIT" ]; then
   echo "harness: $LUAJIT missing -- run 'make -j8' in $ROOT" >&2
   exit 2
 fi
+# The puc54 corpus loads C fixtures; build each arm's copy from its own headers
+# (a PUC-built module is rejected by JITLua's luaL_checkversion).
+CORPUS_LIBS_OUT=${CORPUS_LIBS_OUT:-$ROOT/tests/capi/build/corpus-libs}
+export CORPUS_LIBS_OUT
+sh "$ROOT/tests/ref/build-puc54-libs.sh" >&2
 exec python3 "$ROOT/tests/lib/runner.py" --luajit "$LUAJIT" --ref "$REF" "$@"

@@ -50,13 +50,16 @@
 #if !defined(luai_likely) || !defined(luai_unlikely)
 #error "luai_likely/luai_unlikely missing"
 #endif
+#if !defined(LUAMOD_API)
+#error "LUAMOD_API missing"
+#endif
 
 static LUA_KCONTEXT probe_ctx;  /* must be a usable type */
 
 static int probe_constants(lua_State *L)
 {
   LUA_KCONTEXT ctx = probe_ctx;
-  lua_createtable(L, 0, 14);
+  lua_createtable(L, 0, 16);
   lua_pushinteger(L, (lua_Integer)LUA_MAXINTEGER);
   lua_setfield(L, -2, "maxinteger");
   lua_pushinteger(L, (lua_Integer)LUA_MININTEGER);
@@ -75,6 +78,10 @@ static int probe_constants(lua_State *L)
   lua_setfield(L, -2, "bufsize");
   lua_pushinteger(L, (lua_Integer)LUAL_NUMSIZES);
   lua_setfield(L, -2, "numsizes");
+  lua_pushinteger(L, (lua_Integer)LUAL_ABISTAMP);
+  lua_setfield(L, -2, "abistamp");
+  lua_pushinteger(L, (lua_Integer)LUAL_NUMABI);
+  lua_setfield(L, -2, "numabi");
   lua_pushinteger(L, (lua_Integer)LUA_NUMTYPES);
   lua_setfield(L, -2, "numtypes");
   lua_pushstring(L, LUA_GNAME);
@@ -144,11 +151,11 @@ static int probe_conversions(lua_State *L)
   return 1;
 }
 
-/* luaL_checkversion_ with the caller's idea of version and type sizes. */
+/* luaL_checkversion_ with the caller's idea of version and type/ABI stamp. */
 static int probe_checkversion(lua_State *L)
 {
   lua_Number ver = luaL_optnumber(L, 1, (lua_Number)LUA_VERSION_NUM);
-  size_t sz = (size_t)luaL_optinteger(L, 2, (lua_Integer)LUAL_NUMSIZES);
+  size_t sz = (size_t)luaL_optinteger(L, 2, (lua_Integer)LUAL_NUMABI);
   luaL_checkversion_(L, ver, sz);
   luaL_checkversion(L);
   return 0;

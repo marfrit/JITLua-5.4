@@ -98,6 +98,24 @@ def child_env():
 
 ENV = child_env()
 
+# The corpus C fixtures are built twice, once per arm (tests/ref/
+# build-puc54-libs.sh): PUC-built modules are rejected by JITLua's
+# luaL_checkversion now, so each arm loads only its own build.
+CORPUS_LIBS = Path(os.environ.get("CORPUS_LIBS_OUT",
+                                   ROOT / "tests" / "capi" / "build" / "corpus-libs"))
+
+
+def arm_env(arm, scratch=None):
+    """Environment for one arm.  The corpus C fixtures are installed in the
+    test's private libs/ (install_libs), so the relative cpath resolves to
+    that arm's build and no absolute build path leaks into test output."""
+    env = dict(ENV)
+    if scratch and (Path(scratch) / "libs").is_dir():
+        cpath = "./libs/?.so;./?.so"
+        env["LUA_CPATH"] = cpath
+        env["LUA_CPATH_5_4"] = cpath
+    return env
+
 # Address-space limiting for the memory-heavy corpus files (puc54/heavy.lua).
 # prlimit is preferred because a preexec_fn is unsafe with the job thread pool.
 HAVE_PRLIMIT = shutil.which("prlimit") is not None
@@ -118,7 +136,7 @@ def _as_limit(n):
     return _set
 
 
-def run(argv, cwd, timeout, mem_limit=None):
+def run(argv, cwd, timeout, mem_limit=None, env=None):
     """Run a child in its own process group; return (rc, out, err, timed_out).
 
     mem_limit caps RLIMIT_AS for both arms of puc54/heavy.lua: the reference
@@ -132,7 +150,8 @@ def run(argv, cwd, timeout, mem_limit=None):
         else:
             preexec = _as_limit(mem_limit)
     try:
-        p = subprocess.Popen(argv, cwd=str(cwd), env=ENV, stdout=subprocess.PIPE,
+        p = subprocess.Popen(argv, cwd=str(cwd), env=env or ENV,
+                             stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE, start_new_session=True,
                              preexec_fn=preexec)
     except OSError as e:
@@ -147,6 +166,26 @@ def run(argv, cwd, timeout, mem_limit=None):
             p.kill()
         out, err = p.communicate()
         return (-1, decode(out), decode(err), True)
+
+
+def install_libs(scratch, arm):
+    """Put the arm's C fixtures into <scratch>/libs (loadlib uses relative
+    paths there), replacing any .so copied from the source tree.  A corpus
+    without a libs/ directory needs no fixtures (returns True)."""
+    libs = Path(scratch) / "libs"
+    src = CORPUS_LIBS / arm
+    if not libs.is_dir():
+        return True
+    if not src.is_dir():
+        return False
+    for old in libs.glob("*.so"):
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    for so in src.glob("*.so"):
+        shutil.copy2(str(so), str(libs / so.name))
+    return True
 
 
 def directives(path, text):
@@ -313,19 +352,36 @@ class Job:
         else:
             extra_pre = []
         if self.mode == "A":
-            a = run([ref] + extra_pre + [name] + extra, cwd, to, ml)
-            b = run([jit, "-joff"] + extra_pre + [name] + extra, cwd, to, ml)
+            if scratch and not install_libs(scratch, "puc"):
+                self.status = "FAIL"
+                self.detail = ("missing puc corpus libs in %s "
+                               "(run fetch-ref.sh)" % (CORPUS_LIBS / "puc"))
+                return self
+            a = run([ref] + extra_pre + [name] + extra, cwd, to, ml,
+                    env=arm_env("puc", scratch))
+            if scratch:
+                install_libs(scratch, "jit")
+            b = run([jit, "-joff"] + extra_pre + [name] + extra, cwd, to, ml,
+                    env=arm_env("jit", scratch))
             mismatch, detail = compare(a, b, "puc54", "luajit-jitoff")
         elif self.mode.startswith("B"):
+            if scratch:
+                install_libs(scratch, "jit")
             on = [jit, "-jon"]
             if "@" in self.mode:
                 on += ["-O" + self.mode.split("@", 1)[1]]
-            a = run(on + extra_pre + [name] + extra, cwd, to, ml)
-            b = run([jit, "-joff"] + extra_pre + [name] + extra, cwd, to, ml)
+            a = run(on + extra_pre + [name] + extra, cwd, to, ml,
+                    env=arm_env("jit", scratch))
+            b = run([jit, "-joff"] + extra_pre + [name] + extra, cwd, to, ml,
+                    env=arm_env("jit", scratch))
             mismatch, detail = compare(a, b, "luajit-jiton", "luajit-jitoff")
         elif self.mode == "R":
-            a = run([jit, "-joff"] + extra_pre + [name] + extra, cwd, to, ml)
-            b = run([jit, "-joff"] + extra_pre + [str(DUMP_RELOAD), name] + extra, cwd, to, ml)
+            if scratch:
+                install_libs(scratch, "jit")
+            a = run([jit, "-joff"] + extra_pre + [name] + extra, cwd, to, ml,
+                    env=arm_env("jit", scratch))
+            b = run([jit, "-joff"] + extra_pre + [str(DUMP_RELOAD), name] + extra, cwd, to, ml,
+                    env=arm_env("jit", scratch))
             mismatch, detail = compare(a, b, "direct", "dump-reload")
         else:
             raise ValueError(self.mode)

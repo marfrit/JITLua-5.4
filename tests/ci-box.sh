@@ -48,6 +48,9 @@ make -j"$NPROC" >"$OUT-build.log" 2>&1 || { tail -30 "$OUT-build.log"; exit 1; }
 say "GC policy modes (LUAJIT_GC / -G)"
 stage 'tail -20' sh tests/gcmode.sh
 
+say "object layout, both x86_64 reference layouts (GC64 / non-GC64)"
+stage 'cat' sh tests/nogc64-layout.sh
+
 say "build reference (PUC-Lua 5.4.9, vendored tarball)"
 # A copied tree can carry a reference binary built for another architecture
 # (e.g. aarch64 on the x64 box): always check that it actually runs.

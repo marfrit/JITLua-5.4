@@ -1689,6 +1689,17 @@ static void build_subroutines(BuildCtx *ctx)
   |.endif
   |  cmp aword L:RB->cframe, 0; jne ->fff_fallback
   |  cmp byte L:RB->status, LUA_YIELD;  ja ->fff_fallback
+  |  // 5.4: the resumed thread inherits the resumer's C-call count plus one
+  |  // for this resume. The resume itself is the error if the bound is already
+  |  // reached, so check before any coroutine state is mutated. Do not use
+  |  // KBASE here: it is the caller's constants base and survives the resume.
+  |  mov TMPR, SAVE_L
+  |  mov TMPRd, L:TMPR->ccallnest
+  |  cmp TMPRd, LJ_MAX_XLEVEL
+  |  jae ->fff_fallback
+  |  add TMPRd, 1
+  |  mov L:RB->ccallnest, TMPRd
+  |  cmp byte L:RB->status, LUA_YIELD	// Restore flags for the branch below.
   |  mov RA, L:RB->top
   |  je >1				// Status != LUA_YIELD (i.e. 0)?
   |  cmp RA, L:RB->base			// Check for presence of initial func.

@@ -95,6 +95,25 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   below the frame, into a live frame of a caller. Seen as a crash in the
   interpreter when the allocator fails before the collector's threshold is
   reached (`tests/capi` `oom_pcall`, the JIT-off arm).
+- `FIXED` `__tostring` must return a string (5.4 `luaL_tolstring`). The
+  conversion paths `tostring()`, `print()`, `string.format("%s")`, the C API
+  `luaL_tolstring` and the standalone message handler now enforce it: a string
+  result passes, a number is converted, anything else raises
+  "'__tostring' must return a string" instead of passing the wrong value
+  through. The C fast function validates the result (no tail call), the
+  x64/arm64 asm `tostring` string path falls back when the string base
+  metatable has `__tostring`, and the recorder leaves any `__tostring` call to
+  the interpreter (a trace cannot check a tail-called result; no trace abort).
+  `__name` from the value's metatable, per-type base metatables included,
+  names the default rendering, and `luaL_getmetafield` returns the field type
+  again (it returned a boolean, so the `__name` branch in `luaL_tolstring`,
+  `luaL_typeerror` never fired). `print()` uses `luaL_tolstring` per argument
+  like PUC 5.4.9 and no longer calls a replaced global `tostring`.
+  `table.concat` and `..` stay non-`__tostring` paths. Tests
+  `tests/d54/tostring_01..04`, the capi `tolstring` group; benchmark
+  `tests/bench/b6_tostring.lua` (no-metamethod hot paths flat, the
+  `__tostring` case +23 % interpreted and no longer traced); design and path
+  table: `docs/notes/tostring54.md`.
 - `IMPL-DEFINED` Sparse-table border for runtime-built tables may differ: 5.4
   allows any border; LuaJIT's array-growth policy differs from PUC's alimit hint
   (`tbl_03_border_divergence`).

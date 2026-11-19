@@ -36,3 +36,14 @@ no metatable guard. More traces (ours 68 vs stock 36 dump lines).
 Measurement x64: stock 15.4ms vs ours 16.0ms (~4%, below the >10% row).
 Reduction not done. Candidate: fold/hoist the tab.meta NULL guard when the
 recorder already knows the table has no metatable.
+
+## pcall/xpcall trace recording — penlight cause (2026-11-19)
+Re-applied the recording (87416a0a) and ran `sh tests/corpus-ext/run.sh penlight`
+under -jon and -jon+GC-stress: `tests/test-pretty.lua` fails with
+"LUA: C stack overflow" at `./lua/pl/pretty.lua:281` (inside a `for ... in`
+loop that calls pcall) while -joff is SAME. So the top-level-only
+`ccallnest == 0` guard does not count the nesting of a pcall that a trace
+enters; the counter leaks/overflows and the interpreter's bound fires. The
+proper fix is the trace-level counter with an increment AND a matching
+decrement (and an exit near the limit), which was not implemented. The
+recording is reverted again; only the benchmark (838e414e) and this note stay.

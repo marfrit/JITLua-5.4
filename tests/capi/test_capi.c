@@ -1181,6 +1181,31 @@ static void test_closethread(void)
   ok(lua_tointeger(L, -1) == 1, "lua_closethread closes the dead thread's slots");
   lua_pop(L, 2);
 
+  /* A thread closed while it is suspended inside nested pcalls must start
+  ** from a clean pcall nesting count when it is reused (PUC resets nCcalls
+  ** in luaE_resetthread). Three rounds of 150 nested pcalls only fit below
+  ** the bound of 200 if every close resets the count. */
+  luaL_dostring(L,
+    "function nest(n)\n"
+    "  if n == 0 then coroutine.yield() return 0 end\n"
+    "  local ok, v = pcall(nest, n - 1)\n"
+    "  if not ok then error(v, 0) end\n"
+    "  return v + 1\n"
+    "end");
+  {
+    int i, nres, good = 1;
+    co = lua_newthread(L);
+    for (i = 0; i < 3; i++) {
+      lua_getglobal(co, "nest");
+      lua_pushinteger(co, 150);
+      if (lua_resume(co, L, 1, &nres) != LUA_YIELD) good = 0;
+      lua_closethread(co, L);
+      lua_settop(co, 0);
+    }
+    ok(good, "lua_closethread resets the pcall nesting count");
+    lua_pop(L, 1);
+  }
+
   {
     int top = lua_gettop(L);
     luaopen_coroutine(L);  /* direct call: lua_call would normalize to one */

@@ -1633,7 +1633,6 @@ LUA_API int lua_setfenv(lua_State *L, int idx)
   if (tvisfunc(o)) {
     setgcref(funcV(o)->c.env, obj2gco(t));
     settabV(L, &funcV(o)->c.envv, t);
-    lj_func_flushenv(L);  /* compiled traces baked/loaded the old env */
   } else if (tvisudata(o) && !tvisi64(o)) {  /* boxed int64 is a number */
     GCudata *ud = udataV(o);
     setgcref(ud->env, obj2gco(t));
@@ -1702,7 +1701,6 @@ LUA_API const char *lua_setupvalue(lua_State *L, int idx, int n)
 	setgcref(funcV(f)->l.env, obj2gco(tabV(val)));
       else
 	setgcrefnull(funcV(f)->l.env);
-      lj_func_flushenv(L);  /* compiled traces baked/loaded the old env */
     }
   }
   return name;
@@ -1912,7 +1910,8 @@ LUA_API int lua_resume(lua_State *L, lua_State *from, int nargs, int *nres)
 
 /* Lua 5.4 thread reset: close pending to-be-closed slots and upvalues, then
 ** put the thread back to its fresh suspended state. The PUC 'from' argument
-** only feeds PUC's C-call counter; LuaJIT keeps no such per-thread counter. */
+** only feeds PUC's C-call counter; the pcall nesting count kept here starts
+** from zero again, as the pcall frames it counted are gone. */
 LUA_API int lua_closethread(lua_State *L, lua_State *from)
 {
   int status = L->status, st;
@@ -1926,6 +1925,7 @@ LUA_API int lua_closethread(lua_State *L, lua_State *from)
   else
     setnilV(eslot);
   L->status = LUA_OK;
+  L->ccallnest = 0;  /* Before the __close handlers run, like PUC's nCcalls. */
   st = lj_meta_tbccloseall(L, tvref(L->stack), eslot);
   eslot = L->top-1;  /* close calls may grow the stack */
   lj_func_closeuv(L, tvref(L->stack));

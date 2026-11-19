@@ -29,17 +29,16 @@ Status as measured, not a compatibility claim:
   `tests/known-bad.tsv`.
 - The remaining known gaps and deliberate divergences are recorded in
   [docs/DIFFERENCES.md](docs/DIFFERENCES.md) and
-  [tests/known-bad.tsv](tests/known-bad.tsv). Open items include arbitrary
-  `_ENV` and the pcall/`__call` VM work in the `calls.lua` corpus, tail-call
-  error names, `debug.getinfo(...).istailcall` without a hook, a private dump
+  [tests/known-bad.tsv](tests/known-bad.tsv). Open items include the `__call`
+  chain in the `calls.lua` corpus, tail-call error names, `debug.getinfo(...).istailcall` without a hook, a private dump
   format, and implementation-defined table/GC edges.
 - Open performance items: `heavy.lua` requires a box above 8 GiB; classic
   benchmark runs show remaining gaps in deltablue, x64 spectral-norm and x64
   k-nucleotide
   ([docs/perf-regression-2026-11-17.md](docs/perf-regression-2026-11-17.md)).
-- **Not yet covered:** arbitrary `_ENV` values, the no-op
-  `lua_setcstacklimit`, and the remaining pcall/`__call` VM work. See the
-  two files above for the exact list.
+- **Not yet covered:** the no-op `lua_setcstacklimit` and the `__call`
+  chain VM work. `pcall`/`xpcall` are not recorded in traces since the 5.4
+  nesting bound landed. See the two files above for the exact list.
 
 ## Build
 

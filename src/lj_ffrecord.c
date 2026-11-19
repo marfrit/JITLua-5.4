@@ -597,10 +597,9 @@ static void LJ_FASTCALL recff_xpairs(jit_State *J, RecordFFData *rd)
 
 static void LJ_FASTCALL recff_pcall(jit_State *J, RecordFFData *rd)
 {
-  /* The 5.4 C-call bound lives in the interpreter fast path; keep pcall out
-  ** of traces so a recursive pcall/error cascade stays bounded. */
-  lj_trace_err(J, LJ_TRERR_BADTYPE);
   if (J->maxslot >= 1) {
+    /* Count the protected call in the trace (see lj_record_ccallnest). */
+    lj_record_ccallnest(J, 1);
 #if LJ_FR2
     /* Shift function arguments up. */
     memmove(J->base + 1, J->base, sizeof(TRef) * J->maxslot);
@@ -621,9 +620,8 @@ static TValue *recff_xpcall_cp(lua_State *L, lua_CFunction dummy, void *ud)
 
 static void LJ_FASTCALL recff_xpcall(jit_State *J, RecordFFData *rd)
 {
-  /* 5.4 C-call bound is in the fast path; keep xpcall out of traces. */
-  lj_trace_err(J, LJ_TRERR_BADTYPE);
   if (J->maxslot >= 2) {
+    lj_record_ccallnest(J, 1);
     TValue argv0, argv1;
     TRef tmp;
     int errcode;

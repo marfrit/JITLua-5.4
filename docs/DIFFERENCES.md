@@ -37,13 +37,13 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   bounded at PUC's LUAI_MAXCCALLS (200) with "C stack overflow" and a
   repeatedly erroring message handler ends in "error in error handling"
   (`tests/d54/err_04_ccall_bound.lua`).
-- `PENDING` pcall/xpcall are not recorded in traces (`recff_pcall`/
-  `recff_xpcall` abort the trace): a compiled pcall bypasses the fast-path
-  C-call counter, so a recursive pcall/error cascade in a trace would not be
-  bounded. A hot loop containing pcall therefore falls back to the
-  interpreter and is blacklisted (a performance regression against stock 2.1;
-  the classic benchmark set does not use pcall). A trace-level C-call counter
-  is future work.
+- `FIXED` pcall/xpcall are recorded in traces with an exact C-call counter:
+  `lj_record_ccallnest` emits the `ccallnest` increment and an exit-near-the-
+  limit guard before the protected call, and the matching decrement on the
+  trace's normal return from the pcall frame (any exit before that leaves the
+  frame live for the interpreter's own decrement). `tests/bench/b5_pcall.lua`
+  (x64 2M iterations): pcall 150->47 ms, xpcall 150->2.8 ms;
+  `tests/d54/err_05_pcall_trace.lua` covers the penlight test-pretty shape.
 - `IMPL-DEFINED` Sparse-table border for runtime-built tables may differ: 5.4
   allows any border; LuaJIT's array-growth policy differs from PUC's alimit hint
   (`tbl_03_border_divergence`).
@@ -205,3 +205,11 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   optimizations remain; 5.4 pattern behaviors are covered by `str_03_patterns`.
 - `EXTENSION` `string.dump` bytecode format and `-b`/`bcsave` are
   LuaJIT-specific; `dump_03_version` records the fork format.
+- `EXTENSION` GC policy mode `LUAJIT_GC=speed|memory` (`src/lib_aux.c`,
+  `luaL_newstate`, so every embedder honours it) and the equivalent
+  `luajit -G speed|memory` option; `-G` overrides the environment, `-E`
+  ignores it, unknown values are ignored silently. `memory` sets pause 100 /
+  stepmul 200 (the Stage 0(a) row in `docs/gc-newgen-plan.md`); `speed` is the
+  unchanged default 200/200. Runtime `collectgarbage("setpause" /
+  "setstepmul")` overrides either. The default build is byte-for-byte the same
+  policy as stock LuaJIT 2.1.

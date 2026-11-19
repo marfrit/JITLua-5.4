@@ -1208,6 +1208,23 @@ static int check_downrec_unroll(jit_State *J, GCproto *pt)
 static TRef rec_cat(jit_State *J, BCReg baseslot, BCReg topslot);
 
 /* Record return. */
+/* Trace-level pcall/xpcall C-call counter. delta=+1 emits the increment and
+** the exit-near-the-limit guard; delta=-1 emits the decrement. */
+void lj_record_ccallnest(jit_State *J, int delta)
+{
+  TRef th = emitir(IRT(IR_LREF, IRT_THREAD), 0, 0);
+  TRef cn = emitir(IRT(IR_FLOAD, IRT_INT), th, IRFL_THREAD_CCALLNEST);
+  TRef nv;
+  if (delta > 0) {
+    emitir(IRTG(IR_LT, IRT_INT), cn, lj_ir_kint(J, LJ_MAX_XLEVEL));
+    nv = emitir(IRTI(IR_ADD), cn, lj_ir_kint(J, 1));
+  } else {
+    nv = emitir(IRTI(IR_SUB), cn, lj_ir_kint(J, 1));
+  }
+  emitir(IRT(IR_FSTORE, IRT_INT),
+         emitir(IRT(IR_FREF, IRT_PGC), th, IRFL_THREAD_CCALLNEST), nv);
+}
+
 void lj_record_ret(jit_State *J, BCReg rbase, ptrdiff_t gotresults)
 {
   TValue *frame = J->L->base - 1;
@@ -1226,6 +1243,7 @@ void lj_record_ret(jit_State *J, BCReg rbase, ptrdiff_t gotresults)
     J->baseslot -= (BCReg)cbase;
     J->base -= cbase;
     J->base[--rbase] = TREF_TRUE;  /* Prepend true to results. */
+    lj_record_ccallnest(J, -1);  /* Leave the protected region. */
     frame = frame_prevd(frame);
     J->needsnap = 1;  /* Stop catching on-trace errors. */
   }
@@ -1376,6 +1394,7 @@ static BCReg rec_mm_prep(jit_State *J, ASMFunction cont)
 }
 
 /* Record metamethod lookup. */
+static TRef rec_idx(jit_State *J, RecordIndex *ix, int tabguard);
 int lj_record_mm_lookup(jit_State *J, RecordIndex *ix, MMS mm)
 {
   RecordIndex mix;
@@ -1428,7 +1447,11 @@ int lj_record_mm_lookup(jit_State *J, RecordIndex *ix, MMS mm)
     goto nocheck;
   }
   ix->mt = mt ? mix.tab : TREF_NIL;
-  emitir(IRTG(mt ? IR_NE : IR_EQ, IRT_TAB), mix.tab, lj_ir_knull(J, IRT_TAB));
+  /* Guard the metatable identity, not just non-NULL: the weakness guard
+  ** (rec_tabguard) already emits the same EQ, so the folder CSEs the two
+  ** and the class idiom does not pay two guards on one metatable load. */
+  emitir(IRTG(IR_EQ, IRT_TAB), mix.tab,
+	 mt ? lj_ir_ktab(J, mt) : lj_ir_knull(J, IRT_TAB));
 nocheck:
   if (mt) {
     GCstr *mmstr = mmname_str(J2G(J), mm);
@@ -1441,7 +1464,11 @@ nocheck:
     mix.key = lj_ir_kstr(J, mmstr);
     mix.val = 0;
     mix.idxchain = 0;
-    ix->mobj = lj_record_idx(J, &mix);
+    /* The metaobject is a one-time metamethod resolution, not the loop's
+    ** table operand: its entries are already guarded by the shape guards
+    ** (HREFK/HLOAD/EQ), so it needs no weakness guard. Guarding it added a
+    ** metatable load and compare per iteration for the class idiom. */
+    ix->mobj = rec_idx(J, &mix, 0);
     return !tref_isnil(ix->mobj);  /* 1 if metamethod found, 0 if not. */
   }
   return 0;  /* No metamethod. */
@@ -1919,6 +1946,7 @@ static TRef rec_idx(jit_State *J, RecordIndex *ix, int tabguard)
   IRRef rbref;
   IRType1 rbguard;
   cTValue *oldv;
+  int guardtab = tabguard;  /* guard only the original table operand */
 
   while (!tref_istab(ix->tab)) { /* Handle non-table lookup. */
     /* Never call raw lj_record_idx() on non-table. */
@@ -1957,12 +1985,13 @@ static TRef rec_idx(jit_State *J, RecordIndex *ix, int tabguard)
     /* Otherwise retry lookup with metaobject. */
     ix->tab = ix->mobj;
     copyTV(J->L, &ix->tabv, &ix->mobjv);
+    guardtab = 0;  /* a metaobject, not the loop's table operand */
     if (--ix->idxchain == 0)
       lj_trace_err(J, LJ_TRERR_IDXLOOP);
   }
 
-  /* Guard the weakness of this table operand (not for the guard's lookup). */
-  if (tabguard)
+  /* Guard the weakness of the table operand (not of a metaobject). */
+  if (guardtab)
     rec_tabguard(J, ix->tab, tabV(&ix->tabv));
 
   /* First catch nil and NaN keys for tables. */

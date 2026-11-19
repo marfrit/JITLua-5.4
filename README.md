@@ -20,11 +20,11 @@ Status as measured, not a compatibility claim:
 
 - Differential gates against PUC Lua 5.4.9 pass on the tested platforms.
   Measured on Linux arm64 and x86_64, identical on both, on the `tests/d54`
-  edge-case corpus: A+B **183 PASS / 0 FAIL / 5 XFAIL**, JIT optimization
-  levels 0–3 **404**, R (dump/reload round-trip) **101**; the ASan/UBSan run
-  of A+B+R is **284 PASS / 0 FAIL / 5 XFAIL**; C API checks **222 + 92 + 18**.
+  edge-case corpus: A+B **187 PASS / 0 FAIL / 5 XFAIL**, JIT optimization
+  levels 0–3 **412**, R (dump/reload round-trip) **103**; the ASan/UBSan run
+  of A+B+R is **290 PASS / 0 FAIL / 5 XFAIL**; C API checks **231 + 92 + 18**.
 - Full corpus (PUC 5.4.9 test suite plus `tests/d54`) with `--strict`, the
-  exact command of the public CI: **342 PASS / 0 FAIL / 7 XFAIL / 12 SKIP /
+  exact command of the public CI: **348 PASS / 0 FAIL / 7 XFAIL / 12 SKIP /
   0 TIMEOUT**. Every XFAIL has its reason in one of two lists:
   [tests/known-bad.tsv](tests/known-bad.tsv) for real defects, and
   [tests/known-different.tsv](tests/known-different.tsv) for deliberate or
@@ -54,7 +54,7 @@ Put your own preprocessor defines in **`CFLAGS`**, never in `XCFLAGS`.
 
 The default collector policy is **time-first**: pause 300 %, stepmul 200 %. It
 was raised from 200 % after a measurement on both arches
-(`docs/knuc-phase-align-2026-11.md`): k-nucleotide reaches stock parity
+(`docs/notes/knuc-phase-align-2026-11.md`): k-nucleotide reaches stock parity
 (0.89 → 1.00 on x86_64, 0.853 → 0.979 on arm64) and binary-trees gets faster
 (0.97 → 1.07, 1.00 → 1.04), with lpeg and lua-cjson unchanged. The price is
 peak RSS: binary-trees +31 %, lpeg +17 %, lua-cjson flat.

@@ -771,11 +771,8 @@ static void build_subroutines(BuildCtx *ctx)
   |  endbr
   |  mov RA, RC
   |  sub RA, BASE			// RA = resultofs (bytes).
-  |  mov PC, [BASE-8]			// Caller's own return PC.
   |  mov RDd, MULTRES
-  |  test PCd, FRAME_TYPE
-  |  jnz ->vm_return			// Non-standard frame (e.g. pcall).
-  |  jmp ->BC_RET_Z			// Make the caller return the C results.
+  |  jmp ->BC_RETC_Z			// Make the caller return the C results.
   |
   |->cont_cat:				// BASE = base, RC = result, RB = mbase
   |  endbr
@@ -4610,15 +4607,14 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  mov LFUNC:RB, [RA-16]
     |  checktp_nc LFUNC:RB, LJ_TFUNC, ->vmeta_call
     |->BC_CALLT_Z:
-    |  mov SAVE_PC, PC			// Remember the CALLT pc for the C path.
-    |  mov PC, [BASE-8]
-    |  test PCd, FRAME_TYPE
-    |  jnz >7
-    |1:
     |  mov TMPR, LFUNC:RB
     |  cleartp TMPR
     |  cmp byte CFUNC:TMPR->ffid, 0
     |  jne >9				// C function: keep the caller frame.
+    |  mov PC, [BASE-8]
+    |  test PCd, FRAME_TYPE
+    |  jnz >7
+    |1:
     |  mov [BASE-16], LFUNC:RB		// Copy func+tag down, reloaded below.
     |  mov MULTRES, NARGS:RDd
     |  sub NARGS:RDd, 1
@@ -4642,8 +4638,11 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |    // continuation frame (LJ_CONT_TAILRET) above it. The caller returns
     |    // the C results, but its frame stays in the chain, so error names,
     |    // levels and hooks see the CALLT position, like PUC 5.4.
+    |    // A vararg frame is kept as it is: BASE is not relocated, so the
+    |    // locals of the caller stay where the debug API looks for them.
     |    // NB = RA+16: [NB-32]=cont id, [NB-24]=contpc, [NB-16]=func,
     |    // [NB-8]=delta|FRAME_CONT, args at [NB..].
+    |  mov SAVE_PC, PC			// PC is still the CALLT pc.
     |  lea TMPR, [RA+16]			// TMPR = NB (new C base).
     |  mov ITYPE, RD			// ITYPE = nargs+1 (kept).
     |  mov RB, ITYPE
@@ -4658,8 +4657,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  mov RC, [RA-16]			// Copy func up to [NB-16].
     |  mov [RA], RC
     |  mov qword [RA-16], LJ_CONT_TAILRET	// [NB-32] = cont id.
-    |  mov RC, SAVE_PC
-    |  mov [RA-8], RC			// [NB-24] = contpc.
+    |  mov [RA-8], PC			// [NB-24] = contpc.
     |  mov RC, TMPR
     |  sub RC, BASE
     |  add RC, FRAME_CONT
@@ -4880,6 +4878,9 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  ins_AD	// RA = results, RD = nresults+1
     if (op != BC_RET0) {
       |  shl RAd, 3
+    }
+    if (op == BC_RET) {
+      |->BC_RETC_Z:			// Entry for cont_tailret: any frame type.
     }
     |1:
     |  mov PC, [BASE-8]

@@ -1906,7 +1906,6 @@ LUA_API int lua_closethread(lua_State *L, lua_State *from)
 {
   int status = L->status, st;
   TValue *eslot;
-  UNUSED(from);
   lj_checkapi(L->cframe == NULL, "thread is running");
   if (status == LUA_YIELD) status = LUA_OK;
   eslot = L->top++;
@@ -1917,6 +1916,7 @@ LUA_API int lua_closethread(lua_State *L, lua_State *from)
   L->status = LUA_OK;
   L->ccallnest = from ? from->ccallnest + 1 : 1;  /* Closer's nesting + 1. */
   st = lj_meta_tbccloseall(L, tvref(L->stack), eslot);
+  L->ccallnest = 0;  /* The reset thread has no frames: nothing is nested. */
   eslot = L->top-1;  /* close calls may grow the stack */
   lj_func_closeuv(L, tvref(L->stack));
   L->cframe = NULL;

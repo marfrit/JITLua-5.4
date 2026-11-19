@@ -719,6 +719,7 @@ LJLIB_CF(coroutine_close)
     co->status = LUA_OK;
     co->base = co->top = tvref(co->stack) + 1 + LJ_FR2;
     co->cframe = NULL;
+    co->ccallnest = 0;  /* No frames left: the closer's nesting ends here. */
     return nres;
   }
   if (strcmp(s, "dead") == 0) {  /* Finished without error. */

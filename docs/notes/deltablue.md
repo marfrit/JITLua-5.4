@@ -5,9 +5,8 @@ Goal from the task: close the deltablue JIT gap (stock/ours 0.86 measured at
 branch named as cause 1 (`docs/perf-diagnosis-2026-11.md`), or by the policy
 change sketched for `rec_loop_interp`'s `LLEAVE` branch.
 
-Branch `deltablue`; worktree `~/src/LuaJIT-5.4-deltablue`. The task said to
-merge main first; main had moved on to `f51a7608` (guardperf merged), and that
-merge is what closed the gap. No source change was needed or made.
+Branch `deltablue`. Main was merged first; it had moved on to `f51a7608`
+(guardperf merged), and that merge is what closed the gap. No source change was needed or made.
 
 ## Result
 

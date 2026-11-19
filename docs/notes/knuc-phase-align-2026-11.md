@@ -8,7 +8,7 @@ atomic split; a copy of k-nucleotide prints stage boundaries on stderr with
 attributed to the workload stage it landed in. Everything stays behind the
 existing stats define (`LUAJIT_GC_CENSUS` adds the full live-object census).
 
-Companion to `docs/knuc-perf-2026-11.md`, which established that the gap is a
+Companion to `docs/notes/knuc-perf-2026-11.md`, which established that the gap is a
 collector-policy effect (the `setpause` sweep flips its sign) and not a slow
 walk. This document names the mechanism and answers whether a policy change
 would remove the gap without hurting binary-trees, lpeg and lua-cjson.

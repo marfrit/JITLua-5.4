@@ -3,6 +3,13 @@
 --! frame slot), through next() on a weak-keyed table, or the allocation is on
 --! a branch that becomes a side trace. Bounded and observable: the weak entry
 --! must be cleared before the bound, under the default options and with -dce.
+-- The bounds in this test are sized for a collector pause of 200. Pin it, so
+-- the result does not depend on the default GC policy; a lower pause (the
+-- harness's GC-stress arm) is kept.
+do
+  local prev = collectgarbage("setpause", 200)
+  if prev < 200 then collectgarbage("setpause", prev) end
+end
 
 local function chk(t) return t[1] end
 

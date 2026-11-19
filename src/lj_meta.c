@@ -879,6 +879,17 @@ void LJ_FASTCALL lj_meta_tbcmark(lua_State *L, TValue *o)
 TValue *lj_meta_tbcclose(lua_State *L, TValue *level, MSize multres)
 {
   ptrdiff_t lofs = savestack(L, level);
+  /* MULTRES is live only when this close sits between the producer of open
+  ** results and RETM (return f() in a <close> scope: the jump target of the
+  ** UCLO is the RETM). At any other block exit the VM hands over whatever
+  ** its MULTRES slot holds. On x64 that slot is shared with a temporary and
+  ** can hold half a pointer: the call frame would be placed far outside the
+  ** stack. The VM stored the pc behind the UCLO before calling. */
+  {
+    const BCIns *pc = cframe_Lpc(L);
+    if (bc_op(pc[bc_j(pc[-1])]) != BC_RETM)
+      multres = 0;
+  }
   while (L->tbcn > 0) {
     int32_t *list = mref(L->tbclist, int32_t);
     TValue *o = restorestack(L, list[L->tbcn-1]);

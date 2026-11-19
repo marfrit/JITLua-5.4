@@ -77,6 +77,22 @@ core and library have incompatible numeric types
 version mismatch: app. needs %f, Lua core provides %f
 ```
 
+What the check does not see: a module compiled against PUC's own 5.4
+headers. `LUAL_NUMSIZES` has PUC's value, so such a module passes. The headers
+are source-compatible with PUC 5.4, the binary interface is only partly so:
+`LUA_REGISTRYINDEX` and `lua_upvalueindex` have LuaJIT's values, and
+`luaL_Buffer` has another size (`LUAL_BUFFERSIZE`). A PUC-built module works
+as long as it uses neither (the fixtures in `tests/corpus/puc54/libs` are
+built that way and loaded by both interpreters in mode A); one that takes a
+registry reference, uses C closure upvalues or a `luaL_Buffer` runs with the
+wrong constants and is not stopped. Build modules against these headers.
+Giving the stamp a mark of its own would turn that into a clean
+`luaL_newlib` error, at the price of rejecting the modules that work today;
+that decision is open.
+
+A module compiled against JITLua headers from before this change passes
+`LUAL_BUFFERSIZE` as its stamp and is rejected: rebuild it.
+
 ## `lua_setcstacklimit`
 
 PUC 5.4.9 keeps it as a deprecated no-op that returns `LUAI_MAXCCALLS` (200);
@@ -93,4 +109,12 @@ JITLua already did. The constant now lives in `luaconf.h` and
   `tests/capi/dist/luasystem-0.4.4.tar.gz`
   (sha256 `d20786035f5d5a9ab3555813a3e495516efeba32909007ca0155a73d7695ee4a`)
   against the public headers and loads `system.core` under `-joff` and `-jon`.
+  The tarball is the unmodified upstream release (75 kB, MIT licence,
+  Copyright (c) 2016-2024 Oscar Lim; the licence text is `LICENSE.md` inside
+  it). It is test input only and is not linked into or installed with JITLua.
+- `headers_probe.c` also expands the conversion macros (`lua_integer2str`,
+  `lua_number2str`, `lua_number2strx`, `lua_pointer2str`, `lua_str2number`,
+  `lua_strx2number`, `lua_getlocaledecpoint`) and calls `luaL_checkversion_`
+  with a wrong version and with wrong numeric sizes; both must raise PUC's
+  messages.
 - `tests/capi/test_capi.c` checks the `lua_setcstacklimit` no-op contract.

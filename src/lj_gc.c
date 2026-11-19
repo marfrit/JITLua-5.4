@@ -145,14 +145,41 @@ static void gc_mark_mmudata(global_State *g)
   }
 }
 
-/* Separate userdata objects to be finalized to mmudata list. */
+/* Link an object to the end of the mmudata (to be finalized) list. */
+static void gc_linkmmudata(global_State *g, GCobj *o)
+{
+  if (gcref(g->gc.mmudata)) {  /* Link to end of mmudata list. */
+    GCobj *root = gcref(g->gc.mmudata);
+    setgcrefr(o->gch.nextgc, root->gch.nextgc);
+    setgcref(root->gch.nextgc, o);
+    setgcref(g->gc.mmudata, o);
+  } else {  /* Create circular list. */
+    setgcref(o->gch.nextgc, o);
+    setgcref(g->gc.mmudata, o);
+  }
+}
+
+/* Separate userdata and tables to be finalized to mmudata list. */
 size_t lj_gc_separateudata(global_State *g, int all)
 {
   size_t m = 0;
   GCRef *p = &mainthread(g)->nextgc;
   GCobj *o;
   while ((o = gcref(*p)) != NULL) {
-    if (!(iswhite(o) || all) || isfinalized(gco2ud(o))) {
+    if (o->gch.gct == ~LJ_TTAB) {
+      GCtab *t = gco2tab(o);
+      /* A candidate table sits in the list after the main thread. Move it
+      ** to the mmudata list (and mark it there) once it is unreachable. */
+      if (!(iswhite(o) || all)) {
+	p = &o->gch.nextgc;  /* Reachable: stays a candidate. */
+      } else {
+	m += sizeof(GCtab) + sizeof(TValue) * t->asize +
+	     (t->hmask ? sizeof(Node) * (t->hmask + 1) : 0);
+	t->marked |= LJ_GC_TABFIN;
+	*p = o->gch.nextgc;
+	gc_linkmmudata(g, o);
+      }
+    } else if (!(iswhite(o) || all) || isfinalized(gco2ud(o))) {
       p = &o->gch.nextgc;  /* Nothing to do. */
     } else if (!lj_meta_fastg(g, tabref(gco2ud(o)->metatable), MM_gc)) {
       markfinalized(o);  /* Done, as there's no __gc metamethod. */
@@ -161,18 +188,48 @@ size_t lj_gc_separateudata(global_State *g, int all)
       m += sizeudata(gco2ud(o));
       markfinalized(o);
       *p = o->gch.nextgc;
-      if (gcref(g->gc.mmudata)) {  /* Link to end of mmudata list. */
-	GCobj *root = gcref(g->gc.mmudata);
-	setgcrefr(o->gch.nextgc, root->gch.nextgc);
-	setgcref(root->gch.nextgc, o);
-	setgcref(g->gc.mmudata, o);
-      } else {  /* Create circular list. */
-	setgcref(o->gch.nextgc, o);
-	setgcref(g->gc.mmudata, o);
-      }
+      gc_linkmmudata(g, o);
     }
   }
   return m;
+}
+
+/* Mark a table for finalization at setmetatable time (PUC luaC_checkfinalizer).
+** A table that receives a metatable with a __gc field right now is moved to
+** the finalizer candidate list (the list after the main thread). A later
+** added __gc does not mark it; only this call does. LJ_GC_TABFIN is set only
+** when the table is moved to the mmudata list, i.e. while it is being
+** finalized (PUC: objects in tobefnz). */
+void lj_gc_checkfinalizer(lua_State *L, GCobj *o, GCtab *mt)
+{
+  global_State *g = G(L);
+  GCobj *mth;
+  GCtab *t;
+  GCRef *p;
+  if (o->gch.gct != ~LJ_TTAB || mt == NULL)
+    return;
+  t = gco2tab(o);
+  if (t->marked & LJ_GC_TABFIN)
+    return;  /* Already being finalized. */
+  if (!lj_meta_fastg(g, mt, MM_gc))
+    return;
+  /* Find the table in the main list (the region before the main thread).
+  ** If it is not there, it already sits in the candidate list. */
+  mth = obj2gco(mainthread(g));
+  for (p = &g->gc.root; gcref(*p) != NULL && gcref(*p) != mth;
+       p = &gcref(*p)->gch.nextgc) {
+    if (gcref(*p) == o)
+      break;
+  }
+  if (gcref(*p) != o)
+    return;
+  if (g->gc.state == GCSsweepstring || g->gc.state == GCSsweep)
+    makewhite(g, o);  /* Keep it alive for the rest of the current sweep. */
+  *p = o->gch.nextgc;
+  /* Prepend it to the candidate list after the main thread. The sweep
+  ** pointer is a pointer-to-link, so it needs no fixup here. */
+  setgcrefr(o->gch.nextgc, mainthread(g)->nextgc);
+  setgcref(mainthread(g)->nextgc, o);
 }
 
 /* -- Propagation phase --------------------------------------------------- */
@@ -488,6 +545,8 @@ static int gc_mayclear(cTValue *o, int val)
       return 1;  /* Object is about to be collected. */
     if (tvisudata(o) && val && isfinalized(udataV(o)))
       return 1;  /* Finalized userdata is dropped only from values. */
+    if (tvistab(o) && val && (tabV(o)->marked & LJ_GC_TABFIN))
+      return 1;  /* A table marked for finalization is dropped from values. */
   }
   return 0;  /* Cannot clear. */
 }
@@ -588,6 +647,20 @@ static void gc_finalize(lua_State *L)
     return;
   }
 #endif
+  if (o->gch.gct == ~LJ_TTAB) {
+    GCtab *t = gco2tab(o);
+    /* Add the table back to the main GC list and make it white. Clearing
+    ** LJ_GC_TABFIN is the "already finalized" state; the table is finalized
+    ** again only after a new setmetatable with __gc (PUC resets the bit). */
+    setgcrefr(o->gch.nextgc, g->gc.root);
+    setgcref(g->gc.root, o);
+    makewhite(g, o);
+    o->gch.marked &= (uint8_t)~LJ_GC_TABFIN;
+    mo = lj_meta_fastg(g, tabref(t->metatable), MM_gc);
+    if (mo)
+      gc_call_finalizer(g, L, mo, o);
+    return;
+  }
   /* Add userdata back to the main userdata list and make it white. */
   setgcrefr(o->gch.nextgc, mainthread(g)->nextgc);
   setgcref(mainthread(g)->nextgc, o);

@@ -1222,6 +1222,10 @@ static void build_subroutines(BuildCtx *ctx)
   |    and TAB:CARG2, CARG2, #LJ_GCVMASK
   |  ccmp TAB:TMP0, #0, #0, eq
   |  bne ->fff_fallback
+  |   ldrb TMP0w, TAB:CARG2->nomm
+  |   tbnz TMP0w, #MM_gc, >1
+  |  b ->fff_fallback
+  |1:
   |    str TAB:CARG2, TAB:TMP1->metatable
   |   tbz TMP2w, #2, ->fff_restv	// isblack(table)
   |  barrierback TAB:TMP1, TMP2w, TMP0

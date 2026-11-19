@@ -1400,6 +1400,10 @@ static void build_subroutines(BuildCtx *ctx)
   |  cmp aword TAB:RB->metatable, 0; jne ->fff_fallback
   |  mov TAB:RA, [BASE+8]
   |  checktab TAB:RA, ->fff_fallback
+  |  // Only fast-path a metatable known to have no __gc: otherwise the C
+  |  // fallback must mark the table for finalization (5.4 __gc for tables).
+  |  test byte TAB:RA->nomm, 1<<MM_gc
+  |  jz ->fff_fallback
   |  mov TAB:RB->metatable, TAB:RA
   |  mov PC, [BASE-8]
   |  mov [BASE-16], TAB:TMPR			// Return original table.

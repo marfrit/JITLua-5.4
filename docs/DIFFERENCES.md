@@ -34,8 +34,15 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
 - `IMPL-DEFINED` Sparse-table border for runtime-built tables may differ: 5.4
   allows any border; LuaJIT's array-growth policy differs from PUC's alimit hint
   (`tbl_03_border_divergence`).
-- `PENDING` `__gc` finalization runs only for userdata, not tables (PUC 5.4
-  finalizes tables, manual §2.5.3; `gc_01_tbc_gc`; named VM gap, phase0).
+- `FIXED` `__gc` finalization for tables: implemented with PUC 5.4
+  semantics. A table that receives a metatable with a `__gc` field is marked
+  at that moment (a later added `__gc` does not mark it), resurrected for the
+  call and collected on a later cycle, finalizers run in reverse marking
+  order, an error in `__gc` is a warning, weak values are cleared before the
+  call and weak keys in the next cycle, and `lua_close` runs the remaining
+  finalizers. Implemented on x64 and arm64; the other backends need the same
+  interpreter fast-path guard before they can be trusted for table
+  finalizers (`tests/d54/gc_01_tbc_gc.lua`, `gc_02_table_finalizers.lua`).
 - `PENDING` Tail-call error names: LuaJIT reuses the caller frame, so a manual
   module path reports `string.rep` where PUC reports the short `rep`
   (`err_02_tailname`; non-tail and pcall paths match).

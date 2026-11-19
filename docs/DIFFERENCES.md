@@ -15,21 +15,21 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
 ### Language and VM
 - `FORK` String interning: LuaJIT interns every string; PUC does not intern long
   strings, so `%p`/`lua_topointer` identity after concat/gsub differs (design
-  decision, Markus 2026-11-16).
+  decision, Markus 2026-11-16; C probe `tests/capi` `probe_549`).
 - `FORK` `string.dump` uses JITLua-5.4's private format; PUC 5.4.9 cannot load
   it, and mode R checks our own dump/reload round-trip.
 - `PENDING` Arbitrary `_ENV` values: LuaJIT stores only a table as a function
   environment; `load("return _ENV", nil, nil, 123)()` does not return 123
-  (calls.lua A stops at line 359; VM/C-API work, branch `wip-calls-vm`).
+  (calls.lua A stops at line 359; `env_05_envvalue`; VM/C-API work, branch
+  `wip-calls-vm`).
 - `PENDING` pcall/xpcall C-call nesting bound and `__call` chain argument
   prepending (calls.lua A/B; VM work on `wip-calls-vm`; handler-reentry bound is
   already on main).
 - `IMPL-DEFINED` Sparse-table border for runtime-built tables may differ: 5.4
   allows any border; LuaJIT's array-growth policy differs from PUC's alimit hint
   (`tbl_03_border_divergence`).
-- `IMPL-DEFINED` `__gc` finalization runs only for userdata, not tables (PUC 5.4
-  finalizes tables; `gc_01_tbc_gc`).
-- `EXTENSION` `table.create` is a LuaJIT extension (nil in PUC 5.4).
+- `PENDING` `__gc` finalization runs only for userdata, not tables (PUC 5.4
+  finalizes tables, manual §2.5.3; `gc_01_tbc_gc`; named VM gap, phase0).
 - `PENDING` Tail-call error names: LuaJIT reuses the caller frame, so a manual
   module path reports `string.rep` where PUC reports the short `rep`
   (`err_02_tailname`; non-tail and pcall paths match).
@@ -40,8 +40,6 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   (`close_03/04`; documented divergence).
 - `IMPL-DEFINED` A yield from a `__close` handler crosses the C-level protected
   call; PUC resumes it (`close_04`; documented/accepted divergence).
-- `PENDING` `lua_setcstacklimit` is a no-op returning `LUAI_MAXCCALLS` (200);
-  PUC sets a new C-stack limit and returns the previous one.
 - `FORK` C functions that marked a slot with `lua_toclose` and then yield close
   that slot at yield time, not when the frame "returns" after the resume: with
   no C continuation frame there is no later point to run `__close`. PUC keeps
@@ -50,9 +48,6 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   yield) inside such a `__close` is raised in the coroutine at the yield, not
   after the resume; a yielding `__close` fails with "attempt to yield across a
   C-call boundary" instead of PUC's yieldable continuation.
-- `EXTENSION` `luaL_Buffer` uses the PUC 5.4 layout and `luaL_prepbuffer` is a
-  macro over `luaL_prepbuffsize`. This changes the auxlib ABI: C modules
-  compiled against an older JITLua-5.4 auxlib must be recompiled.
 - `FORK` The 5.4 C continuation API (`lua_callk`, `lua_pcallk`, `lua_yieldk`)
   is present, but LuaJIT has no C-level continuation frames: `k` is never
   called and `ctx` is ignored. `lua_pcallk` never returns `LUA_YIELD`;
@@ -60,15 +55,26 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   boundary" instead of silently skipping the continuation. Plain
   `lua_yield` from a C function still works, including a tail yield
   (`tests/capi` `test_continuations`).
-- `PENDING` The number metatable does not apply to integers outside the inline
-  47-bit range (boxed int64): after `debug.setmetatable(0, {__index = math})`,
-  `(1):floor()` works but `((1 << 50) + 3):floor()` raises, and
+- `PENDING` The number metatable does not apply to boxed int64 values
+  (integers outside the inline 47-bit range; integer literals beyond int32
+  materialize as boxes even when the value fits in 47 bits): after
+  `debug.setmetatable(0, {__index = math})`, `(1):floor()` and
+  `((1 << 45) + 3):floor()` work but `((1 << 50) + 3):floor()` raises, and
   `getmetatable` of such an integer returns nil (PUC returns the number
-  metatable). Interpreter and JIT agree; found in the release review.
+  metatable; `meta_05_nummt_i64`). Interpreter and JIT agree; found in the
+  release review.
 - `PENDING` `lua_getextraspace`: there is no reserved pointer-sized area before
   `lua_State`. Adding one would need a layout change in `GG_State` and in every
   per-thread allocation, moving the GC object/interior pointer and the assembler
-  offsets; not done. Modules using it need a portable side area instead.
+  offsets; not done. Modules using it need a portable side area instead
+  (C probe `tests/capi` `probe_549`).
+- `PENDING` Parsing or running a chunk that names a global on a state whose
+  base library is not installed segfaults (PUC 5.4.9 runs it): the 5.4 `_ENV`
+  GGET special case reads the interned `_ENV` string from `GCROOT_ENVSTR`
+  (`lj_parse.c`), which `lib_base` installs only when the base library is
+  opened (`lib_base.c`); `luaL_dostring` on a fresh state crashes. Repro and
+  mechanism in `docs/differences-audit-2026-11.md` (new difference found in
+  the 2026-11 audit).
 
 - `FIXED` Weak-table JIT loop hang (`closure.lua:37`; stock LuaJIT 2.1 hangs
   there too). A trace that reads from a weak table keeps its allocations, so
@@ -122,7 +128,7 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   module should test `pcall(require, "ffi")` instead.
 
 ### Added 5.4 standard library / C API
-- `EXTENSION` `utf8.*`, `string.pack/unpack`, `table.rawlen`, `math.type/
+- `EXTENSION` `utf8.*`, `string.pack/unpack`, `rawlen`, `math.type/
   tointeger/ult`, `package.searchers` two-result protocol and `require(name,data)`,
   `io` 5.4 read/seek/lines rules, `os.date/time` 5.4 field rules.
 - `EXTENSION` 5.4 C API: `lua_newuserdatauv`, `lua_get/setiuservalue`,
@@ -134,7 +140,9 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   `luaL_buffaddr`/`luaL_bufflen`, `luaL_argexpected`, `luaopen_coroutine`,
   integer checks/return types, `luaL_addgsub/buffsub/pushfail`, and
   `luaL_tolstring/requiref/typeerror`. `luaconf.h` includes `<limits.h>` like
-  PUC.
+  PUC. The `luaL_Buffer` layout matches PUC 5.4 and `luaL_prepbuffer` is a
+  macro over `luaL_prepbuffsize`; this changed the auxlib ABI, so C modules
+  compiled against an older JITLua-5.4 auxlib must be recompiled.
 - `EXTENSION` `lua_getfenv`/`setfenv` remain present as LuaJIT extensions;
   PUC 5.4 removed them.
 

@@ -1919,8 +1919,9 @@ LUA_API int lua_resume(lua_State *L, lua_State *from, int nargs, int *nres)
 
 /* Lua 5.4 thread reset: close pending to-be-closed slots and upvalues, then
 ** put the thread back to its fresh suspended state. The PUC 'from' argument
-** only feeds PUC's C-call counter; the pcall nesting count kept here starts
-** from zero again, as the pcall frames it counted are gone. */
+** feeds the C-call counter: the closed thread's __close handlers run with the
+** closer's nesting plus one (PUC sets nCcalls to from's count, and the C call
+** into the handler it does not need to count here adds the other level). */
 LUA_API int lua_closethread(lua_State *L, lua_State *from)
 {
   int status = L->status, st;
@@ -1934,7 +1935,7 @@ LUA_API int lua_closethread(lua_State *L, lua_State *from)
   else
     setnilV(eslot);
   L->status = LUA_OK;
-  L->ccallnest = 0;  /* Before the __close handlers run, like PUC's nCcalls. */
+  L->ccallnest = from ? from->ccallnest + 1 : 1;  /* Closer's nesting + 1. */
   st = lj_meta_tbccloseall(L, tvref(L->stack), eslot);
   eslot = L->top-1;  /* close calls may grow the stack */
   lj_func_closeuv(L, tvref(L->stack));

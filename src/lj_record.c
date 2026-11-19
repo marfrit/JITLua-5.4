@@ -1956,8 +1956,15 @@ static void rec_tabguard(jit_State *J, TRef tab, GCtab *t)
     if (mode && tvisstr(mode)) {
       GCstr *str = strV(mode);
       emitir(IRTG(IR_EQ, IRT_STR), trmode, lj_ir_kstr(J, str));
-      if (strchr(strdata(str), 'k') || strchr(strdata(str), 'v'))
+      if (strchr(strdata(str), 'k') || strchr(strdata(str), 'v')) {
 	J->cur.weak = 1;
+	/* A side trace that reads a weak table makes its root weak, too. The
+	** root's GC check runs first on every iteration and is at the start
+	** bytecode: it has to clear the dead slots (gc_jit_cleardead), or the
+	** side trace's check never gets to do it. */
+	if (J->cur.root && traceref(J, J->cur.root))
+	  traceref(J, J->cur.root)->weak = 1;
+      }
     }
   }
 }

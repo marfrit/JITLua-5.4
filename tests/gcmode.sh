@@ -6,7 +6,7 @@
 # The initial collector policy must follow LUAJIT_GC=speed|memory (read in
 # luaL_newstate, so every embedder honours it) and the equivalent
 # `luajit -G speed|memory` option.  speed = pause 300 / stepmul 200 (the
-# measured time-first default, docs/knuc-phase-align-2026-11.md);
+# measured time-first default, docs/notes/knuc-phase-align-2026-11.md);
 # memory = pause 100 / stepmul 200.  -G overrides the environment, -E ignores
 # it, unknown values are ignored silently, the default stays unchanged, and a
 # runtime collectgarbage("setpause"/"setstepmul") still overrides either.

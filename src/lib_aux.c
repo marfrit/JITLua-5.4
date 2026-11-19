@@ -32,8 +32,11 @@
 /* -- 5.4 binary-compatibility check -------------------------------------- */
 
 /* PUC 5.4.9 luaL_checkversion_: raise on a numeric-type size or version
-** mismatch, so a module built against different headers is rejected instead
-** of corrupting the stack.  The macro in lauxlib.h passes LUAL_NUMSIZES. */
+** mismatch.  The macro in lauxlib.h passes LUAL_NUMSIZES, which has PUC's
+** value: the check tells apart other numeric types and other Lua versions,
+** not a module compiled against PUC's own 5.4 headers.  Such a module only
+** works as far as it stays clear of the pseudo-indices and of luaL_Buffer
+** (see docs/notes/capi-header-compat.md). */
 LUALIB_API void luaL_checkversion_(lua_State *L, lua_Number ver, size_t sz)
 {
   lua_Number v = lua_version(L);

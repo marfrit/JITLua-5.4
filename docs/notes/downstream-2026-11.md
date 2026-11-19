@@ -95,10 +95,11 @@ print(pcall(load, "return 1->2"))  -- both fail, with different wording
 
 Classification: **known divergence** (inherited LuaJIT extension; documented in
 `doc/extensions.html`, but not in `docs/DIFFERENCES.md` or
-`tests/known-bad.tsv`). Recorded as `tests/d54/parse_arrow_shortfunc.lua`,
-`XFAIL` in mode A, so the next session can decide to add the EXTENSION row or
-gate the syntax. It is the only PUC/JITLua behavioral difference a suite
-reported.
+`tests/known-bad.tsv` at the time). Recorded as
+`tests/d54/parse_arrow_shortfunc.lua`, `XFAIL` in mode A; it has since been
+given an EXTENSION row in `docs/DIFFERENCES.md` and moved to
+`tests/known-different.tsv`. It is the only PUC/JITLua behavioral difference a
+suite reported.
 
 ### 2. luaunit 3.4 — `jit.version` version detection (known FORK + suite issue)
 
@@ -233,7 +234,7 @@ compiler output is interpreter-independent in all three cases.
 
 ## Differences vs PUC 5.4.9
 
-### 1. OPEN — x86_64 JITLua segfault with a to-be-closed table (real bug)
+### 1. FIXED — x86_64 JITLua segfault with a to-be-closed table (real bug)
 
 Fennel's `test.core` → `test-destructuring` segfaults under JITLua on x86_64
 (both `-joff` and `-jon`), while PUC completes all 66 assertions; arm64 is
@@ -256,11 +257,15 @@ end
 print(pcall(f))   -- PUC: true true | x86_64 JITLua: SIGSEGV
 ```
 
-It crashes in both JIT modes, so it is an interpreter/GC issue, not a JIT
-miscompile; it is x86_64-only. No `tests/d54` entry was added: `known-bad.tsv`
-has no architecture qualifier, so a test for this would be XFAIL on x86_64 but
-XPASS on arm64 and would fail the strict arm64 gate. The next session should
-fix it, then add a cross-architecture test.
+It crashed in both JIT modes, so it was an interpreter issue, not a JIT
+miscompile, and it was x86_64-only. Cause: the block exit (`BC_TBCCLO`) hands
+the count of open results (MULTRES) to `lj_meta_tbcclose`, which places the
+`__close` call frame above them. That count is only live for `return f()` in
+a `<close>` scope. On x64 its slot is shared with a VM temporary, and the
+store of a new string key (`t2.what = ...`) leaves half a pointer there, so
+the frame was placed far outside the stack. `lj_meta_tbcclose` now ignores
+the count unless the close is followed by `RETM`. Test:
+`tests/d54/close_06_block_exit_multres.lua` (all modes, both architectures).
 
 ### 2. Fennel `test-getinfo` — `debug.getinfo(1,"t").istailcall` (known PENDING)
 
@@ -285,9 +290,8 @@ print(g())   -- PUC: true | JITLua: false
 
 ## Open items for the next round
 
-1. x86_64-only JITLua segfault on a to-be-closed table with `__close`
-   (minimal repro above); needs a fix and then a d54 test with an
-   architecture-aware known-bad policy (or a fix that makes it pass on both).
+1. The x86_64-only segfault on a to-be-closed table is fixed (item 1 above).
+   The Fennel suite was not re-run on x86_64 after the fix.
 2. Teal `spec/api/load_spec.lua` failure: classify definitively (it is
    identical on PUC, but the exact cause was not traced).
 3. LuaRocks suite: needs a hererocks-style `LUA`/`LUA_DIR` test environment;

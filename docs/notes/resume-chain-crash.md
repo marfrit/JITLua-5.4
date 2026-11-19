@@ -41,14 +41,14 @@ path. That divergence is open (see below); it is not a crash.
 
 ## Red evidence (fresh `git archive integ7` = d28858b7)
 
-x86_64 (x64-box), `-joff` and `-jon` identical:
+x86_64 test host, `-joff` and `-jon` identical:
 
 | | d=196 | d=197 | d=198 | d=199 | d=200 | d=201 | d=202 | d=250 |
 |---|---|---|---|---|---|---|---|---|
 | PUC 5.4.9 | bottom | bottom | err@1 | err@2 | err@3 | err@4 | err@5 | err@53 |
 | ours | bottom | bottom | bottom | bottom | bottom | **SIGSEGV** (rc=139) | | |
 
-aarch64 (arm-box), `-joff` and `-jon` identical: no crash, but
+aarch64 test host, `-joff` and `-jon` identical: no crash, but
 `d=196..200 bottom`, `d=201 err@1`, `d=202 err@2`, `d=250 err@50` — the bound
 is reached three levels later than PUC.
 

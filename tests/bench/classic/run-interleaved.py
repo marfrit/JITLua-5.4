@@ -5,7 +5,10 @@ Reuses tests/bench/classic/run.py for the pinned sources and the stock build,
 but alternates the two arms per repetition (interleaved) and reports the
 median of BENCH_REPS (default 7) runs per arm.
 
-  X64_BOX_HOST=pve1 x64-box -t 3600 python3 tests/bench/classic/run-interleaved.py
+  x64-box -t 3600 python3 tests/bench/classic/run-interleaved.py
+
+(x64-box is a private wrapper that runs a command on a remote x86_64 test
+host; pin one host, so that both arms run on the same machine.)
 """
 import importlib.util, os, statistics, subprocess, sys, time
 from pathlib import Path

@@ -8,8 +8,8 @@ build.
 
 ## Method
 
-* Tree: `knuc` = `integ5` (36a7fb13) + the `9073ddc8` merge, in
-  `~/src/LuaJIT-5.4-knuc`. Stock is LuaJIT 2.1 `63c8f1a9` built from
+* Tree: branch `knuc` = `integ5` (36a7fb13) + the `9073ddc8` merge. Stock is
+  LuaJIT 2.1 `63c8f1a9` built from
   `.dlcache/bench/luajit-63c8f1a9.tar.gz` by the same Makefile logic, same
   CFLAGS (`-O2 -fomit-frame-pointer`; the two `src/Makefile`s differ only in
   the 5.4 port's `-DLUAJIT_NUMMODE=2`, `lib_utf8` and `lj_i64`).

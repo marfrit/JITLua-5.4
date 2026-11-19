@@ -5,7 +5,9 @@
 # allocated. If one binary's census moves a lot, trace selection is
 # layout-dependent (hotcount is hashed on the pc address).
 #
-#   X64_BOX_HOST=pve1 x64-box -t 2400 sh tests/bench/db-perturb.sh
+#   x64-box -t 2400 sh tests/bench/db-perturb.sh
+# (x64-box is a private wrapper that runs a command on a remote x86_64 test
+# host; pin one host, so that both arms run on the same machine.)
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$ROOT"

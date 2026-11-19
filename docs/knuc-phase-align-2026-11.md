@@ -31,7 +31,7 @@ not. The reproducible wall difference that is left — 0.89 → 1.00 on x64 and
 mutator side, i.e. the cost of carrying the uncollected heap, not the
 collector's own work.
 
-### Census, x64 (pinned box, stats build, CPU microseconds)
+### Census, x86_64 test host (stats build, CPU microseconds)
 
 | `setpause` | cycles | collector total | k12 dur (gc/mut) | k18 dur (gc/mut) | k18 live strings | k18 heap |
 |---:|---:|---:|---:|---:|---:|---:|
@@ -57,7 +57,7 @@ Every cycle is dominated by the string sweep (57–80 % of its time) and the
 cycles grow with the heap: cycle 8 costs 3.7 ms against cycle 5's 0.6 ms. The
 last cycle is the one that lands in `k18` at the default.
 
-### Census, arm64 (escher, same instrument)
+### Census, arm64 test host (same instrument)
 
 | `setpause` | cycles | collector total | k12 dur (gc/mut) | k18 dur (gc/mut) |
 |---:|---:|---:|---:|---:|

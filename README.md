@@ -55,12 +55,18 @@ Put your own preprocessor defines in **`CFLAGS`**, never in `XCFLAGS`.
 
 ## GC policy mode
 
-The default collector policy is unchanged (pause 200 %, stepmul 200 %). An
-opt-in **memory** mode collects at 100 % of live memory (`setpause=100`) with
-the same step speed. Per `docs/gc-newgen-plan.md` (Stage 0(a), the
-`setpause=100` row of the measurement table) that closes about 76 % of the
-binary-trees peak-RSS gap to PUC 5.4.9, at the cost of more collector work.
-Select it either way:
+The default collector policy is **time-first**: pause 300 %, stepmul 200 %. It
+was raised from 200 % after a measurement on both arches
+(`docs/knuc-phase-align-2026-11.md`): k-nucleotide reaches stock parity
+(0.89 → 1.00 on x86_64, 0.853 → 0.979 on arm64) and binary-trees gets faster
+(0.97 → 1.07, 1.00 → 1.04), with lpeg and lua-cjson unchanged. The price is
+peak RSS: binary-trees +31 %, lpeg +17 %, lua-cjson flat.
+
+An opt-in **memory** mode trades time for RSS: it collects at 100 % of live
+memory (`setpause=100`) with the same step speed. Per `docs/gc-newgen-plan.md`
+(Stage 0(a), the `setpause=100` row of the measurement table) that closes about
+76 % of the binary-trees peak-RSS gap to PUC 5.4.9, at the cost of more
+collector work. Select it either way:
 
 ```sh
 LUAJIT_GC=memory ./src/luajit -jon script.lua

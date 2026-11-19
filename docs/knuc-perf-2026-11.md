@@ -147,7 +147,7 @@ same 65535 mask, and its cycles are 1.6× larger (2.24 ms against 1.37 ms).
 ## Next measurement — done: the gap is a policy/phase-alignment effect
 
 The decision experiment was the cycle-policy sweep. Median of 7, interleaved,
-one job on pve2, k-nucleotide with `collectgarbage("setpause", N)` before the
+one job on the x86_64 test host, k-nucleotide with `collectgarbage("setpause", N)` before the
 chunk:
 
 | setpause | ours ms | stock ms | ours/stock |

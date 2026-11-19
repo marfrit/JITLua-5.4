@@ -5,6 +5,13 @@
 --! weak afterwards (a __mode stored into its metatable, a setmetatable on the
 --! link). Also covers a weak-valued metatable whose __index table is the only
 --! reference. Fails (bounded, no hang) if the trace does not guard the chain.
+-- The bounds in this test are sized for a collector pause of 200. Pin it, so
+-- the result does not depend on the default GC policy; a lower pause (the
+-- harness's GC-stress arm) is kept.
+do
+  local prev = collectgarbage("setpause", 200)
+  if prev < 200 then collectgarbage("setpause", prev) end
+end
 local jit = rawget(_G, "jit")
 local LIMIT = 200000
 

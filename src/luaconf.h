@@ -104,7 +104,7 @@
 ** against the previous 200%: k-nucleotide reaches stock parity (0.89 -> 1.00
 ** x86_64, 0.853 -> 0.979 arm64) and binary-trees improves (0.97 -> 1.07,
 ** 1.00 -> 1.04), with lpeg and lua-cjson unchanged, at +31% / +17% peak RSS on
-** binary-trees / lpeg.  See docs/knuc-phase-align-2026-11.md.  The opt-in
+** binary-trees / lpeg.  See docs/notes/knuc-phase-align-2026-11.md.  The opt-in
 ** LUAJIT_GC=memory mode below is the RSS-first setting. */
 #define LUAI_GCPAUSE	300	/* Pause GC until memory is at 300%. */
 #define LUAI_GCMUL	200	/* Run GC at 200% of allocation speed. */

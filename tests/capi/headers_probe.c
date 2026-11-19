@@ -99,7 +99,64 @@ static int probe_numbertointeger(lua_State *L)
   return 1;
 }
 
+/* The conversion macros are text: a module only finds out that one of them
+** is broken when it expands it. <stdio.h>, <stdlib.h> and <locale.h> are the
+** user's job, exactly as with PUC. */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <locale.h>
+
+static int probe_conversions(lua_State *L)
+{
+  char buf[LUAI_MAXNUMBER2STR + 32];
+  char small[4];
+  char *end;
+  int n;
+  lua_createtable(L, 0, 10);
+  n = lua_integer2str(buf, sizeof(buf), (lua_Integer)-1234567890123LL);
+  lua_pushlstring(L, buf, (size_t)n);
+  lua_setfield(L, -2, "integer2str");
+  n = lua_integer2str(small, sizeof(small), (lua_Integer)123456);
+  lua_pushboolean(L, n == 6 && strcmp(small, "123") == 0);  /* bounded */
+  lua_setfield(L, -2, "integer2str_bounded");
+  n = lua_number2str(buf, sizeof(buf), (lua_Number)0.5);
+  lua_pushlstring(L, buf, (size_t)n);
+  lua_setfield(L, -2, "number2str");
+  n = lua_number2str(small, sizeof(small), (lua_Number)123456.0);
+  lua_pushboolean(L, n == 6 && strcmp(small, "123") == 0);
+  lua_setfield(L, -2, "number2str_bounded");
+  n = lua_number2strx(L, buf, sizeof(buf), "%.3f", (lua_Number)1.5);
+  lua_pushlstring(L, buf, (size_t)n);
+  lua_setfield(L, -2, "number2strx");
+  n = lua_pointer2str(buf, sizeof(buf), (void *)L);
+  lua_pushboolean(L, n > 0 && (size_t)n == strlen(buf));
+  lua_setfield(L, -2, "pointer2str");
+  lua_pushnumber(L, lua_str2number("2.25rest", &end));
+  lua_setfield(L, -2, "str2number");
+  lua_pushstring(L, end);
+  lua_setfield(L, -2, "str2number_end");
+  lua_pushnumber(L, lua_strx2number("0x10", &end));
+  lua_setfield(L, -2, "strx2number");
+  buf[0] = (char)lua_getlocaledecpoint(); buf[1] = 0;
+  lua_pushstring(L, buf);
+  lua_setfield(L, -2, "decpoint");
+  return 1;
+}
+
+/* luaL_checkversion_ with the caller's idea of version and type sizes. */
+static int probe_checkversion(lua_State *L)
+{
+  lua_Number ver = luaL_optnumber(L, 1, (lua_Number)LUA_VERSION_NUM);
+  size_t sz = (size_t)luaL_optinteger(L, 2, (lua_Integer)LUAL_NUMSIZES);
+  luaL_checkversion_(L, ver, sz);
+  luaL_checkversion(L);
+  return 0;
+}
+
 static const luaL_Reg probelib[] = {
+  { "conversions", probe_conversions },
+  { "checkversion", probe_checkversion },
   { "constants", probe_constants },
   { "numbertointeger", probe_numbertointeger },
   { NULL, NULL }
@@ -112,5 +169,8 @@ int luaopen_headers_probe(lua_State *L)
   lua_pushboolean(L, LUA_MININTEGER < 0 && LUA_MAXINTEGER > 0 &&
                      LUA_MAXINTEGER >= (lua_Integer)INT_MAX);
   lua_setfield(L, -2, "sane_limits");
+  /* The stamp PUC 5.4's own lauxlib.h would pass. */
+  lua_pushinteger(L, (lua_Integer)(sizeof(lua_Integer)*16 + sizeof(lua_Number)));
+  lua_setfield(L, -2, "puc_numsizes");
   return 1;
 }

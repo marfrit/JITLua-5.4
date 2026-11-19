@@ -31,5 +31,31 @@ assert(p.numbertointeger(-2.5) == -2, "lua_numbertointeger(-2.5) truncates")
 assert(p.numbertointeger(1e300) == nil, "lua_numbertointeger(1e300) must fail")
 assert(p.numbertointeger(-1e300) == nil, "lua_numbertointeger(-1e300) must fail")
 
+-- The conversion macros, expanded in the module.
+local v = assert(p.conversions(), "conversions() must return a table")
+assert(v.integer2str == "-1234567890123", "lua_integer2str: " .. tostring(v.integer2str))
+assert(v.integer2str_bounded == true, "lua_integer2str must honour the buffer size")
+assert(v.number2str == "0.5", "lua_number2str: " .. tostring(v.number2str))
+assert(v.number2str_bounded == true, "lua_number2str must honour the buffer size")
+assert(v.number2strx == "1.500", "lua_number2strx: " .. tostring(v.number2strx))
+assert(v.pointer2str == true, "lua_pointer2str")
+assert(v.str2number == 2.25 and v.str2number_end == "rest", "lua_str2number")
+assert(v.strx2number == 16, "lua_strx2number")
+assert(v.decpoint == ".", "lua_getlocaledecpoint in the C locale")
+
+-- luaL_checkversion_: silent for a matching module, an error otherwise.
+assert(pcall(p.checkversion), "luaL_checkversion must accept this module")
+local ok, msg = pcall(p.checkversion, 503)
+assert(not ok and msg:find("version mismatch", 1, true),
+       "luaL_checkversion_ must reject another version: " .. tostring(msg))
+ok, msg = pcall(p.checkversion, 504, 1)
+assert(not ok and msg:find("incompatible numeric types", 1, true),
+       "luaL_checkversion_ must reject other numeric type sizes: " .. tostring(msg))
+
+-- The stamp is PUC's own value: the corpus fixtures (tests/corpus/puc54/libs)
+-- are compiled against PUC's headers and loaded by both interpreters.
+assert(c.numsizes == p.puc_numsizes, "LUAL_NUMSIZES must have PUC 5.4's value")
+assert(pcall(p.checkversion, 504, p.puc_numsizes))
+
 print("headers_probe: OK maxinteger=" .. c.maxinteger ..
       " int_max=" .. c.int_max .. " numtypes=" .. c.numtypes)

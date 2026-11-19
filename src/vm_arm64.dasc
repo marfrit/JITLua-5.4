@@ -710,10 +710,7 @@ static void build_subroutines(BuildCtx *ctx)
   |  bti_jump
   |  mov BASE, RB			// Restore the caller base.
   |  ldr PC, [BASE, FRAME_PC]		// Caller's own return PC.
-  |   str RCw, SAVE_MULTRES
-  |  ands CARG1, PC, #FRAME_TYPE
-  |  bne ->vm_return			// Non-standard frame (e.g. pcall).
-  |  b ->BC_RET_Z			// Make the caller return the C results.
+  |  b ->BC_RETM_Z			// Caller returns the results: any frame type.
   |
   |->cont_cat:				// RA = resultptr, CARG4 = meta base
   |  bti_jump
@@ -1072,10 +1069,9 @@ static void build_subroutines(BuildCtx *ctx)
   |  add CARG3, RA, NARGS8:RC
   |  bl extern lj_meta_call	// (lua_State *L, TValue *func, TValue *top)
   |  ldr TMP1, [RA, FRAME_FUNC]		// Guaranteed to be a function here.
-  |   ldr PC, [BASE, FRAME_PC]
   |   add NARGS8:RC, NARGS8:RC, #8	// Got one more argument now.
   |  and LFUNC:CARG3, TMP1, #LJ_GCVMASK
-  |  b ->BC_CALLT2_Z
+  |  b ->BC_CALLT2_Z			// PC is still the CALLT pc.
   |
   |//-- Argument coercion for 'for' statement ------------------------------
   |
@@ -3982,17 +3978,14 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  ldr TMP1, [RA], #16
     |   sub NARGS8:RC, NARGS8:RC, #8
     |  checktp CARG3, TMP1, LJ_TFUNC, ->vmeta_callt
-    |   str PC, SAVE_PC			// Remember the CALLT pc.
-    |  ldr PC, [BASE, FRAME_PC]
     |->BC_CALLT2_Z:
+    |  ldrb TMP2w, LFUNC:CARG3->ffid
+    |  cbnz TMP2w, >9			// C function: keep the caller frame.
+    |  ldr PC, [BASE, FRAME_PC]
     |   mov RB, #0
     |  tst PC, #FRAME_TYPE
     |  bne >7
     |1:
-    |  ldrb TMP2w, LFUNC:CARG3->ffid
-    |  cbz TMP2w, >2
-    |  b >9				// C function: keep the caller frame.
-    |2:
     |  str TMP1, [BASE, FRAME_FUNC]	// Copy function down, but keep PC.
     |  cbz NARGS8:RC, >4
     |3:
@@ -4009,8 +4002,10 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |    // continuation frame (LJ_CONT_TAILRET) above it. The caller returns
     |    // the C results, but its frame stays in the chain, so error names,
     |    // levels and hooks see the CALLT position, like PUC 5.4.
+    |    // A vararg frame is kept as it is: BASE is not relocated, so the
+    |    // locals of the caller stay where the debug API looks for them.
     |    // NB = RA+16: [NB-32]=cont id, [NB-24]=contpc, [NB-16]=func,
-    |    // [NB-8]=delta|FRAME_CONT, args at [NB..].
+    |    // [NB-8]=delta|FRAME_CONT, args at [NB..]. PC is the CALLT pc.
     |  add TMP3, RA, #16			// TMP3 = NB (new C base).
     |  cbz NARGS8:RC, >6
     |  sub TMP0, RC, #8			// TMP0 = (nargs-1)*8.
@@ -4024,8 +4019,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  str TMP1, [RA]			// [NB-16] = func.
     |  mov TMP0, #LJ_CONT_TAILRET
     |  str TMP0, [RA, #-16]		// [NB-32] = cont id.
-    |  ldr TMP0, SAVE_PC
-    |  str TMP0, [RA, #-8]			// [NB-24] = contpc.
+    |  str PC, [RA, #-8]			// [NB-24] = contpc.
     |  sub TMP0, TMP3, BASE
     |  add TMP0, TMP0, #FRAME_CONT
     |  str TMP0, [RA, #8]			// [NB-8] = delta | FRAME_CONT.
@@ -4038,12 +4032,9 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |7:  // Tailcall from a vararg function.
     |  eor PC, PC, #FRAME_VARG
     |  tst PC, #FRAME_TYPEP		// Vararg frame below?
-    |  csel TMP2, RB, TMP2, ne		// Clear ffid if no Lua function below.
     |  bne <1
     |  sub BASE, BASE, PC
     |  ldr PC, [BASE, FRAME_PC]
-    |  tst PC, #FRAME_TYPE
-    |  csel TMP2, RB, TMP2, ne		// Clear ffid if no Lua function below.
     |  b <1
     break;
 

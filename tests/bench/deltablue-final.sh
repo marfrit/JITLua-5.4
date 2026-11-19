@@ -2,7 +2,9 @@
 # deltablue-final.sh -- final evidence for the merged tree: stock vs fork
 # deltablue trace census (-jv) and interleaved timing (-jon, -joff).
 #
-#   X64_BOX_HOST=pve1 x64-box -t 2400 sh tests/bench/deltablue-final.sh
+#   x64-box -t 2400 sh tests/bench/deltablue-final.sh
+# (x64-box is a private wrapper that runs a command on a remote x86_64 test
+# host; pin one host, so that both arms run on the same machine.)
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$ROOT"

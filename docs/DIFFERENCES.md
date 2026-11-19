@@ -50,7 +50,12 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   overflow" at 198. Reverted until the bound error can be raised without
   re-entering the C handler (a dedicated VM helper). The closethread side is
   kept and does not crash (checked to depth 300 on both arches), but it only
-  counts, so a deep close chain is not bounded where PUC errors.
+  counts, so a deep close chain is not bounded where PUC errors. The count
+  applies while the `__close` handlers run; the closed thread is left with a
+  count of zero, so a thread reset by `lua_closethread` starts like a new one.
+  Because nothing bounds the chain, one that is deep enough exhausts the
+  native stack instead (measured on x86_64 with an 8 MB stack: 100000 nested
+  resumes run, 200000 end in SIGSEGV; PUC stops at 198 with an error).
   `tests/d54/err_07_resume_chain.lua` guards the crash;
   `tests/d54/err_06_coro_ccallnest.lua` is the XFAIL for the inheritance.
   Evidence and open leads: `docs/notes/resume-chain-crash.md`.
@@ -91,9 +96,18 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   function in tail position names the object (`err_02_tailname`,
   `err_04_tailcall_c`). Tail calls to Lua functions keep the frame-replacement
   path (constant stack depth); tail calls to C functions consume Lua stack,
-  bounded by the C-call limit, like PUC. The trace recorder mirrors the same
-  continuation frame, so traces keep recording such tail calls inline; the
-  mechanism and the model layout are in `docs/notes/tailname.md`.
+  bounded by the C-call limit, like PUC. The caller frame is kept whole, a
+  vararg frame included, so `debug.getlocal`/`debug.setlocal` at level 1
+  inside the C function see the caller's locals. The trace recorder mirrors
+  the same continuation frame, so traces keep recording such tail calls
+  inline; a fast function that hands over to a metamethod (`tostring` ->
+  `__tostring`) is not such a tail call and replaces its own frame as before
+  (`err_08_tailcall_c_trace`). The mechanism and the model layout are in
+  `docs/notes/tailname.md`. x64 (GC64) and arm64 only.
+- `PENDING` Return hook of a function that ends in a tail call to a C
+  function: PUC calls the return hook for the Lua caller after the C function
+  returns; here the caller returns through the continuation without a hook
+  event, as it did when the frame was replaced.
 - `PENDING` `debug.getinfo(1,"t").istailcall` is not true without a call hook;
   PUC reports true (`db.lua` line 619; Fable tail marks need a hook).
 - `IMPL-DEFINED` Inside a `__close` handler on an error path, debug level 2 is
@@ -231,7 +245,10 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   `LUA_PRELOAD_TABLE` and `LUAL_NUMSIZES`. `lua_number2str` takes PUC's
   `(s, sz, n)` form and `lua_integer2str` uses `snprintf`. `luaL_checkversion`
   passes `LUAL_NUMSIZES` and `luaL_checkversion_` raises PUC's mismatch errors
-  (it was a release-build no-op). `lua_setcstacklimit` is the PUC 5.4
+  (it was a release-build no-op). The check does not tell a module compiled
+  against PUC's own headers apart: it passes, and works only as long as it
+  uses neither the pseudo-indices (`LUA_REGISTRYINDEX`, `lua_upvalueindex`)
+  nor `luaL_Buffer`, which differ. Build modules against these headers. `lua_setcstacklimit` is the PUC 5.4
   deprecated no-op returning `LUAI_MAXCCALLS` (200). The full comparison is in
   [docs/notes/capi-header-compat.md](notes/capi-header-compat.md).
 - `EXTENSION` `lua_getfenv`/`setfenv` remain present as LuaJIT extensions;
@@ -256,6 +273,11 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
 - `EXTENSION` FFI source-literal suffixes `LL`, `ULL`/`LLU` and imaginary `i`
   (`1LL`, `1ULL`, `0x10ULL`, `12.5i`) are accepted when FFI is compiled;
   PUC 5.4 rejects them (`lex_03_ffi_suffix`).
+- `EXTENSION` Inherited LuaJIT 3.0 syntax extensions (`doc/extensions.html`)
+  are accepted where PUC 5.4.9 reports a syntax error, among them the short
+  function expression `a -> b` / `|x| -> x*x`. Code that probes for the
+  rejection sees the difference (`tests/d54/parse_arrow_shortfunc.lua`,
+  mode A in `tests/known-different.tsv`).
 - `EXTENSION` LuaJIT's pattern-matching implementation and its string-buffer
   optimizations remain; 5.4 pattern behaviors are covered by `str_03_patterns`.
 - `EXTENSION` `string.dump` bytecode format and `-b`/`bcsave` are
@@ -266,7 +288,7 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   `luajit -G speed|memory` option; `-G` overrides the environment, `-E`
   ignores it, unknown values are ignored silently. `speed` is the default
   300/200 (time-first, measured on both arches in
-  `docs/knuc-phase-align-2026-11.md`); `memory` sets pause 100 / stepmul 200
+  `docs/notes/knuc-phase-align-2026-11.md`); `memory` sets pause 100 / stepmul 200
   (the Stage 0(a) row in `docs/gc-newgen-plan.md`), the RSS-first setting.
   Runtime `collectgarbage("setpause" / "setstepmul")` overrides either. The
   pause default is a deliberate divergence from stock LuaJIT 2.1's 200/200; it

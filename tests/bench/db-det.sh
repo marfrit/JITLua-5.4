@@ -4,7 +4,9 @@
 # randomness in lj_trace.c:penalty_pc() is reproducible, then runs the
 # deltablue -jv census twice per arm and diffs the two arms.
 #
-#   X64_BOX_HOST=pve1 x64-box -t 2400 sh tests/bench/db-det.sh
+#   x64-box -t 2400 sh tests/bench/db-det.sh
+# (x64-box is a private wrapper that runs a command on a remote x86_64 test
+# host; pin one host, so that both arms run on the same machine.)
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$ROOT"

@@ -1,6 +1,6 @@
 # Tail calls into C functions (P1.8b / tailname)
 
-Worktree `LuaJIT-5.4-tailname2`, branch `tailname2`.
+Branch `tailname2`, with the pre-push review fixes of branch `fable-batch3`.
 
 ## What is finished
 
@@ -16,14 +16,16 @@ Tail calls to Lua functions keep the old frame replacement.
 
 The trace recorder mirrors that frame layout, so traces keep compiling
 `CALLT` into C/fast functions: the fast function is recorded inline exactly as
-before, no bail-out. `docs/DIFFERENCES.md` records this as `FIXED`.
+before, no bail-out. `docs/DIFFERENCES.md` records this as `FIXED`. A vararg
+caller keeps its vararg frame too (see the rules below).
 
 ## The mechanism that broke with the stock recorder
 
 The stock recorder (`lj_record_tailcall`) models a tail call as a frame
 replacement: it moves func+args down to `J->base[-1-LJ_FR2]` and leaves
 `J->base`/`J->baseslot`/`J->framedepth` unchanged. That is consistent with the
-old VM, where the callee's base equals the caller's base.
+old VM, where the callee's base equals the caller's base, and it is still
+what happens for a Lua callee.
 
 With the kept caller frame the VM's `L->base` moves to the C frame
 (`NB`), so the recorder's stack address mapping `base = L->base - J->baseslot`
@@ -43,8 +45,9 @@ to it. That is the `-jon` segfault seen in lpeg/penlight (`#1 lua_pcall`,
 
 ## The fix
 
-`lj_record_tailcall` detects a C callee (directly or via `__call`) and builds
-the continuation frame in the model with the same layout as the VM:
+`rec_callt` (the recorder for `BC_CALLT`/`BC_CALLMT`) detects a callee that is
+not a Lua function (directly or via `__call`) and builds the continuation
+frame in the model with the same layout as the VM:
 
     [func+0] = cont value (KNUM with the LJ_CONT_TAILRET id)
     [func+1] = TREF_CONT          (the contpc slot)
@@ -59,13 +62,47 @@ correctly again) and adds 2 to `J->framedepth` (the continuation contributes a
 
 `lj_record_ret` handles the return into that frame: the generic continuation
 pop already restores `framedepth`/`baseslot`/`base` to the caller frame, so
-the new `LJ_CONT_TAILRET` branch only rebases `rbase` to the pre-pop base,
-sets `frame = frame_prevd(frame)` and jumps back to the Lua-return handling
+the `LJ_CONT_TAILRET` branch only rebases `rbase` to the pre-pop base,
+sets `frame = frame_prevd(frame)` and jumps back to the return handling
 (`retry_tailret`) to process the kept caller's own return.
 
 The mapping error is worth recording because it is invisible in a release
 build: only `rec_check_slots` catches the shift, and the release symptom is a
 wild jump thousands of instructions later.
+
+## Rules the model has to follow (found in the pre-push review)
+
+Each of these was wrong in the first version and is pinned by
+`tests/d54/err_08_tailcall_c_trace.lua`:
+
+- **Only the bytecode tail call keeps the frame.** `lj_record_tailcall` has a
+  second caller: `recff_metacall`, for a fast function that hands over to a
+  metamethod (`tostring` -> `__tostring`, `pairs` -> `__pairs`). The VM does
+  that through `vm_call_tail`, which replaces the frame of the fast function
+  whatever the metamethod is. `lj_record_tailcall` therefore stays the plain
+  frame replacement, and the continuation frame is built by `rec_callt` only.
+  With the test in the shared function, `tostring(io.stdout)` in a hot loop
+  (a C `__tostring`) crashed with the JIT on.
+- **A Lua function can return through the continuation.** After
+  `return tostring(obj)` with a Lua `__tostring`, the metamethod runs in the
+  fast function's frame, whose link is the `LJ_CONT_TAILRET` frame. If the
+  trace started in the function that made the tail call, that return leaves
+  the trace. It has to end *before* the model pops the frames (link type
+  "return to interpreter"), or the final snapshot pairs the metamethod's `RET`
+  with the caller's base and the interpreter returns the wrong slots.
+- **`__call` adds an argument.** `rec_call_setup` inserts the called object
+  as the first argument; the block to move is given by `J->maxslot`, not by
+  the `nargs` operand of the bytecode.
+- **A vararg frame is kept as it is.** The VM tests the callee before it
+  relocates `BASE` for a vararg caller, so the continuation frame sits on the
+  vararg frame, the return goes through the ordinary vararg return
+  (`BC_RETC_Z` on x64, `BC_RETM_Z` on arm64), and `debug.getlocal(1, n)`
+  inside the C function reads the caller's real slots. The recorder does the
+  same: no base relocation for a C callee, and `lj_record_ret` pops the vararg
+  frame after the continuation.
+- `baseadj` in `lj_record_ret` includes the popped continuation frame (the
+  `__concat` remainder path computes the lower frame from it), and the
+  kept-frame path has the same slot-limit check as `lj_record_call`.
 
 ## Measurements (x64, one pinned box, base 5d2e7883 vs head, interleaved, 7 runs)
 
@@ -96,15 +133,24 @@ Within noise; the constructor/format/select loops dropped from +28 %/+49 %/
 
 ## Open for the next round
 
-- Recorder correctness for a trace that *exits inside* a tail-called C
-  function is only exercised by tests and lpeg/penlight; the frame model is
-  mirrored but a targeted side-exit test inside a tail-called C function is
-  not part of the suite yet.
+- A return hook for the Lua caller after the C function returns (PUC has
+  one): the continuation returns without going through the hook dispatch.
+  Recorded as `PENDING` in `docs/DIFFERENCES.md`.
+- A function called through `pcall` that ends in a tail call to C
+  (`pcall(function() return f_c() end)`) aborts the trace at the return
+  (`NYI: return to lower frame`): the pcall frame below the kept caller is
+  not resolved after the continuation pop. Correct, not compiled.
+- Side exits inside a tail-called `pcall`/`xpcall` (frames: caller,
+  continuation, pcall, callee) are exercised by `err_04_tailcall_c`,
+  `err_08_tailcall_c_trace` and the corpus-ext programs; there is no
+  generator that enumerates exit positions.
 - Error names raised from compiled code: checked by modes A/B on the d54
-  corpus (they match `-joff`); no case has been found where a compiled error
-  path differs, but the boundary is not proven exhaustively.
+  corpus (they match `-joff`); the boundary is not proven exhaustively.
+- `debug.setlocal` on a `(*temporary)` slot of the kept caller can overwrite
+  the continuation slots, like it can for every metamethod continuation
+  frame in stock LuaJIT.
 - Other interpreter backends (x86, ppc, mips) are not ported; only x64 GC64
-  and arm64.
+  and arm64. The recorder's kept-frame path is compiled for those two only.
 - The continuation frame stores the cont id at `[NB-32]`; any future
   continuation id must not collide (0 = tailcall, 1 = ffi callback,
   2 = tailret).

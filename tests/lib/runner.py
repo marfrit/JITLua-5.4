@@ -7,6 +7,8 @@ Modes
   R  our LuaJIT direct run    vs  string.dump -> load -> run (serializer round-trip)
 
 A test passes when exit status, normalized stdout and normalized stderr agree.
+A test whose `--! modes:` line excludes A has no reference arm and must also
+end with status 0: two arms that fail the same assertion prove nothing.
 Normalization is deliberately conservative (see canon/canon_err): whitespace,
 absolute paths, heap addresses and the program-name prefix of error messages.
 Number formatting, error wording and error line numbers are NOT normalized --
@@ -246,6 +248,7 @@ class Job:
         self.args, self.opts = args, opts
         self.timeout = opts.timeout
         self.status, self.detail, self.reason = "PASS", "", ""
+        self.selfcheck = False  # no reference arm: must end with status 0
         self.secs = 0.0
 
     def run(self, ctx):
@@ -305,6 +308,15 @@ class Job:
             mismatch, detail = compare(a, b, "direct", "dump-reload")
         else:
             raise ValueError(self.mode)
+        # A test that excludes mode A has no reference arm. Two arms that fail
+        # the same assertion agree with each other, so agreement alone proves
+        # nothing there: such a test has to end with status 0.
+        if (self.selfcheck and not mismatch and not detail and
+                a[0] != 0 and b[0] != 0):
+            mismatch = True
+            detail = ("both arms exit %d and the test has no reference arm "
+                      "(modes exclude A): %s" %
+                      (a[0], (canon_err(a[2]).strip().split("\n") or [""])[0][:200]))
         self.secs = time.time() - t0
         if scratch:
             import shutil
@@ -353,7 +365,7 @@ def plan(tests, modes, ctx, opts):
                 j.detail = "not valid Lua 5.4: " + canon_err(err or out)
                 bad.append(j)
                 continue
-        allow = [m.strip().upper() for m in d["modes"].split(",")] if "modes" in d else None
+        allow = [m.split()[0].upper() for m in d["modes"].split(",") if m.split()] if "modes" in d else None
         timeout = float(d["timeout"]) if "timeout" in d else opts.timeout
         extra = shlex.split(d["args"]) if "args" in d else []
         for m in modes:
@@ -361,6 +373,7 @@ def plan(tests, modes, ctx, opts):
                 continue
             j = Job(p, rel, m, extra, opts)
             j.timeout = timeout
+            j.selfcheck = bool(allow) and "A" not in allow
             jobs.append(j)
     return jobs, skipped, bad
 

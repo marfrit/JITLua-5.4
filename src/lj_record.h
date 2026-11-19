@@ -31,6 +31,7 @@ LJ_FUNC void lj_record_udata_notbox(jit_State *J, TRef tr, cTValue *tv);
 LJ_FUNC int lj_record_objcmp(jit_State *J, TRef a, TRef b,
 			     cTValue *av, cTValue *bv);
 LJ_FUNC void lj_record_stop(jit_State *J, TraceLink linktype, TraceNo lnk);
+LJ_FUNC void lj_record_ccallnest(jit_State *J);
 LJ_FUNC TRef lj_record_constify(jit_State *J, cTValue *o);
 LJ_FUNC TRef lj_record_vload(jit_State *J, TRef ref, MSize idx, IRType t);
 

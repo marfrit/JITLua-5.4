@@ -443,6 +443,7 @@ typedef struct jit_State {
   uint8_t needsnap;	/* Need snapshot before recording next bytecode. */
   IRType1 guardemit;	/* Accumulated IRT_GUARD for emitted instructions. */
   uint8_t bcskip;	/* Number of bytecode instructions to skip. */
+  int8_t ccallpend;	/* Pending pcall nesting change, see lj_record.c. */
 
   FoldState fold;	/* Fold state. */
 

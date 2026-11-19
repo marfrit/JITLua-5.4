@@ -37,8 +37,7 @@ Status as measured, not a compatibility claim:
   k-nucleotide
   ([docs/perf-regression-2026-11-17.md](docs/perf-regression-2026-11-17.md)).
 - **Not yet covered:** the no-op `lua_setcstacklimit` and the `__call`
-  chain VM work. `pcall`/`xpcall` are not recorded in traces since the 5.4
-  nesting bound landed. See the two files above for the exact list.
+  chain VM work. See the two files above for the exact list.
 
 ## Build
 
@@ -52,6 +51,29 @@ The build enables dual-number mode with `XCFLAGS += -DLUAJIT_NUMMODE=2` in
 `src/Makefile` (line 117). A command-line `XCFLAGS=` **replaces** that variable,
 so the define disappears and `src/lj_arch.h` stops the build with a `#error`.
 Put your own preprocessor defines in **`CFLAGS`**, never in `XCFLAGS`.
+
+## GC policy mode
+
+The default collector policy is unchanged (pause 200 %, stepmul 200 %). An
+opt-in **memory** mode collects at 100 % of live memory (`setpause=100`) with
+the same step speed. Per `docs/gc-newgen-plan.md` (Stage 0(a), the
+`setpause=100` row of the measurement table) that closes about 76 % of the
+binary-trees peak-RSS gap to PUC 5.4.9, at the cost of more collector work.
+Select it either way:
+
+```sh
+LUAJIT_GC=memory ./src/luajit -jon script.lua
+./src/luajit -G memory -jon script.lua
+```
+
+`LUAJIT_GC` is read in `luaL_newstate()` (`src/lib_aux.c`), so every embedder
+that creates its states with it sees the variable (`lua_newstate()` does not
+read it). `-G` overrides the environment and `-E` ignores it; unknown values
+are ignored silently. A runtime `collectgarbage("setpause", n)` or
+`"setstepmul"` overrides either, and `collectgarbage("incremental"/
+"generational")` is unaffected. `tests/gcmode.sh` checks the read-back values
+for the default, both environment values, the CLI option and the precedence
+rules.
 
 ## Tests
 

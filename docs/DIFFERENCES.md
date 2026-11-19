@@ -14,9 +14,9 @@ the two tested platforms. The other LuaJIT backends (x86, arm, ppc, mips and
 non-GC64 builds) are not maintained and may lack individual 5.4 changes.
 For x86_64 without GC64 that is concrete: `src/Makefile` picks `vm_x86.dasc`
 (the VM for 32 bit GC references) whenever `LJ_FR2` is off, and that VM has no
-handler for `BC_IDIV`, `BC_KI64`, `BC_TBC` or `BC_TBCCLO` and no `cont_tbc` or
-`cont_tailret`, so `make CFLAGS=-DLUAJIT_DISABLE_GC64` stops in buildvm with
-`Error: undefined opcode BC_IDIV`. The *object layout* of that configuration
+handler for `BC_IDIV`, `BC_KI64`, `BC_TBC` or `BC_TBCCLO` and no `cont_tbc` or `cont_tailret`, so `make CFLAGS=-DLUAJIT_DISABLE_GC64` stops in
+buildvm with
+`Error: undefined opcode BC_IDIV` (measured: docs/notes/nogc64-2026-11-19.md). The *object layout* of that configuration
 is maintained: `make layout-check` (`tests/nogc64-layout.sh`, a stage of
 `tests/ci-box.sh`) compiles the GC object headers for x86_64 in both reference
 layouts, so a field added to a GC object cannot move a `GChead`-shared offset

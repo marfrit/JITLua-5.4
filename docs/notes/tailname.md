@@ -84,6 +84,16 @@ Median wall time in ms; `tests/bench` classic set and a local call-heavy set:
 Within noise; the constructor/format/select loops dropped from +28 %/+49 %/
 +8000 % (the earlier bail-out version) back to parity.
 
+## Gates (after merging main f51a7608, on the merged tree)
+
+- `tests/harness.sh --strict --mode both --corpus tests/d54`: 173 pass,
+  0 fail, 3 xfail (the pre-existing d54 divergences).
+- `tests/ci-box.sh`: all stages passed on x64 and on arm64.
+- `tests/ci-local.sh --sanitizers-only`: `ci-local: OK` on x64 and on arm64.
+- corpus-ext lpeg and penlight: same in the `joff`, `jon` and `gcs` arms.
+- The interleaved base/head benchmark above was repeated on the merged tree
+  with the same result.
+
 ## Open for the next round
 
 - Recorder correctness for a trace that *exits inside* a tail-called C

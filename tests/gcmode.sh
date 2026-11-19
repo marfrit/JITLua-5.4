@@ -5,7 +5,9 @@
 #
 # The initial collector policy must follow LUAJIT_GC=speed|memory (read in
 # luaL_newstate, so every embedder honours it) and the equivalent
-# `luajit -G speed|memory` option.  -G overrides the environment, -E ignores
+# `luajit -G speed|memory` option.  speed = pause 300 / stepmul 200 (the
+# measured time-first default, docs/knuc-phase-align-2026-11.md);
+# memory = pause 100 / stepmul 200.  -G overrides the environment, -E ignores
 # it, unknown values are ignored silently, the default stays unchanged, and a
 # runtime collectgarbage("setpause"/"setstepmul") still overrides either.
 set -eu
@@ -46,16 +48,16 @@ case_run() { # case_run <label> <want_pause> <command...>
   fi
 }
 
-case_run default      200 env -u LUAJIT_GC "$LUAJIT"
+case_run default      300 env -u LUAJIT_GC "$LUAJIT"
 case_run env-memory   100 env LUAJIT_GC=memory "$LUAJIT"
-case_run env-speed    200 env LUAJIT_GC=speed "$LUAJIT"
-case_run env-unknown  200 env LUAJIT_GC=banana "$LUAJIT"
+case_run env-speed    300 env LUAJIT_GC=speed "$LUAJIT"
+case_run env-unknown  300 env LUAJIT_GC=banana "$LUAJIT"
 case_run cli-memory   100 env -u LUAJIT_GC "$LUAJIT" -G memory
 case_run cli-attached 100 env -u LUAJIT_GC "$LUAJIT" -Gmemory
-case_run cli-speed    200 env LUAJIT_GC=memory "$LUAJIT" -G speed
-case_run env-vs-cli   200 env LUAJIT_GC=memory "$LUAJIT" -G speed
-case_run noenv-E      200 env LUAJIT_GC=memory "$LUAJIT" -E
-case_run cli-unknown  200 env -u LUAJIT_GC "$LUAJIT" -G banana
+case_run cli-speed    300 env LUAJIT_GC=memory "$LUAJIT" -G speed
+case_run env-vs-cli   300 env LUAJIT_GC=memory "$LUAJIT" -G speed
+case_run noenv-E      300 env LUAJIT_GC=memory "$LUAJIT" -E
+case_run cli-unknown  300 env -u LUAJIT_GC "$LUAJIT" -G banana
 
 if [ "$fails" -ne 0 ]; then
   echo "gcmode: FAILED"

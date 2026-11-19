@@ -44,6 +44,7 @@
 #ifdef LUAJIT_GC_STATS
 #include <stdio.h>
 #include <stdint.h>
+#include <time.h>
 #include <sys/time.h>
 
 #define GCSTATS_ALLOC_SAMPLE	6  /* Time 1 call in (1<<6) = 64. */
@@ -252,7 +253,78 @@ void lj_gc_stats_free(GCSize osz)
   gcstats.free_calls++; gcstats.free_bytes += osz;
 }
 
+/* Live-object census by GC type, printed when a GC cycle completes.  Strings
+** live in the intern table, not on the root list, so they are walked there.
+** Measurement only (LUAJIT_GC_STATS). */
+static void gcstats_census(global_State *g)
+{
+  GCobj *o;
+  uint64_t ntab = 0, nfunc = 0, nproto = 0, nudata = 0, nthr = 0, nother = 0;
+  uint64_t tab_asize = 0, tab_hnodes = 0, tab_bytes = 0, str_bytes = 0;
+  MSize i;
+  for (o = gcref(g->gc.root); o != NULL; o = gcnext(o)) {
+    switch (o->gch.gct) {
+    case ~LJ_TTAB: {
+      GCtab *t = gco2tab(o);
+      uint64_t hn = t->hmask ? (uint64_t)t->hmask + 1 : 0;
+      ntab++; tab_asize += t->asize; tab_hnodes += hn;
+      tab_bytes += sizeof(GCtab) + (uint64_t)t->asize * sizeof(TValue) +
+		   hn * sizeof(Node);
+      break;
+      }
+    case ~LJ_TFUNC: nfunc++; break;
+    case ~LJ_TPROTO: nproto++; break;
+    case ~LJ_TUDATA: nudata++; break;
+    case ~LJ_TTHREAD: nthr++; break;
+    default: nother++; break;
+    }
+  }
+  for (i = 0; i <= g->str.mask; i++) {
+    GCobj *s = gcref(g->str.tab[i]);
+    while (s != NULL) { str_bytes += lj_str_size(gco2str(s)->len); s = gcnext(s); }
+  }
+  fprintf(stderr, "GCCENSUS total_kb=%.1f str_num=%u str_mask=%u str_bytes=%llu "
+	  "tab=%llu tab_asize=%llu tab_hnodes=%llu tab_bytes=%llu "
+	  "func=%llu proto=%llu udata=%llu thread=%llu other=%llu\n",
+	  (double)g->gc.total / 1024.0, (unsigned)g->str.num, (unsigned)g->str.mask,
+	  (unsigned long long)str_bytes,
+	  (unsigned long long)ntab, (unsigned long long)tab_asize,
+	  (unsigned long long)tab_hnodes, (unsigned long long)tab_bytes,
+	  (unsigned long long)nfunc, (unsigned long long)nproto,
+	  (unsigned long long)nudata, (unsigned long long)nthr,
+	  (unsigned long long)nother);
+}
+
+/* Called when a GC cycle completes: the cheap per-cycle line (or the full
+** census under -DLUAJIT_GC_CENSUS).  Kept out of the macro below because a
+** preprocessor conditional cannot appear inside a macro definition. */
+static void gcstats_cycle_hook(global_State *g)
+{
+  /* Per-cycle phase split, so a cycle can be attributed to a workload stage.
+  ** The timestamp is clock()/CLOCKS_PER_SEC, the same clock Lua's os.clock()
+  ** reads, so a Lua stage probe can print matching stage boundaries. */
+  static uint64_t last_mark, last_sweepstr, last_sweep, last_atomic;
+  uint64_t m = gcstats.mark_ns - last_mark;
+  uint64_t ss = gcstats.sweepstr_ns - last_sweepstr;
+  uint64_t sw = gcstats.sweep_ns - last_sweep;
+  uint64_t at = gcstats.atomic_ns - last_atomic;
+  last_mark = gcstats.mark_ns; last_sweepstr = gcstats.sweepstr_ns;
+  last_sweep = gcstats.sweep_ns; last_atomic = gcstats.atomic_ns;
+#ifdef LUAJIT_GC_CENSUS
+  gcstats_census(g);
+#else
+  fprintf(stderr, "GCCYC t=%.6f total_kb=%.1f str_num=%u str_mask=%u "
+	  "cyc_mark_us=%.1f cyc_sweepstr_us=%.1f cyc_sweep_us=%.1f "
+	  "cyc_atomic_us=%.1f cyc_total_us=%.1f\n",
+	  (double)clock() / (double)CLOCKS_PER_SEC,
+	  (double)g->gc.total / 1024.0, (unsigned)g->str.num, (unsigned)g->str.mask,
+	  (double)m / 1000.0, (double)ss / 1000.0, (double)sw / 1000.0,
+	  (double)at / 1000.0, (double)(m + ss + sw + at) / 1000.0);
+#endif
+}
+
 #define GCSTATS_STEP_RET(v) do { \
+  if ((v) == 1) gcstats_cycle_hook(g); \
   gcstats_pause(); \
   uint64_t _t = gcstats_now() - gcstats_t0; \
   gcstats.steps++; gcstats.step_ns += _t; \

@@ -29,7 +29,11 @@ local jit = rawget(_G, "jit")
 
 local function run(label)
   if jit then jit.flush() end
-  local LIMIT = 20000
+  -- The bound must not depend on the collector's pause policy: the loop drives
+  -- the GC by allocation, so a larger pause legitimately needs more iterations.
+  -- 100000 keeps a wide margin at the default pause 300 and still fails if the
+  -- entry is never collected (the bug this guards against).
+  local LIMIT = 100000
   local x = setmetatable({[1] = {}}, {__mode = "kv"})
   local n1 = exact(x, LIMIT)
   assert(x[1] == nil, label .. ": exact shape entry not collected (n=" .. n1 .. ")")

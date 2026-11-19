@@ -264,8 +264,10 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   read in `luaL_newstate`, so every embedder that creates its states with it
   honours the variable; `lua_newstate` does not read it) and the equivalent
   `luajit -G speed|memory` option; `-G` overrides the environment, `-E`
-  ignores it, unknown values are ignored silently. `memory` sets pause 100 /
-  stepmul 200 (the Stage 0(a) row in `docs/gc-newgen-plan.md`); `speed` is the
-  unchanged default 200/200. Runtime `collectgarbage("setpause" /
-  "setstepmul")` overrides either. The default build is byte-for-byte the same
-  policy as stock LuaJIT 2.1.
+  ignores it, unknown values are ignored silently. `speed` is the default
+  300/200 (time-first, measured on both arches in
+  `docs/knuc-phase-align-2026-11.md`); `memory` sets pause 100 / stepmul 200
+  (the Stage 0(a) row in `docs/gc-newgen-plan.md`), the RSS-first setting.
+  Runtime `collectgarbage("setpause" / "setstepmul")` overrides either. The
+  pause default is a deliberate divergence from stock LuaJIT 2.1's 200/200; it
+  buys stock-parity k-nucleotide and a faster binary-trees for more peak RSS.

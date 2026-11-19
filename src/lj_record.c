@@ -1468,11 +1468,15 @@ int lj_record_mm_lookup(jit_State *J, RecordIndex *ix, MMS mm)
     goto nocheck;
   }
   ix->mt = mt ? mix.tab : TREF_NIL;
-  /* Guard the presence of the metatable, not its identity: the metamethod
-  ** lookup below is structural on the runtime metatable, and matching the
-  ** weakness is rec_tabguard's job (it guards meta.weak). This keeps the
-  ** own-mt idiom alive across metatables that share the same weakness. */
-  emitir(IRTG(mt ? IR_NE : IR_EQ, IRT_TAB), mix.tab, lj_ir_knull(J, IRT_TAB));
+  /* Guard the metatable identity, not just non-NULL: the weakness guard
+  ** (rec_tabguard) already emits the same EQ, so the folder CSEs the two
+  ** and the class idiom does not pay two guards on one metatable load. */
+  emitir(IRTG(IR_EQ, IRT_TAB), mix.tab,
+	 mt ? lj_ir_ktab(J, mt) : lj_ir_knull(J, IRT_TAB));
+  /* The identity is guarded, so look the metamethod up in the constant:
+  ** the lookup, the metaobject and their weakness guards no longer depend on
+  ** the table operand and are hoisted out of a loop over many objects. */
+  if (mt) mix.tab = lj_ir_ktab(J, mt);
 nocheck:
   if (mt) {
     GCstr *mmstr = mmname_str(J2G(J), mm);
@@ -1924,13 +1928,10 @@ static TRef rec_idx(jit_State *J, RecordIndex *ix, int tabguard);
 ** A trace is shaped by the weakness of its tables at record time: a trace
 ** that read a weak table keeps its allocations and clears dead stack slots
 ** at the loop's GC check (GCtrace.weak), any other trace does neither. So
-** guard the metatable's per-table weakness flag (GCtab.weak). Every write of
-** the interned "__mode" key marks the flag stale (LJ_TAB_WEAK_UNKNOWN); this
-** function recomputes it from __mode and guards the exact value, so
-** metatables that share a weakness (the own-mt idiom: one strong metatable
-** per object) keep the same trace instead of exiting on every metatable.
-** Do not use the negative metamethod cache (nomm) for this: every
-** string-keyed store to the metatable clears it.
+** guard the metatable and the value of its __mode field. The field is looked
+** up like any other constant key, with the metatable as a constant: one
+** invariant check per metatable and trace. Do not use the negative metamethod
+** cache (nomm) for this: every string-keyed store to the metatable clears it.
 */
 static void rec_tabguard(jit_State *J, TRef tab, GCtab *t)
 {
@@ -1939,31 +1940,31 @@ static void rec_tabguard(jit_State *J, TRef tab, GCtab *t)
   if (mt == NULL) {
     emitir(IRTG(IR_EQ, IRT_TAB), mtref, lj_ir_knull(J, IRT_TAB));
   } else {
-    /* Guard the per-metatable weakness flag, not the metatable identity: all
-    ** strong metatables (e.g. one per object, the own-mt idiom) then keep the
-    ** same trace. Recompute the flag here so the runtime value is exact, and
-    ** guard non-NULL so the FLOAD cannot fault. */
     GCstr *mmstr = mmname_str(J2G(J), MM_mode);
     cTValue *mode = lj_tab_getstr(mt, mmstr);
-    uint8_t w = 0;
+    TRef kmt = lj_ir_ktab(J, mt);
+    RecordIndex mix;
+    TRef trmode;
+    emitir(IRTG(IR_EQ, IRT_TAB), mtref, kmt);
+    mix.tab = kmt;
+    settabV(J->L, &mix.tabv, mt);
+    mix.key = lj_ir_kstr(J, mmstr);
+    setstrV(J->L, &mix.keyv, mmstr);
+    mix.val = 0;
+    mix.idxchain = 0;
+    trmode = rec_idx(J, &mix, 0);  /* Guards the type or the absence. */
     if (mode && tvisstr(mode)) {
       GCstr *str = strV(mode);
-      if (strchr(strdata(str), 'k')) w |= LJ_TAB_WEAK_K;
-      if (strchr(strdata(str), 'v')) w |= LJ_TAB_WEAK_V;
-    }
-    mt->weak = w;  /* Make the runtime flag exact for this metatable. */
-    emitir(IRTG(IR_NE, IRT_TAB), mtref, lj_ir_knull(J, IRT_TAB));
-    emitir(IRTGI(IR_EQ),
-	   emitir(IRT(IR_FLOAD, IRT_U8), mtref, IRFL_TAB_WEAK),
-	   lj_ir_kint(J, w));
-    if (w) {
-      J->cur.weak = 1;
-      /* A side trace that reads a weak table makes its root weak, too. The
-      ** root's GC check runs first on every iteration and is at the start
-      ** bytecode: it has to clear the dead slots (gc_jit_cleardead), or the
-      ** side trace's check never gets to do it. */
-      if (J->cur.root && traceref(J, J->cur.root))
-	traceref(J, J->cur.root)->weak = 1;
+      emitir(IRTG(IR_EQ, IRT_STR), trmode, lj_ir_kstr(J, str));
+      if (strchr(strdata(str), 'k') || strchr(strdata(str), 'v')) {
+	J->cur.weak = 1;
+	/* A side trace that reads a weak table makes its root weak, too. The
+	** root's GC check runs first on every iteration and is at the start
+	** bytecode: it has to clear the dead slots (gc_jit_cleardead), or the
+	** side trace's check never gets to do it. */
+	if (J->cur.root && traceref(J, J->cur.root))
+	  traceref(J, J->cur.root)->weak = 1;
+      }
     }
   }
 }

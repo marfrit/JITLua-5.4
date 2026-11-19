@@ -521,7 +521,6 @@ LJ_STATIC_ASSERT(offsetof(Node, val) == 0);
 typedef struct GCtab {
   GCHeader;
   uint8_t nomm;		/* Negative cache for fast metamethods. */
-  uint8_t weak;		/* Weakness of this table as a metatable: see LJ_TAB_WEAK_*. */
   int8_t colo;		/* Array colocation. */
   MRef array;		/* Array part. */
   GCRef gclist;
@@ -533,14 +532,6 @@ typedef struct GCtab {
   MRef freetop;		/* Top of free elements. */
 #endif
 } GCtab;
-
-/* GCtab.weak: weakness of this table when it is used as a metatable.
-** Bit 0 is set when __mode contains 'k', bit 1 when it contains 'v', so 0 is
-** a strong metatable. LJ_TAB_WEAK_UNKNOWN means the flag is stale and must be
-** recomputed from __mode (see lj_tab_updweak and rec_tabguard). */
-#define LJ_TAB_WEAK_K		0x01
-#define LJ_TAB_WEAK_V		0x02
-#define LJ_TAB_WEAK_UNKNOWN	0xff
 
 #define sizetabcolo(n)	((n)*sizeof(TValue) + sizeof(GCtab))
 #define tabref(r)	((GCtab *)gcref((r)))

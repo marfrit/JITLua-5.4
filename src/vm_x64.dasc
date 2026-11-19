@@ -4409,13 +4409,6 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  and TMPRd, STR:RC->sid
     |  imul TMPRd, #NODE
     |  mov byte TAB:RB->nomm, 0		// Clear metamethod cache.
-    |  // A store of the interned "__mode" key makes this table's weakness flag
-    |  // stale; rec_tabguard recomputes it. ITYPE is re-set below.
-    |  mov ITYPE, [DISPATCH+DISPATCH_GL(gcroot)+8*(GCROOT_MMNAME+MM_mode)]
-    |  cmp ITYPE, STR:RC
-    |  jne >8
-    |  mov byte TAB:RB->weak, 0xff
-    |8:
     |  add NODE:TMPR, TAB:RB->node
     |  settp ITYPE, STR:RC, LJ_TSTR
     |1:

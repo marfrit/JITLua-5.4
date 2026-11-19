@@ -192,8 +192,6 @@ static TValue *meta_tset(lua_State *L, cTValue *o, cTValue *k, int isenv)
       GCtab *t = tabV(o);
       cTValue *tv = lj_tab_get(L, t, k);
       if (LJ_LIKELY(!tvisnil(tv))) {
-	if (tvisstr(k) && strV(k) == mmname_str(G(L), MM_mode))
-	  t->weak = LJ_TAB_WEAK_UNKNOWN;  /* Existing __mode slot is rewritten. */
 	t->nomm = 0;  /* Invalidate negative metamethod cache. */
 	lj_gc_anybarriert(L, t);
 	return (TValue *)tv;

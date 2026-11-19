@@ -1416,7 +1416,6 @@ static BCReg rec_mm_prep(jit_State *J, ASMFunction cont)
 }
 
 /* Record metamethod lookup. */
-static TRef rec_idx(jit_State *J, RecordIndex *ix, int tabguard);
 int lj_record_mm_lookup(jit_State *J, RecordIndex *ix, MMS mm)
 {
   RecordIndex mix;
@@ -1474,6 +1473,10 @@ int lj_record_mm_lookup(jit_State *J, RecordIndex *ix, MMS mm)
   ** and the class idiom does not pay two guards on one metatable load. */
   emitir(IRTG(IR_EQ, IRT_TAB), mix.tab,
 	 mt ? lj_ir_ktab(J, mt) : lj_ir_knull(J, IRT_TAB));
+  /* The identity is guarded, so look the metamethod up in the constant:
+  ** the lookup, the metaobject and their weakness guards no longer depend on
+  ** the table operand and are hoisted out of a loop over many objects. */
+  if (mt) mix.tab = lj_ir_ktab(J, mt);
 nocheck:
   if (mt) {
     GCstr *mmstr = mmname_str(J2G(J), mm);
@@ -1486,11 +1489,10 @@ nocheck:
     mix.key = lj_ir_kstr(J, mmstr);
     mix.val = 0;
     mix.idxchain = 0;
-    /* The metaobject is a one-time metamethod resolution, not the loop's
-    ** table operand: its entries are already guarded by the shape guards
-    ** (HREFK/HLOAD/EQ), so it needs no weakness guard. Guarding it added a
-    ** metatable load and compare per iteration for the class idiom. */
-    ix->mobj = rec_idx(J, &mix, 0);
+    /* The trace reads an entry of the metatable: guard its weakness like
+    ** that of any other table operand (a weak-valued metatable can lose its
+    ** metaobject). */
+    ix->mobj = lj_record_idx(J, &mix);
     return !tref_isnil(ix->mobj);  /* 1 if metamethod found, 0 if not. */
   }
   return 0;  /* No metamethod. */
@@ -1968,7 +1970,6 @@ static TRef rec_idx(jit_State *J, RecordIndex *ix, int tabguard)
   IRRef rbref;
   IRType1 rbguard;
   cTValue *oldv;
-  int guardtab = tabguard;  /* guard only the original table operand */
 
   while (!tref_istab(ix->tab)) { /* Handle non-table lookup. */
     /* Never call raw lj_record_idx() on non-table. */
@@ -2007,13 +2008,14 @@ static TRef rec_idx(jit_State *J, RecordIndex *ix, int tabguard)
     /* Otherwise retry lookup with metaobject. */
     ix->tab = ix->mobj;
     copyTV(J->L, &ix->tabv, &ix->mobjv);
-    guardtab = 0;  /* a metaobject, not the loop's table operand */
     if (--ix->idxchain == 0)
       lj_trace_err(J, LJ_TRERR_IDXLOOP);
   }
 
-  /* Guard the weakness of the table operand (not of a metaobject). */
-  if (guardtab)
+  /* Guard the weakness of the table the entry is read from: the operand or
+  ** the last link of its __index chain (but not for the guard's own lookup).
+  */
+  if (tabguard)
     rec_tabguard(J, ix->tab, tabV(&ix->tabv));
 
   /* First catch nil and NaN keys for tables. */

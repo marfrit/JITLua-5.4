@@ -1,4 +1,5 @@
 #!/bin/sh
+# x64-box/arm-box are private wrappers that run a command on a remote x86_64/arm64 test host.
 # GC baseline runner for JITLua-5.4.  Measurement only: no GC behaviour change
 # in a default build (the optional LUAJIT_GC_STATS block is compiled out).
 #
@@ -24,7 +25,7 @@ load_line() { printf 'load: %s | luajit/make: %s\n' "$(uptime | sed 's/.*load av
 
 say "machine: $ARCH, nproc $NPROC, jobs $JOBS"
 load_line
-# arm-box carries a model server: refuse to measure while another luajit/make
+# The arm64 test host is shared: refuse to measure while another luajit/make
 # job is running there, unless the caller explicitly overrides.
 if [ "$ARCH" = "aarch64" ] && [ "${GC_ALLOW_LOAD:-0}" != 1 ]; then
   if pgrep -a 'luajit|make' >/dev/null 2>&1; then

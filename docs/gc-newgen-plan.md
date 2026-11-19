@@ -218,7 +218,7 @@ pick: binary-trees' 50 % share and its near-100 % death rate per cycle.
 **Expected gain and risk.** Upside is bounded by the table-churning
 workloads' GC share; realistically Stage 1 removes the *sweep-scan and
 malloc-free* components of that share, not the traversal (which must still
-read table contents) or the finalize phase. Honest estimate: 5–15 % on
+read table contents) or the finalize phase. Realistic estimate: 5–15 % on
 binary-trees, ≤ 5 % on lpeg and lua-cjson, 0 elsewhere — but this is a range,
 not a number, until the Stage 0(b) phase split says how much of the 473 ms
 x64 binary-trees GC is sweep+alloc vs mark+atomic. Risk: medium. The bitmap
@@ -293,7 +293,7 @@ mode string; `"setpause"`/`"setstepmul"` feed the threshold in both modes,
 and `"step"`/`K`/`"collect"` drive a bounded number of steps or a full major
 cycle.
 
-**Quantitative honesty:** the baseline's PUC-generational arm is within noise
+**Quantitative caveat:** the baseline's PUC-generational arm is within noise
 of PUC-incremental on all 17 workloads, so Stage 3 has **no measured payoff
 on `gc-measure.sh`**. Its value is request/response and long-lived-server
 workloads the harness does not measure. It should be justified by a *new*

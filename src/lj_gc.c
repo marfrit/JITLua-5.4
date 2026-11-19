@@ -489,8 +489,11 @@ size_t lj_gc_separateudata(global_State *g, int all)
 	*p = o->gch.nextgc;
 	gc_linkmmudata(g, o);
       }
-    } else if (!(iswhite(o) || all) || isfinalized(gco2ud(o))) {
-      p = &o->gch.nextgc;  /* Nothing to do. */
+    } else if (!(iswhite(o) || all) || isfinalized(gco2ud(o)) ||
+	       g->gc.closing) {
+      /* Nothing to do. 5.4 (GCSTPCLS): while lua_close runs, a userdata that
+      ** gets __gc is registered nowhere, so it is freed without a finalizer. */
+      p = &o->gch.nextgc;
     } else if (!lj_meta_fastg(g, tabref(gco2ud(o)->metatable), MM_gc)) {
       markfinalized(o);  /* Done, as there's no __gc metamethod. */
       p = &o->gch.nextgc;

@@ -353,13 +353,17 @@ LUA_API void lua_close(lua_State *L)
   global_State *g = G(L);
   int i;
   L = mainthread(g);  /* Only the main thread can be closed. */
-  g->gc.closing = 1;  /* 5.4: finalizers installed from now on are ignored. */
 #if LJ_HASPROFILE
   luaJIT_profile_stop(L);
 #endif
   setgcrefnull(g->cur_L);
   lj_func_closeuv(L, tvref(L->stack));
+  /* Separate what already has a finalizer before the closing flag stops
+  ** registration (PUC sets GCSTPCLS and then separates its finobj list, which
+  ** holds exactly what was registered before close). Objects that get __gc
+  ** from here on -- during a __gc call, for instance -- are not finalized. */
   lj_gc_separateudata(g, 1);  /* Separate udata which have GC metamethods. */
+  g->gc.closing = 1;  /* 5.4: finalizers installed from now on are ignored. */
 #if LJ_HASJIT
   G2J(g)->flags &= ~JIT_F_ON;
   G2J(g)->state = LJ_TRACE_IDLE;

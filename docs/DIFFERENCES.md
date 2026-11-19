@@ -37,14 +37,13 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   bounded at PUC's LUAI_MAXCCALLS (200) with "C stack overflow" and a
   repeatedly erroring message handler ends in "error in error handling"
   (`tests/d54/err_04_ccall_bound.lua`).
-- `PENDING` pcall/xpcall are not recorded in traces (`recff_pcall`/
-  `recff_xpcall` abort the trace): a compiled pcall bypasses the interpreter
-  fast path that bounds the C-call nesting. Recording only top-level pcalls
-  (a `ccallnest == 0` IR guard) compiles hot loops again (`tests/bench/
-  b5_pcall.lua`, x64 2M iterations: pcall 150->44 ms, xpcall 150->2.9 ms)
-  but produced a JIT-vs-interpreter divergence in the penlight corpus under
-  `-jon` + GC stress, so it is held back until a trace-level C-call counter
-  (increment and decrement in the trace) can be implemented and verified.
+- `FIXED` pcall/xpcall are recorded in traces with an exact C-call counter:
+  `lj_record_ccallnest` emits the `ccallnest` increment and an exit-near-the-
+  limit guard before the protected call, and the matching decrement on the
+  trace's normal return from the pcall frame (any exit before that leaves the
+  frame live for the interpreter's own decrement). `tests/bench/b5_pcall.lua`
+  (x64 2M iterations): pcall 150->47 ms, xpcall 150->2.8 ms;
+  `tests/d54/err_05_pcall_trace.lua` covers the penlight test-pretty shape.
 - `IMPL-DEFINED` Sparse-table border for runtime-built tables may differ: 5.4
   allows any border; LuaJIT's array-growth policy differs from PUC's alimit hint
   (`tbl_03_border_divergence`).

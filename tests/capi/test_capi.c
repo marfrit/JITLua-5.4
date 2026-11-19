@@ -1565,7 +1565,7 @@ static void check_tols(lua_State *L, const char *name, const char *want)
     const char *s = lua_tolstring(L, -1, &len);
     ok(s != NULL && len == strlen(want) && memcmp(s, want, len) == 0, name);
   }
-  lua_pop(L, 3);
+  lua_pop(L, 2);  /* the global value and the result */
 }
 
 /* Same, but the whole result must be a prefix (heap addresses differ). */
@@ -1581,7 +1581,7 @@ static void check_tols_prefix(lua_State *L, const char *name, const char *prefix
     ok(s != NULL && strncmp(s, prefix, strlen(prefix)) == 0 &&
        s[strlen(prefix)] != '\0', name);
   }
-  lua_pop(L, 3);
+  lua_pop(L, 2);  /* the global value and the result */
 }
 
 /* Same, but the call must raise PUC 5.4.9's wording. A location prefix
@@ -1658,9 +1658,7 @@ static void test_tolstring(void)
   } else {
     ok(0, "tolstring string base metatable setup");
   }
-  lua_pop(L, 1);
   luaL_dostring(L, "getmetatable('').__tostring = nil");
-  lua_pop(L, 1);
   if (luaL_dostring(L,
       "debug.setmetatable(1, {__tostring=function() return 2 end})\n"
       "tol_n7 = 7\n") == LUA_OK) {
@@ -1668,12 +1666,9 @@ static void test_tolstring(void)
   } else {
     ok(0, "tolstring number base metatable setup");
   }
-  lua_pop(L, 1);
   luaL_dostring(L, "debug.setmetatable(1, {__tostring=function() return nil end})");
-  lua_pop(L, 1);
   check_tols_err(L, "tol_n7", "'__tostring' must return a string");
   luaL_dostring(L, "debug.setmetatable(1, nil)");
-  lua_pop(L, 1);
   check_tols(L, "tol_n7", "7");
   lua_close(L);
 }

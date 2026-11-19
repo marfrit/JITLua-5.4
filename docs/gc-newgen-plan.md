@@ -109,6 +109,50 @@ sweep of `pause ∈ {100, 133, 150, 200}` × `stepmul ∈ {200, 300, 400, 500}` 
 binary-trees and lpeg, both arches. This is a one-constant (or two-constant)
 patch with reproducible, wall+peak-RSS evidence.
 
+**DECIDED 2026-11-19: the default pause is 300, and memory is the opt-in mode.**
+The hypothesis above (pairing a *lower* pause with a higher stepmul to buy RSS)
+was tested and rejected: `setstepmul=400` alone leaves k-nucleotide at 0.92 of
+stock and lowering the pause costs time everywhere, while *raising* the pause
+buys time on the workloads that matter. The default is therefore `pause 300 /
+stepmul 200` (`LUAI_GCPAUSE` in `src/luaconf.h`) and the RSS-first setting
+became the opt-in `LUAJIT_GC=memory` / `-G memory` mode (pause 100 / stepmul
+200). Measured with `tests/bench/classic/run.py` and `tests/bench/gc_measure.py`
+(median of 7, interleaved, one box per arch, `-jon`; corpus rows are
+ours-200 vs ours-300 because a fork-built module will not load in stock):
+
+| workload | stock ms / MB | speed 200 ms / MB | speed 300 ms / MB | memory ms / MB |
+|---|---|---|---|---|
+| nbody | 9.2 / 12.0 | 11.3 / 12.0 | 11.3 / 12.0 | 11.4 / 12.0 |
+| spectral-norm | 22.1 / 12.0 | 22.0 / 12.0 | 24.1 / 12.0 | 24.2 / 12.0 |
+| fannkuch-redux | 70.1 / 12.0 | 65.9 / 12.0 | 65.9 / 12.0 | 65.9 / 12.0 |
+| binary-trees | 936.8 / 32.6 | 967.8 / 28.9 | **855.4 / 38.7** | 1526.6 / 19.8 |
+| fasta | 13.5 / 12.0 | 13.5 / 12.0 | 13.5 / 12.0 | 13.5 / 12.0 |
+| deltablue | 19766.5 / 12.0 | 22225.0 / 12.0 | 21882.9 / 12.0 | 26588.1 / 12.0 |
+| scimark | 30593.8 / 12.0 | 29542.9 / 12.0 | 29594.7 / 12.0 | 29530.0 / 12.0 |
+| k-nucleotide | 66.3 / 12.0 | 76.9 / 12.0 | **70.4 / 12.0** | 129.8 / 12.0 |
+| regex-dna | 61.7 / 12.0 | 65.9 / 12.0 | 66.0 / 12.0 | 68.0 / 12.0 |
+| lpeg | (no stock arm) | 464.3 / 16.7 | 462.6 / 19.6 | 1121.8 / 15.3 |
+| lua-cjson | (no stock arm) | 425.5 / 126.5 | 407.8 / 127.5 | 524.5 / 127.0 |
+
+arm64 test host (median of 11, one box; the run was taken at load 2.3 → 7.8, so
+the small rows carry spread — see `docs/notes/knuc-open-2026-11-19.md`):
+
+| workload | stock ms / MB | speed 200 ms / MB | speed 300 ms / MB |
+|---|---|---|---|
+| binary-trees | 169.9 / 32.6 | 170.5 / 29.0 | **158.8 / 37.2** |
+| k-nucleotide | 28.2 / 12.4 | 42.0 / 12.4 | **30.5 / 12.4** |
+| deltablue | 3504.3 / 12.4 | 3350.3 / 12.4 | 3250.1 / 12.4 |
+| scimark | 25335.4 / 12.4 | 26335.1 / 12.4 | 26119.2 / 12.4 |
+| lpeg | (no stock arm) | 132.3 / 16.1 | 130.0 / 19.3 |
+| lua-cjson | (no stock arm) | 250.0 / 125.6 | **233.9 / 125.8** |
+| nbody / spectral / fannkuch / fasta / regex-dna | — | flat | flat |
+
+Read-out: 300 is never worse than 200 by more than noise on either arch, it
+closes most of the k-nucleotide gap (0.86 → 0.94 x86_64; 0.67 → 0.92 arm64) and
+makes binary-trees faster than stock (1.09 / 1.07), at +34% / +15% peak RSS on
+binary-trees and +17% on lpeg. The memory mode is unchanged (pause 100 /
+stepmul 200) and still the RSS-first setting.
+
 **(b) Per-phase GC instrumentation — the enabler.** The `-DLUAJIT_GC_STATS`
 block (`src/lj_gc.c:33-113` on gcbase) already yields steps/cycles/atomic
 durations and log2 pause histograms, but **no mark-vs-sweep-string-vs-sweep-

@@ -94,8 +94,13 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   OR-ed the type tag into it, so negative int32 keys corrupted the hash
   part. See `docs/bug-math-random-jit.md`; `tests/lib/math-random-jit.lua` is
   the regression test.
-- `PENDING` `heavy.lua` needs near 8 GiB in the PUC reference and OOM-kills an
-  8 GiB box; excluded from the default corpus, explicit `--include-heavy` stage.
+- `IMPL-DEFINED` `heavy.lua` runs under a 4 GiB `RLIMIT_AS` cap in the
+  `--include-heavy` stage; both sides then end in an allowed resource error
+  (Lua 5.4 manual 3.4.7), but the reports differ: PUC stops with "not enough
+  memory" at `#a=134217728` (peak ~2.0 GiB RSS) while LuaJIT stops with
+  `heavy.lua:154: table overflow` at `#a=201326592` (peak ~3.3 GiB), and the
+  `collectgarbage` byte counts differ in every mode. Excluded from the default
+  corpus; see `tests/known-bad.tsv`.
 - `PENDING` Classic benchmarks slower than stock 2.1 (>10%): deltablue both
   arches (missing-metamethod trace loss), spectral-norm x64 (integer-loop
   guards/CONVs), k-nucleotide x64 (`__index`/string-key path); see

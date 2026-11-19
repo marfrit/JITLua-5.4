@@ -11,6 +11,15 @@ tests/harness.sh              # modes A + B over the whole corpus
 tests/harness.sh --mode all   # + mode R (string.dump -> load -> re-run)
 ```
 
+`make check` is the short gate: it builds `src/luajit` if needed, then runs the
+same differential invocation as the A+B stage of `tests/ci-box.sh` --
+`tests/harness.sh --strict --mode both --corpus tests/d54 --timeout 120` -- and
+exits non-zero on any unexpected failure. The PUC 5.4.9 reference is built only
+from a locally available tarball (`tests/ref/dist` or the download cache); a
+package build without one prints
+`check: PUC 5.4.9 reference unavailable (...); running mode B only` and falls
+back to mode B (JIT against interpreter) rather than failing on a download.
+
 ## Modes
 | mode | comparison | proves |
 |---|---|---|
@@ -30,6 +39,19 @@ tests/harness.sh --update-known-bad                     # refresh expected failu
 tests/harness.sh --list
 LUAJIT=tests/ref/sanbuild/src/luajit tests/harness.sh --corpus tests/d54
 ```
+
+### Memory-heavy files
+`tests/corpus/puc54/heavy.lua` is excluded from the default corpus. Run it
+explicitly with a generous timeout (`--timeout 120` or more):
+```sh
+tests/harness.sh --include-heavy --timeout 300 --corpus tests/corpus/puc54 \
+  --filter heavy --mode all --verbose
+```
+Both arms then run under a 4 GiB address-space cap (`RLIMIT_AS`, applied with
+`prlimit` when available, otherwise a `preexec_fn`); `--heavy-mem-limit` changes
+it (`K`/`M`/`G`/`T` suffix or bytes). The resulting "not enough memory" /
+"table overflow" error is an allowed outcome, so the file is an `XFAIL` entry
+in `known-bad.tsv`, not a `FAIL`.
 
 ## Statuses
 `PASS` / `FAIL` (unexpected, exit 1) / `XFAIL` (listed in `known-bad.tsv`) /

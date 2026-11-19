@@ -216,6 +216,8 @@ def build_cmods(workloads):
     """Build the C modules once per header family: puc, ours, stock."""
     inc = {"puc": ROOT / "tests" / "ref" / "src" / "lua-5.4.9" / "src",
            "ours": ROOT / "src", "stock": STOCK / "src"}
+    want = [f.strip() for f in os.environ.get("GC_MOD_FAMILIES", "puc,ours,stock").split(",") if f.strip()]
+    inc = {k: v for k, v in inc.items() if k in want}
     cc = os.environ.get("CC", "cc")
     built = {"puc": {}, "ours": {}, "stock": {}}
     for name, spec in workloads.items():

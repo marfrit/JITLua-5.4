@@ -44,6 +44,7 @@
 #ifdef LUAJIT_GC_STATS
 #include <stdio.h>
 #include <stdint.h>
+#include <time.h>
 #include <sys/time.h>
 
 #define GCSTATS_ALLOC_SAMPLE	6  /* Time 1 call in (1<<6) = 64. */
@@ -299,11 +300,26 @@ static void gcstats_census(global_State *g)
 ** preprocessor conditional cannot appear inside a macro definition. */
 static void gcstats_cycle_hook(global_State *g)
 {
+  /* Per-cycle phase split, so a cycle can be attributed to a workload stage.
+  ** The timestamp is clock()/CLOCKS_PER_SEC, the same clock Lua's os.clock()
+  ** reads, so a Lua stage probe can print matching stage boundaries. */
+  static uint64_t last_mark, last_sweepstr, last_sweep, last_atomic;
+  uint64_t m = gcstats.mark_ns - last_mark;
+  uint64_t ss = gcstats.sweepstr_ns - last_sweepstr;
+  uint64_t sw = gcstats.sweep_ns - last_sweep;
+  uint64_t at = gcstats.atomic_ns - last_atomic;
+  last_mark = gcstats.mark_ns; last_sweepstr = gcstats.sweepstr_ns;
+  last_sweep = gcstats.sweep_ns; last_atomic = gcstats.atomic_ns;
 #ifdef LUAJIT_GC_CENSUS
   gcstats_census(g);
 #else
-  fprintf(stderr, "GCCYC total_kb=%.1f str_num=%u str_mask=%u\n",
-	  (double)g->gc.total / 1024.0, (unsigned)g->str.num, (unsigned)g->str.mask);
+  fprintf(stderr, "GCCYC t=%.6f total_kb=%.1f str_num=%u str_mask=%u "
+	  "cyc_mark_us=%.1f cyc_sweepstr_us=%.1f cyc_sweep_us=%.1f "
+	  "cyc_atomic_us=%.1f cyc_total_us=%.1f\n",
+	  (double)clock() / (double)CLOCKS_PER_SEC,
+	  (double)g->gc.total / 1024.0, (unsigned)g->str.num, (unsigned)g->str.mask,
+	  (double)m / 1000.0, (double)ss / 1000.0, (double)sw / 1000.0,
+	  (double)at / 1000.0, (double)(m + ss + sw + at) / 1000.0);
 #endif
 }
 

@@ -125,6 +125,47 @@ Result (both arches, `-joff`/`-jon`, `tests/d54/err_09_close_chain.lua`):
 `d=196/197 fail=none`, `d=198..200000 fail=197 msg=C stack overflow`, matching
 PUC 5.4.9 line for line. No crash at 200000.
 
+A close that is refused at the bound drops the pending slots, as PUC has
+done by the time it returns the error. They used to stay registered on the
+reset thread, and a thread reset by `lua_closethread` is used again: the next
+function's to-be-closed value was then closed a second time through the stale
+slot (`tests/capi` "close at the bound").
+
+## Frames a coroutine is suspended in
+
+The first version stored `resumer + 1` into the count on every resume and
+left the rest alone. A coroutine that had yielded inside k pcall frames still
+had those k frames on its stack; each of them took one off the count when it
+returned. After the resume the count was therefore k too low, and with k
+larger than the resumer's count it wrapped below zero, which made the next
+pcall in that coroutine fail with "C stack overflow":
+
+```lua
+local function nest(k)
+  if k == 0 then coroutine.yield() return end
+  assert(pcall(nest, k - 1))
+end
+local co = coroutine.wrap(function()
+  nest(10)
+  return pcall(function() return "fine" end)
+end)
+co()
+print(pcall(co))   -- PUC: true true fine; was: false C stack overflow
+```
+
+From C the same happened with two pending frames and `from == NULL`.
+
+In PUC the frames that were pending at the yield no longer count after the
+resume (their C levels are gone, `lua_resume` sets `nCcalls` anew) and
+nothing is subtracted when they finish. The count here does the same now:
+every place that gives a thread its count stores it a second time in
+`ccallbase`, and a returning pcall frame (`vm_returnp`, `vm_unwind_ff`, x64
+and arm64) does not count below that value. Frames entered after the resume
+count in and out as before. Compiled code needs no change: a trace only
+returns through pcall frames it entered itself.
+`tests/d54/err_10_resume_pending_pcall.lua` matches PUC 5.4.9 line for line,
+including the depth seen inside the pending frames after the resume.
+
 ## Baseline alignment
 
 The main thread now starts with `LJ_CCALLNEST_BASE` 3. PUC's `nCcalls` counts

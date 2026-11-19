@@ -36,7 +36,10 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   "stack overflow", which pcall/xpcall directly on the chain catch like any
   other runtime error. calls.lua mode A now differs only in the `string.dump`
   private-format FORK at its binary-chunk section (line 474), which is listed
-  in tests/known-different.tsv; mode B passes. See docs/notes/callchain.md.
+  in tests/known-different.tsv; mode B passes. Setting up such a call can
+  grow and move the stack (`tests/d54/call_05_chain_stack_move.lua`). x64
+  (GC64) and arm64 only; the other interpreters resolve one level, as before.
+  See docs/notes/callchain.md.
 - `FIXED` pcall/xpcall C-call nesting bound: nested pcall/xpcall calls are
   bounded at PUC's LUAI_MAXCCALLS (200) with "C stack overflow" and a
   repeatedly erroring message handler ends in "error in error handling"
@@ -48,7 +51,10 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   `lua_resume` apply that formula and raise the resume itself as "C stack
   overflow" at the 200 bound, before any coroutine state is mutated. The
   deltas against the top-level pcall depth match PUC 5.4.9 in `-joff`/`-jon`
-  on both arches (`tests/d54/err_06_coro_ccallnest.lua`).
+  on both arches (`tests/d54/err_06_coro_ccallnest.lua`). The pcall frames a
+  coroutine is suspended in are not counted again by the next resume and take
+  nothing off the new count when they return, as in PUC
+  (`tests/d54/err_10_resume_pending_pcall.lua`).
   The first attempt crashed at ~200 levels on x86_64 because its fast-path
   block loaded the resumer via `KBASE` (r15), which is the caller's bytecode
   constants base and survives the resume: the next string-key opcode read
@@ -64,7 +70,8 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   into the handler reaches it; with no pending handler PUC does not error).
   A deep close chain now ends in PUC's error at its 198th thread instead of
   exhausting the native stack (was SIGSEGV at depth 200000 on both arches),
-  `tests/d54/err_09_close_chain.lua`.
+  `tests/d54/err_09_close_chain.lua`. A close refused that way calls no
+  handler and leaves no to-be-closed slot pending on the reset thread.
   The main thread also starts with `LJ_CCALLNEST_BASE` 3, PUC's standalone
   baseline, so the absolute bound now matches PUC without changing any delta:
   pcall depth 197, resume `err@1` at depth 198, close failure at the 198th

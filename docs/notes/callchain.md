@@ -1,8 +1,8 @@
 # The __call chain (calls.lua lines 171/193)
 
-Worktree `LuaJIT-5.4-callchain`, branch `callchain`, merged on top of main
-`7e8e4bf9` (the tail-call-into-C recorder rework). Known-bad is empty; the
-calls.lua mode-A row is now a known difference for the private dump format.
+Branch `callchain`, on top of main `7e8e4bf9` (the tail-call-into-C recorder
+rework). Known-bad is empty; the calls.lua mode-A row is now a known
+difference for the private dump format.
 
 ## PUC semantics
 
@@ -26,9 +26,9 @@ that reaches PUC's own limit is not practical.
 `lj_meta_call` (src/lj_meta.c) walks the chain twice:
 
 1. Count pass: follow `__call` from the called object without touching the
-   stack. Per level it asks `lj_state_checkstack(L, n)` for one more slot
-   relative to the width already counted, so a cyclic chain terminates in a
-   catchable "stack overflow" instead of looping. A level without `__call`
+   stack. Per level it makes sure there is room for the n slots counted so
+   far above the call's arguments and grows the stack if not, so a cyclic
+   chain terminates in a catchable "stack overflow" instead of looping. A level without `__call`
    copies that object into the func slot and raises the existing
    `attempt to call a X value`; keeping it in the func slot preserves the
    caller-side variable naming in the error.
@@ -45,11 +45,20 @@ tests still pass). The VM adds it to its own nargs bookkeeping; x64 saves
 
 The VM rebases from the returned func slot:
 
-- x64 `vmeta_call`/`vmeta_callt`: `RA = func+16`, `BASE = L->base`; the CALLT
-  hint is kept as `KBASE-BASE` across the call. This offset must be computed
-  before `lea CARG3`, because on POSIX `CARG3` aliases `BASE` (`rdx`). That
-  clobber was the first implementation bug: the restored hint was garbage
-  and tail calls through a chain executed the wrong bytecode.
+- x64 `vmeta_call`: `RA = func+16`, `BASE = L->base`. The CALLT hint is
+  `KBASE == BASE` on entry. The old base is kept in `RB` (callee-saved)
+  across the call and compared with the untouched `KBASE` afterwards; only
+  when the hint was set does `KBASE` become the new base. For every other
+  call `KBASE` must come back exactly as it went in: it is the constants
+  base of the calling Lua function, and a fast function at the end of the
+  chain returns to that function without reloading it. The first two
+  versions got this wrong. One read `BASE` after `lea CARG3` had clobbered it
+  (on POSIX `CARG3` is `rdx` = `BASE`), so tail calls through a chain ran the
+  wrong bytecode. The next kept the hint as `KBASE-BASE` and added the new
+  base back, which relocated the constants base together with the stack
+  whenever the stack moved: the caller then loaded its constants from
+  somewhere else in the heap (`tests/d54/call_05_chain_stack_move.lua`,
+  SIGSEGV or wrong strings and numbers on x86_64).
 - arm64 `vmeta_call`/`vmeta_callt`: `BASE`/`RA = func+16`, BASE reloaded from
   `L->base`. `vmeta_callt` keeps the CALLT pc (callee-saved x21) across the
   call; the merged `BC_CALLT2_Z` loads the caller frame pc only on the Lua
@@ -60,11 +69,15 @@ The VM rebases from the returned func slot:
   `L->top = top+n`, which is wrong for this contract; the explicit
   `metanargs` field replaced it.
 
-The stack reservation asks for `top-L->top + n` slots, not just `n`, because
-`L->top` can sit below the call's argument top (it does for BC_CALLT). When
-that request cannot be satisfied, no target frame exists yet, so a fast
-pcall/xpcall does not recognize the protected call and the overflow used to
-escape. `lj_meta_call` now installs the same dummy frame that
+The stack reservation is measured from the call's argument top, not from
+`L->top`: `L->top` is where the last C call left it, which can be far below
+this call or above it. Asking `lj_state_growstack` for `top-L->top + n` slots
+made the request as large as that distance, so recursion through a callable
+object could end in "stack overflow" well before the limit, depending on
+where the frames happened to sit (`tests/d54/call_06_chain_depth_align.lua`:
+14584 against 16371 levels). When the n slots cannot be had, no target frame
+exists yet, so a fast pcall/xpcall does not recognize the protected call and
+the overflow used to escape. `lj_meta_call` now installs the same dummy frame that
 `lj_err_optype_call` uses for a non-callable target when the current C-frame
 pc is not a Lua frame, then forces the overflow through
 `lj_state_growstack`; the error unwinds into pcall/xpcall and the handler
@@ -94,6 +107,13 @@ back to the interpreter, with identical results.
   overflow message, then the script continues. coroutine.wrap and the xpcall
   handler reject the same table as a non-function before resolution, like
   PUC, in both arms.
+- `tests/d54/call_05_chain_stack_move.lua` (A+B+R): chains of 1 to 3000
+  objects that end in a fast function, called first thing in a new coroutine
+  (the setup has to grow and move the stack), plain, in tail position and
+  under pcall; the caller uses its constants right after the call. Plus one
+  level of `__call` at every stack alignment of a 3000-deep recursion.
+- `tests/d54/call_06_chain_depth_align.lua` (B+R): recursion through a
+  callable object reaches the same depth at every alignment.
 
 Red evidence on the unchanged tree: calls.lua aborts at line 187 under
 `-joff` and `-jon` with `attempt to call a table value`; call_01 fails mode A
@@ -113,7 +133,7 @@ Depth 1 is the unchanged single-level path.
 
 ## Gates (merged tree, main 7e8e4bf9)
 
-- `tests/ci-box.sh`: all stages passed on x86_64 (pve pool) and aarch64.
+- `tests/ci-box.sh`: all stages passed on x86_64 and aarch64.
 - `tests/ci-local.sh --sanitizers-only`: `ci-local: OK` on both arches;
   d54 all modes: 296 PASS, 0 FAIL, 5 XFAIL.
 - `tests/harness.sh --strict --mode all --timeout 120`: 354 PASS, 0 FAIL,
@@ -128,10 +148,13 @@ Depth 1 is the unchanged single-level path.
 - `coroutine.wrap(chainObject)` and a chain object as the xpcall handler are
   rejected as non-functions before any resolution, as in PUC; only a direct
   pcall/xpcall target can reach the overflow path.
-- A GC finalizer that mutates a metatable between the two passes could make
-  the prepended objects differ from PUC's per-level retry view. No allocation
-  happens in either pass, so only a stack-growing GC step could interleave;
-  no test reaches that.
+- Nothing can change a metatable between the two passes: neither pass
+  allocates a collectable object, and growing the stack reallocates it
+  without a GC step, so no finalizer runs in between.
 - A cyclic chain is bounded by the stack, not by a fixed depth, as in PUC.
-- Other interpreter backends (x86, ppc, mips) still carry the one-level
-  `lj_meta_call` call-site contract; only x64 GC64 and arm64 are ported.
+- Other interpreter backends (x86, arm, ppc, mips) still carry the one-level
+  `lj_meta_call` call-site contract; only x64 GC64 and arm64 are ported. For
+  them `lj_meta_call` is the one-level helper it was (`LJ_META_CALLCHAIN` in
+  `lj_meta.h`): it never moves the stack, adds one argument, and a `__call`
+  value that is not a function is an error; the recorder aborts on such a
+  chain there. Those backends were not built.

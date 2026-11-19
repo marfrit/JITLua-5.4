@@ -84,6 +84,9 @@ typedef void * (*lua_Alloc) (void *ud, void *ptr, size_t osize, size_t nsize);
 #define LUA_TUSERDATA		7
 #define LUA_TTHREAD		8
 
+#define LUA_NUMTYPES		9	/* number of basic types (PUC 5.4) */
+#define LUA_NUMTAGS		LUA_NUMTYPES  /* PUC 5.4 name for the same value */
+
 
 
 /* minimum Lua stack available to a C function */

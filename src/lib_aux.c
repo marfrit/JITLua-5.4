@@ -27,6 +27,21 @@
 #include <sys/wait.h>
 #endif
 
+/* -- 5.4 binary-compatibility check -------------------------------------- */
+
+/* PUC 5.4.9 luaL_checkversion_: raise on a numeric-type size or version
+** mismatch, so a module built against different headers is rejected instead
+** of corrupting the stack.  The macro in lauxlib.h passes LUAL_NUMSIZES. */
+LUALIB_API void luaL_checkversion_(lua_State *L, lua_Number ver, size_t sz)
+{
+  lua_Number v = lua_version(L);
+  if (sz != (size_t)LUAL_NUMSIZES)  /* check the numeric types, like PUC */
+    luaL_error(L, "core and library have incompatible numeric types");
+  else if (v != ver)
+    luaL_error(L, "version mismatch: app. needs %f, Lua core provides %f",
+               (LUAI_UACNUMBER)ver, (LUAI_UACNUMBER)v);
+}
+
 /* -- I/O error handling -------------------------------------------------- */
 
 LUALIB_API int luaL_fileresult(lua_State *L, int stat, const char *fname)

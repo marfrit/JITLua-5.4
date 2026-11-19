@@ -15,12 +15,20 @@
 #include "lua.h"
 
 
+/* global table (PUC 5.4 lauxlib.h) */
+#define LUA_GNAME	"_G"
+
 /* extra error code for `luaL_load' */
 #define LUA_ERRFILE     (LUA_ERRERR+1)
 
+/* PUC 5.4 registry keys and the numeric-type size stamp. */
+#define LUA_PRELOAD_TABLE	"_PRELOAD"
+#define LUAL_NUMSIZES	(sizeof(lua_Integer)*16 + sizeof(lua_Number))
+
 /* 5.4 binary-compatibility check; we accept the same version only. */
 LUALIB_API void (luaL_checkversion_) (lua_State *L, lua_Number ver, size_t sz);
-#define luaL_checkversion(L)	luaL_checkversion_(L, LUA_VERSION_NUM, LUAL_BUFFERSIZE)
+#define luaL_checkversion(L) \
+	luaL_checkversion_(L, LUA_VERSION_NUM, LUAL_NUMSIZES)
 
 typedef struct luaL_Buffer luaL_Buffer;
 

@@ -99,6 +99,7 @@
 /* Various tunables. */
 #define LUAI_MAXSTACK	65500	/* Max. # of stack slots for a thread (<64K). */
 #define LUAI_MAXCSTACK	8000	/* Max. # of stack slots for a C func (<10K). */
+#define LUAI_MAXCCALLS	200	/* Max. # of nested C calls (PUC parity). */
 #define LUAI_GCPAUSE	200	/* Pause GC until memory is at 200%. */
 #define LUAI_GCMUL	200	/* Run GC at 200% of allocation speed. */
 #define LUA_MAXCAPTURES	32	/* Max. pattern captures. */
@@ -126,7 +127,7 @@
 #define LUA_MAXINTEGER		((LUA_INTEGER)((~(LUA_UNSIGNED)0) >> 1))
 #define LUA_MININTEGER		((LUA_INTEGER)(-LUA_MAXINTEGER - 1))
 #define LUA_MAXUNSIGNED		(~(LUA_UNSIGNED)0)
-#define lua_integer2str(s,sz,n)	sprintf((s), sz, LUA_INTEGER_FMT, (LUAI_UACINT)(n))
+#define lua_integer2str(s,sz,n)	snprintf((s), (sz), LUA_INTEGER_FMT, (LUAI_UACINT)(n))
 #define LUA_IDSIZE	60	/* Size of lua_Debug.short_src. */
 /*
 ** Size of lauxlib and io.* on-stack buffers. Weird workaround to avoid using
@@ -143,7 +144,20 @@
 #define LUAI_UACNUMBER		double
 #define LUA_NUMBER_SCAN		"%lf"
 #define LUA_NUMBER_FMT		"%.14g"
-#define lua_number2str(s, n)	sprintf((s), LUA_NUMBER_FMT, (n))
+#define lua_number2str(s,sz,n) \
+	snprintf((s), (sz), LUA_NUMBER_FMT, (LUAI_UACNUMBER)(n))
+#define lua_str2number(s,p)	strtod((s), (p))
+#define lua_strx2number(s,p)	lua_str2number(s, p)
+#define lua_pointer2str(buff,sz,p) snprintf((buff), (sz), "%p", (p))
+#define lua_number2strx(L,b,sz,f,n) \
+	((void)(L), snprintf((b), (sz), (f), (LUAI_UACNUMBER)(n)))
+/* PUC luaconf.h: convert a float with an integral value to a lua_Integer,
+** returning 0 when the value is out of range (the comparisons account for
+** rounding; see PUC luaconf.h for the rationale). */
+#define lua_numbertointeger(n,p) \
+  ((n) >= (LUA_NUMBER)(LUA_MININTEGER) && \
+   (n) < -(LUA_NUMBER)(LUA_MININTEGER) && \
+      (*(p) = (LUA_INTEGER)(n), 1))
 #define LUAI_MAXNUMBER2STR	32
 #define LUA_INTFRMLEN		"l"
 #define LUA_INTFRM_T		long
@@ -174,6 +188,28 @@
 #define luai_apicheck(L, o)	{ (void)L; assert(o); }
 #else
 #define luai_apicheck(L, o)	{ (void)L; }
+#endif
+
+/* Locale radix character (PUC luaconf.h). Code using this macro must include
+** <locale.h> itself, exactly as with PUC. */
+#if !defined(lua_getlocaledecpoint)
+#define lua_getlocaledecpoint()		(localeconv()->decimal_point[0])
+#endif
+
+/* Branch-prediction helpers (PUC luaconf.h). LUA_NOBUILTIN disables them. */
+#if !defined(luai_likely)
+#if defined(__GNUC__) && !defined(LUA_NOBUILTIN)
+#define luai_likely(x)		(__builtin_expect(((x) != 0), 1))
+#define luai_unlikely(x)	(__builtin_expect(((x) != 0), 0))
+#else
+#define luai_likely(x)		(x)
+#define luai_unlikely(x)	(x)
+#endif
+#endif
+#if defined(LUA_CORE) || defined(LUA_LIB)
+/* shorter names for Lua's own use (PUC luaconf.h) */
+#define l_likely(x)	luai_likely(x)
+#define l_unlikely(x)	luai_unlikely(x)
 #endif
 
 #endif

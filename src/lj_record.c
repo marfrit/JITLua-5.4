@@ -573,6 +573,8 @@ void lj_record_stop(jit_State *J, TraceLink linktype, TraceNo lnk)
   if (J->retryrec)
     lj_trace_err(J, LJ_TRERR_RETRY);
 #endif
+  if (J->ccallpend)  /* No snapshot left to count a pcall in or out. */
+    lj_trace_err(J, LJ_TRERR_NYIRETL);
   lj_trace_end(J);
   J->cur.linktype = (uint8_t)linktype;
   J->cur.link = (uint16_t)lnk;
@@ -1207,24 +1209,44 @@ static int check_downrec_unroll(jit_State *J, GCproto *pt)
 
 static TRef rec_cat(jit_State *J, BCReg baseslot, BCReg topslot);
 
-/* Record return. */
-/* Trace-level pcall/xpcall C-call counter. delta=+1 emits the increment and
-** the exit-near-the-limit guard; delta=-1 emits the decrement. */
-void lj_record_ccallnest(jit_State *J, int delta)
+/* Trace-level pcall/xpcall nesting counter (the 5.4 C-call bound).
+**
+** L->ccallnest is not part of a snapshot, so memory has to agree with the
+** frames of every state a trace can leave to: by a guard, or by an error
+** raised in compiled code, which unwinds to the snapshot that covers the
+** faulting machine code. The counter therefore changes exactly at the two
+** snapshots that add and drop the pcall frame:
+** - recff_pcall/recff_xpcall emit the limit guard after the call setup. It
+**   belongs to the state in front of the pcall, like the setup's own guards.
+** - The change itself is left pending (J->ccallpend) and stored as the first
+**   instruction after the next snapshot: the one with the pcall frame for the
+**   increment, the one without it for the decrement. Whatever the recorder
+**   emits in between still belongs to the old state.
+** - Both stores are typed as guards. That keeps their snapshots from being
+**   merged into a later one, so the boundary stays where the store is even
+**   if the protected call has no guard of its own. Neither store is ever
+**   eliminated (see lj_opt_dse_fstore).
+*/
+void lj_record_ccallnest(jit_State *J)
 {
   TRef th = emitir(IRT(IR_LREF, IRT_THREAD), 0, 0);
   TRef cn = emitir(IRT(IR_FLOAD, IRT_INT), th, IRFL_THREAD_CCALLNEST);
-  TRef nv;
-  if (delta > 0) {
-    emitir(IRTG(IR_LT, IRT_INT), cn, lj_ir_kint(J, LJ_MAX_XLEVEL));
-    nv = emitir(IRTI(IR_ADD), cn, lj_ir_kint(J, 1));
-  } else {
-    nv = emitir(IRTI(IR_SUB), cn, lj_ir_kint(J, 1));
-  }
-  emitir(IRT(IR_FSTORE, IRT_INT),
-         emitir(IRT(IR_FREF, IRT_PGC), th, IRFL_THREAD_CCALLNEST), nv);
+  emitir(IRTG(IR_LT, IRT_INT), cn, lj_ir_kint(J, LJ_MAX_XLEVEL));
+  J->ccallpend++;
 }
 
+/* Store a pending change of the pcall nesting counter. */
+static void rec_ccallnest_flush(jit_State *J)
+{
+  TRef th = emitir(IRT(IR_LREF, IRT_THREAD), 0, 0);
+  TRef cn = emitir(IRT(IR_FLOAD, IRT_INT), th, IRFL_THREAD_CCALLNEST);
+  TRef nv = emitir(IRTI(IR_ADD), cn, lj_ir_kint(J, J->ccallpend));
+  TRef fref = emitir(IRT(IR_FREF, IRT_PGC), th, IRFL_THREAD_CCALLNEST);
+  J->ccallpend = 0;
+  emitir(IRTG(IR_FSTORE, IRT_INT), fref, nv);
+}
+
+/* Record return. */
 void lj_record_ret(jit_State *J, BCReg rbase, ptrdiff_t gotresults)
 {
   TValue *frame = J->L->base - 1;
@@ -1243,9 +1265,9 @@ void lj_record_ret(jit_State *J, BCReg rbase, ptrdiff_t gotresults)
     J->baseslot -= (BCReg)cbase;
     J->base -= cbase;
     J->base[--rbase] = TREF_TRUE;  /* Prepend true to results. */
-    lj_record_ccallnest(J, -1);  /* Leave the protected region. */
     frame = frame_prevd(frame);
     J->needsnap = 1;  /* Stop catching on-trace errors. */
+    J->ccallpend--;  /* Count the pcall out at that snapshot. */
   }
   /* Return to lower frame via interpreter for unhandled cases. */
   if (J->framedepth == 0 && J->pt && bc_isret(bc_op(*J->pc)) &&
@@ -2703,6 +2725,8 @@ void lj_record_ins(jit_State *J)
     lj_snap_add(J);
     J->mergesnap = 1;
   }
+  if (LJ_UNLIKELY(J->ccallpend))  /* Right behind the snapshot. */
+    rec_ccallnest_flush(J);
 
   /* Skip some bytecodes. */
   if (LJ_UNLIKELY(J->bcskip > 0)) {
@@ -3426,6 +3450,7 @@ void lj_record_setup(jit_State *J)
   J->maxslot = 0;
   J->framedepth = 0;
   J->retdepth = 0;
+  J->ccallpend = 0;
 
   J->instunroll = J->param[JIT_P_instunroll];
   J->loopunroll = J->param[JIT_P_loopunroll];

@@ -595,16 +595,27 @@ static void LJ_FASTCALL recff_xpairs(jit_State *J, RecordFFData *rd)
   }
 }
 
+/* The 5.4 pcall/xpcall nesting bound is counted in L->ccallnest by the
+** interpreter fast paths of x64 and arm64 only, and an error raised by
+** compiled code inside the protected call must become a trace exit for the
+** count to stay exact. Keep pcall/xpcall out of traces everywhere else.
+*/
+#if LJ_UNWIND_JIT && (LJ_TARGET_X64 || LJ_TARGET_ARM64)
+#define recff_pcall_check(J)	UNUSED(J)
+#else
+#define recff_pcall_check(J)	lj_trace_err(J, LJ_TRERR_BADTYPE)
+#endif
+
 static void LJ_FASTCALL recff_pcall(jit_State *J, RecordFFData *rd)
 {
+  recff_pcall_check(J);
   if (J->maxslot >= 1) {
-    /* Count the protected call in the trace (see lj_record_ccallnest). */
-    lj_record_ccallnest(J, 1);
 #if LJ_FR2
     /* Shift function arguments up. */
     memmove(J->base + 1, J->base, sizeof(TRef) * J->maxslot);
 #endif
     lj_record_call(J, 0, J->maxslot - 1);
+    lj_record_ccallnest(J);  /* After the call setup, see lj_record.c. */
     rd->nres = -1;  /* Pending call. */
     J->needsnap = 1;  /* Start catching on-trace errors. */
   }  /* else: Interpreter will throw. */
@@ -620,8 +631,8 @@ static TValue *recff_xpcall_cp(lua_State *L, lua_CFunction dummy, void *ud)
 
 static void LJ_FASTCALL recff_xpcall(jit_State *J, RecordFFData *rd)
 {
+  recff_pcall_check(J);
   if (J->maxslot >= 2) {
-    lj_record_ccallnest(J, 1);
     TValue argv0, argv1;
     TRef tmp;
     int errcode;
@@ -642,6 +653,7 @@ static void LJ_FASTCALL recff_xpcall(jit_State *J, RecordFFData *rd)
     copyTV(J->L, &rd->argv[1], &argv1);
     if (errcode)
       lj_err_throw(J->L, errcode);  /* Propagate errors. */
+    lj_record_ccallnest(J);  /* After the call setup, see lj_record.c. */
     rd->nres = -1;  /* Pending call. */
     J->needsnap = 1;  /* Start catching on-trace errors. */
   }  /* else: Interpreter will throw. */

@@ -693,6 +693,8 @@ TRef LJ_FASTCALL lj_opt_dse_fstore(jit_State *J)
 	  !(xr->op2 >= IRFL_SBUF_W && xr->op2 <= IRFL_SBUF_R))
 	return DROPFOLD;  /* Same value: drop the new store. */
       /* Different value: try to eliminate the redundant store. */
+      if (xr->op2 == IRFL_THREAD_CCALLNEST)
+	goto doemit;  /* Each store marks a snapshot boundary: keep them all. */
       if (ref > J->chain[IR_LOOP]) {  /* Quick check to avoid crossing LOOP. */
 	IRIns *ir;
 	/* Check for any intervening guards or conflicting loads. */

@@ -1127,18 +1127,20 @@ static void rec_call_setup(jit_State *J, BCReg func, ptrdiff_t nargs)
   (void)getslot(J, func); /* Ensure func has a reference. */
   for (i = 1; i <= nargs; i++)
     (void)getslot(J, func+LJ_FR2+i);  /* Ensure all args have a reference. */
-  if (!tref_isfunc(fbase[0])) {  /* Resolve __call metamethod. */
+  while (!tref_isfunc(fbase[0])) {  /* Resolve the __call chain. */
     ix.tab = fbase[0];
     copyTV(J->L, &ix.tabv, functv);
-    if (!lj_record_mm_lookup(J, &ix, MM_call) || !tref_isfunc(ix.mobj))
+    if (!lj_record_mm_lookup(J, &ix, MM_call))
       lj_trace_err(J, LJ_TRERR_NOMM);
     for (i = ++nargs; i > LJ_FR2; i--)  /* Shift arguments up. */
       fbase[i+LJ_FR2] = fbase[i+LJ_FR2-1];
 #if LJ_FR2
     fbase[2] = fbase[0];
 #endif
-    fbase[0] = ix.mobj;  /* Replace function. */
+    fbase[0] = ix.mobj;  /* Replace function with its __call value. */
     functv = &ix.mobjv;
+    if (J->baseslot + func + nargs + 2*LJ_FR2 >= LJ_MAX_JSLOTS)
+      lj_trace_err(J, LJ_TRERR_STACKOV);  /* Chain too deep for a trace. */
   }
   kfunc = rec_call_specialize(J, funcV(functv), fbase[0]);
 #if LJ_FR2
@@ -1167,6 +1169,7 @@ void lj_record_call(jit_State *J, BCReg func, ptrdiff_t nargs)
 ** to a metamethod (vm_call_tail), whatever kind of function that is. */
 void lj_record_tailcall(jit_State *J, BCReg func, ptrdiff_t nargs)
 {
+
   rec_call_setup(J, func, nargs);
   if (frame_isvarg(J->L->base - 1)) {
     BCReg cbase = (BCReg)frame_delta(J->L->base - 1);
@@ -1193,12 +1196,20 @@ void lj_record_tailcall(jit_State *J, BCReg func, ptrdiff_t nargs)
 static int rec_callt_keepframe(jit_State *J, BCReg func)
 {
 #if LJ_TARGET_X64 || LJ_TARGET_ARM64
-  cTValue *o = &J->L->base[func];
-  if (!tvisfunc(o)) {
-    o = lj_meta_lookup(J->L, o, MM_call);
-    if (!tvisfunc(o)) return 0;  /* rec_call_setup raises the trace error. */
+  /* Follow the whole __call chain to its final callee, like the VM. */
+  TValue cur;
+  int n = 0;
+  copyTV(J->L, &cur, &J->L->base[func]);
+  for (;;) {
+    if (tvisfunc(&cur)) return !isluafunc(funcV(&cur));
+    {
+      cTValue *mo = lj_meta_lookup(J->L, &cur, MM_call);
+      if (!mo || tvisnil(mo)) return 0;  /* rec_call_setup raises NOMM. */
+      if (++n >= LJ_MAX_JSLOTS)
+	lj_trace_err(J, LJ_TRERR_STACKOV);
+      copyTV(J->L, &cur, mo);
+    }
   }
-  return !isluafunc(funcV(o));
 #else
   UNUSED(J); UNUSED(func);
   return 0;

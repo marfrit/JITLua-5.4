@@ -1055,8 +1055,11 @@ static void build_subroutines(BuildCtx *ctx)
   |   str PC, SAVE_PC
   |  add CARG3, BASE, NARGS8:RC
   |  bl extern lj_meta_call	// (lua_State *L, TValue *func, TValue *top)
+  |  // The chain may have moved the stack: CRET1 = returned func slot.
+  |  add BASE, CRET1, #16
+  |  ldr TMP0w, L->metanargs
+  |   add NARGS8:RC, NARGS8:RC, TMP0, lsl #3	// All prepended objects.
   |  ldr LFUNC:CARG3, [BASE, FRAME_FUNC]  // Guaranteed to be a function here.
-  |   add NARGS8:RC, NARGS8:RC, #8	// Got one more argument now.
   |  and LFUNC:CARG3, CARG3, #LJ_GCVMASK
   |  ins_call
   |
@@ -1068,8 +1071,12 @@ static void build_subroutines(BuildCtx *ctx)
   |   str PC, SAVE_PC
   |  add CARG3, RA, NARGS8:RC
   |  bl extern lj_meta_call	// (lua_State *L, TValue *func, TValue *top)
+  |  // The chain may have moved the stack: CRET1 = returned func slot.
+  |  add RA, CRET1, #16
+  |   ldr BASE, L->base		// The kept caller base may have moved.
   |  ldr TMP1, [RA, FRAME_FUNC]		// Guaranteed to be a function here.
-  |   add NARGS8:RC, NARGS8:RC, #8	// Got one more argument now.
+  |  ldr TMP0w, L->metanargs
+  |   add NARGS8:RC, NARGS8:RC, TMP0, lsl #3	// All prepended objects.
   |  and LFUNC:CARG3, TMP1, #LJ_GCVMASK
   |  b ->BC_CALLT2_Z			// PC is still the CALLT pc.
   |

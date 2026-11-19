@@ -38,7 +38,7 @@ LJ_FUNCA TValue *lj_meta_equal_any(lua_State *L, uint64_t a, uint64_t b,
 LJ_FUNCA TValue * LJ_FASTCALL lj_meta_equal_cd(lua_State *L, BCIns ins);
 LJ_FUNCA TValue *lj_meta_comp(lua_State *L, cTValue *o1, cTValue *o2, int op);
 LJ_FUNCA void lj_meta_istype(lua_State *L, BCReg ra, BCReg tp);
-LJ_FUNCA void lj_meta_call(lua_State *L, TValue *func, TValue *top);
+LJ_FUNCA TValue *lj_meta_call(lua_State *L, TValue *func, TValue *top);
 LJ_FUNCA void LJ_FASTCALL lj_meta_for(lua_State *L, TValue *o);
 /* 5.4 to-be-closed variables. */
 LJ_FUNCA void LJ_FASTCALL lj_meta_tbcmark(lua_State *L, TValue *o);

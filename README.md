@@ -20,26 +20,26 @@ Status as measured, not a compatibility claim:
 
 - Differential gates against PUC Lua 5.4.9 pass on the tested platforms.
   Measured on Linux arm64 and x86_64, identical on both, on the `tests/d54`
-  edge-case corpus: A+B **187 PASS / 0 FAIL / 5 XFAIL**, JIT optimization
-  levels 0–3 **412**, R (dump/reload round-trip) **103**; the ASan/UBSan run
-  of A+B+R is **290 PASS / 0 FAIL / 5 XFAIL**; C API checks **231 + 92 + 18**.
+  edge-case corpus: A+B **192 PASS / 0 FAIL / 5 XFAIL**, JIT optimization
+  levels 0–3 **428**, R (dump/reload round-trip) **104**; the ASan/UBSan run
+  of A+B+R is **296 PASS / 0 FAIL / 5 XFAIL**; C API checks **231 + 92 + 18**.
 - The C API is **source-compatible** with PUC Lua 5.4, **not
   binary-compatible**: C modules must be rebuilt against JITLua's headers.
   A module built against PUC's headers that calls `luaL_checkversion` (as
   `luaL_newlib` does) is rejected at load.
 - Full corpus (PUC 5.4.9 test suite plus `tests/d54`) with `--strict`, the
-  exact command of the public CI: **348 PASS / 0 FAIL / 7 XFAIL / 12 SKIP /
+  exact command of the public CI: **354 PASS / 0 FAIL / 7 XFAIL / 12 SKIP /
   0 TIMEOUT**. Every XFAIL has its reason in one of two lists:
   [tests/known-bad.tsv](tests/known-bad.tsv) for real defects, and
   [tests/known-different.tsv](tests/known-different.tsv) for deliberate or
   implementation-defined differences.
-- Known defects (known-bad.tsv): the `__call` chain in the `calls.lua`
-  corpus, `debug.getinfo(...).istailcall` without a hook, and the C-call
-  nesting count across coroutines.
+- Known defects (known-bad.tsv): `debug.getinfo(...).istailcall` without a
+  hook, and the C-call nesting count across coroutines.
 - Known differences (known-different.tsv, all described in
-  [docs/DIFFERENCES.md](docs/DIFFERENCES.md)): a private bytecode dump format,
-  the border of runtime-built sparse tables, LuaJIT's maximum table array size
-  (`heavy.lua`), and the inherited LuaJIT 3.0 short-function syntax `->`.
+  [docs/DIFFERENCES.md](docs/DIFFERENCES.md)): a private bytecode dump format
+  (including the `calls.lua` binary-chunk section), the border of runtime-built
+  sparse tables, LuaJIT's maximum table array size (`heavy.lua`), and the
+  inherited LuaJIT 3.0 short-function syntax `->`.
 
 ## Build
 

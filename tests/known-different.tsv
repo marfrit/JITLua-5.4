@@ -3,6 +3,7 @@
 # Not defects: deliberate fork decisions (FORK), behaviour the 5.4 manual leaves
 # to the implementation (IMPL-DEFINED), or inherited LuaJIT extensions. Each one
 # is also described in docs/DIFFERENCES.md. Real defects are in known-bad.tsv.
+tests/corpus/puc54/calls.lua	A	FORK: the __call chain (lines 171/193) is fixed; the only remaining mode-A difference is the binary-chunk section, which compares our private `\27LJ...` dump header to PUC's `\27Lua...` (line 474). Mode R checks our own dump format.
 tests/corpus/puc54/heavy.lua	*	IMPL-DEFINED: under a 4GiB RLIMIT_AS (--include-heavy) both sides end in an allowed resource error but cannot match: measured on x86_64 and aarch64, PUC reports "not enough memory" at #a=134217728 (peak ~2.0GiB RSS; the stop size varies with allocator fragmentation) while LuaJIT reports "heavy.lua:154: table overflow" at #a=201326592 (peak ~3.3GiB); collectgarbage'count' bytes and the per-MiB stderr counters differ in every mode.
 tests/d54/dump_02_border.lua	A	IMPL-DEFINED: dump/reload border bug FIXED and rawlen added; only the runtime-built sparse-table border differs (any border is legal per the 5.4 manual)
 tests/d54/tbl_03_border_divergence.lua	A	IMPL-DEFINED: runtime-built sparse tables may report any legal border (5.4 manual 3.4.7); LuaJIT's array-growth policy differs from PUC's alimit hint

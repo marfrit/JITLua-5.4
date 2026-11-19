@@ -766,6 +766,9 @@ struct lua_State {
     void *ptr;		/* Pointer-aligned access. */
     uint8_t bytes[LUA_EXTRASPACE];
   } extraspace;
+  /* Arguments prepended by the __call chain, consumed by vmeta_call. Kept
+  ** after extraspace so no existing offset moves. */
+  MSize metanargs;
 };
 
 #define G(L)			(mref(L->glref, global_State))

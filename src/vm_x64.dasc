@@ -1232,8 +1232,8 @@ static void build_subroutines(BuildCtx *ctx)
   |  lea RA, [BASE+RA*8+16]
   |->vmeta_call:			// Resolve and call __call metamethod.
   |  // BASE = old base, RA = new base, RC = nargs+1, PC = return
-  |  mov TMP1d, NARGS:RDd		// Save RA, RC for us.
-  |  mov RB, RA
+  |  mov TMP1d, NARGS:RDd		// Save nargs+1 across the C call.
+  |  sub KBASE, BASE		// Keep the CALLT hint as a relocation offset.
   |.if X64WIN
   |  mov L:TMPR, SAVE_L
   |  mov L:TMPR->base, BASE		// Caveat: CARG2 is BASE.
@@ -1248,13 +1248,15 @@ static void build_subroutines(BuildCtx *ctx)
   |.endif
   |  mov SAVE_PC, PC
   |  call extern lj_meta_call	// (lua_State *L, TValue *func, TValue *top)
-  |  mov RA, RB
+  |  // The chain may have moved the stack: RC = returned func slot.
+  |  lea RA, [RC+16]
   |  mov L:RB, SAVE_L
   |  mov BASE, L:RB->base
-  |  mov NARGS:RDd, TMP1d
+  |  add KBASE, BASE		// Hint survives a stack move.
+  |  mov NARGS:RDd, TMP1d		// Restore nargs+1, add the prepended objects.
+  |  mov TMPRd, L:RB->metanargs
+  |  add NARGS:RDd, TMPRd		// RD = nargs+1 (all prepended objects included).
   |  mov LFUNC:RB, [RA-16]
-  |  add NARGS:RDd, 1
-  |  // This is fragile. L->base must not move, KBASE must always be defined.
   |  cmp KBASE, BASE			// Continue with CALLT if flag set.
   |  je ->BC_CALLT_Z
   |  cleartp LFUNC:RB

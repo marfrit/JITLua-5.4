@@ -29,18 +29,26 @@
 #include <sys/wait.h>
 #endif
 
-/* -- 5.4 binary-compatibility check -------------------------------------- */
+/* -- 5.4 source/ABI compatibility check -------------------------------- */
 
 /* PUC 5.4.9 luaL_checkversion_: raise on a numeric-type size or version
-** mismatch.  The macro in lauxlib.h passes LUAL_NUMSIZES, which has PUC's
-** value: the check tells apart other numeric types and other Lua versions,
-** not a module compiled against PUC's own 5.4 headers.  Such a module only
-** works as far as it stays clear of the pseudo-indices and of luaL_Buffer
-** (see docs/notes/capi-header-compat.md). */
+** mismatch, and reject a module built against PUC's own 5.4 headers.  Such a
+** module passes PUC's numeric stamp (LUAL_NUMSIZES is intentionally the same
+** value here) but its pseudo-indices and luaL_Buffer layout would be wrong,
+** so luaL_checkversion() passes a fork-specific LUAL_NUMABI instead.  A
+** module that never calls luaL_checkversion() (a raw luaopen_ function
+** without luaL_newlib) cannot be caught; rebuild all modules against JITLua's
+** headers.  See docs/notes/capi-header-compat.md. */
+#define LUAL_PUC_NUMSIZES \
+  ((size_t)(sizeof(lua_Integer)*16 + sizeof(lua_Number)))
 LUALIB_API void luaL_checkversion_(lua_State *L, lua_Number ver, size_t sz)
 {
   lua_Number v = lua_version(L);
-  if (sz != (size_t)LUAL_NUMSIZES)  /* check the numeric types, like PUC */
+  if (sz == LUAL_PUC_NUMSIZES)  /* a module built against PUC 5.4's headers */
+    luaL_error(L, "core and library have incompatible numeric types: "
+               "module built for a different Lua ABI; rebuild it against "
+               "JITLua headers");
+  else if (sz != (size_t)LUAL_NUMABI)  /* other numeric types, like PUC */
     luaL_error(L, "core and library have incompatible numeric types");
   else if (v != ver)
     luaL_error(L, "version mismatch: app. needs %f, Lua core provides %f",

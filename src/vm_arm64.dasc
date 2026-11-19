@@ -1444,6 +1444,13 @@ static void build_subroutines(BuildCtx *ctx)
   |   ccmp CARG3, CARG4, #2, ls
   |    ccmp RB, #0, #2, ls
   |    bhi ->fff_fallback
+  |  // 5.4: the resumed thread inherits the resumer's pcall nesting + 1, so
+  |  // only 200-(nesting+1) C calls remain usable inside the coroutine.
+  |  ldr TMP0w, L->ccallnest
+  |  cmp TMP0w, #LJ_MAX_XLEVEL
+  |  bhs ->fff_fallback		// Resume at the bound: error in the fallback.
+  |  add TMP0w, TMP0w, #1
+  |  str TMP0w, L:CARG1->ccallnest
   |.if resume
   |  sub CARG3, CARG3, #8		// Keep resumed thread in stack for GC.
   |  add BASE, BASE, #8

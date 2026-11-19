@@ -442,7 +442,7 @@ void lj_gc_checkfinalizer(lua_State *L, GCobj *o, GCtab *mt)
   GCobj *mth;
   GCtab *t;
   GCRef *p;
-  if (o->gch.gct != ~LJ_TTAB || mt == NULL)
+  if (o->gch.gct != ~LJ_TTAB || mt == NULL || g->gc.closing)
     return;
   t = gco2tab(o);
   if (t->marked & LJ_GC_TABFIN)

@@ -624,6 +624,7 @@ typedef struct GCState {
   uint8_t currentwhite;	/* Current white color. */
   uint8_t state;	/* GC state. */
   uint8_t gcmode;  /* 5.4 GC mode: 0 incremental, 1 generational */
+  uint8_t closing;  /* lua_close in progress: no new finalizers (PUC GCSTPCLS). */
 #if LJ_64
   uint8_t lightudnum;	/* Number of lightuserdata segments - 1. */
 #else

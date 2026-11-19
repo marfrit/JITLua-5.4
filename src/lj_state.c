@@ -352,6 +352,7 @@ LUA_API void lua_close(lua_State *L)
   global_State *g = G(L);
   int i;
   L = mainthread(g);  /* Only the main thread can be closed. */
+  g->gc.closing = 1;  /* 5.4: finalizers installed from now on are ignored. */
 #if LJ_HASPROFILE
   luaJIT_profile_stop(L);
 #endif

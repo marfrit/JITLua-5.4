@@ -9,6 +9,5 @@ tests/corpus/puc54/db.lua	A	P5: debug.getinfo(1,"t").istailcall must be true wit
 tests/corpus/puc54/heavy.lua	A	PERF/memory: reference needs near 8G and OOM-kills the box; excluded from the default corpus discovery, run alone with --include-heavy on a >8G box.
 tests/d54/dump_02_border.lua	A	IMPL-DEFINED: dump/reload border bug FIXED and rawlen added; only the runtime-built sparse-table border differs (any border is legal per the 5.4 manual)
 tests/d54/err_02_tailname.lua	A	P1.8b: tail-call error names -- LuaJIT reuses the caller frame, so the loaded-module fallback reports 'string.rep' where 5.4 reports the short 'rep'. Non-tail and pcall paths match.
-tests/d54/gc_01_tbc_gc.lua	A	IMPL-DEFINED: LuaJIT runs __gc only for userdata, not tables (PUC 5.4 finalizes tables); gc options now match
 tests/d54/tbl_03_border_divergence.lua	A	IMPL-DEFINED: runtime-built sparse tables may report any legal border (5.4 manual 3.4.7); LuaJIT's array-growth policy differs from PUC's alimit hint
 tests/d54/dump_03_version.lua	A	FORK: private dump format (JITLua-5.4 fork); PUC 5.4.9 cannot round-trip it, mode R checks ours

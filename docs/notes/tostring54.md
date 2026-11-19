@@ -41,6 +41,7 @@ The standalone message handler (lua.c msghandler) is separate: it calls
 | `tostring(plain)` | `lj_strfmt_obj`, no `__name` | `lj_strfmt_obj` with the metatable's string `__name` |
 | `print(x)` | called the global `tostring`, `'tostring' must return a string to 'print'` | PUC 5.4.9 shape: `luaL_tolstring` per argument |
 | `string.format("%s", x)` | called `__tostring`, then rendered whatever came back | `lj_strfmt_tolstrres`; a number converts, others raise |
+| `string.format("%s", str)` | never looked at the string metatable | calls a `__tostring` in the string metatable (one test of the negative cache bit otherwise); `%q` does not, as in PUC |
 | `luaL_tolstring` | already PUC-shaped, but `luaL_getmetafield` returned a boolean so the `__name` branch never fired | `luaL_getmetafield` returns the field type |
 | standalone handler | accepted a number result, printed `42` | PUC's `lua_type(...) == LUA_TSTRING` rule |
 
@@ -64,8 +65,9 @@ the asm cannot use "metatable present" as the number path does. `GCtab.nomm`
 only caches the fast metamethods (bits 0..MM_FAST); `__tostring` is not one.
 Spare bit 6 is now `MM_TOSTR_ABSENT`: `lj_meta_lookup` sets it on a
 `__tostring` miss, and any string-keyed store into a metatable clears the
-whole byte (`lj_tab_set`, and the recorder's `nommstr` store for compiled
-code). The asm inlines a string only when the bit is set; otherwise it calls
+whole byte (`lj_tab_set`, the interpreter's TSETS, and the store compiled
+code emits for a key `nommstr` reports: the fast metamethod names and, since
+the review fix, `__tostring`). The asm inlines a string only when the bit is set; otherwise it calls
 the C fallback, which performs the real lookup and either calls the metamethod
 or fills the bit. The first `tostring(string)` per process pays one lookup.
 
@@ -112,12 +114,21 @@ A+B 212 PASS / 0 FAIL / 4 XFAIL, opt levels 0-3 468, R 114, ASan/UBSan A+B+R
 
 ## Remaining risks
 
-- A compiled trace that inlined `tostring(string)` or `tostring(number)` does
-  not re-check the base metatable per execution when a `__tostring` is added
-  to it by a plain store (not `debug.setmetatable`, which flushes traces).
-  The interpreter adapts through the `nomm` bit; traces are cached the same
-  way other metamethod-negative caches are. Same limitation for a number base
-  metatable created without `debug.setmetatable`.
+- Closed by the review fix: a trace that inlined `tostring(string)`,
+  `tostring(number)` or `tostring(nil/boolean)` did not notice a `__tostring`
+  stored into the type's metatable afterwards, because the recorder looked
+  the method up without recording the lookup. `recff_tostring` and the `%s`
+  case of the `string.format` recorder now record it with
+  `lj_record_mm_lookup`, like every other metamethod lookup: a guard on the
+  absent field when the metatable exists (always, for strings), nothing when
+  the type has no metatable (`lua_setmetatable` flushes the traces when one
+  is installed). `tests/d54/tostring_05_late_mm.lua`.
+- `tostring` called recursively from its own `__tostring` ends in
+  "stack overflow" (the Lua stack limit) where PUC reports "C stack
+  overflow"; no crash on either architecture.
+- A `__name` longer than the stack buffer is assembled in a heap `SBuf`. If
+  the string allocation that follows fails with a memory error, that buffer
+  is not freed until the state is closed.
 - `__tostring` that yields: the C fast function now uses `lua_call`, so the
   yield stops at the C-call boundary like PUC. The old tail call handed the
   metamethod the fast function's frame; whether a yield could cross it there

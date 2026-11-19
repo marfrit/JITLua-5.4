@@ -54,17 +54,52 @@ the Lua library index arithmetic:
 - JIT: `rec_idx_abc` emits unsigned `IR_ABC`/`IR_ULE` for the asize field;
   x86 and arm64 `asm_compmap` map ABC to unsigned conditions; `IR_ALEN`
   returns the computed length (<= INT_MAX). No signed narrowing change needed
-  because asize stays positive int32.
+  because asize stays positive int32. The address of a slot is another
+  matter, see "Index scaling" below.
 - Interpreter fast paths (`vm_x64.dasc`, `vm_arm64.dasc`: TGETV/TGETB/TGETR,
   TSETV/TSETB/TSETR, TSETM, ITERN/ITERC, ipairs_aux, vm_next) compare with
-  unsigned branches (`jae`, `bhs`, `ja`) against the 32-bit asize; index
-  scaling to the array pointer is done in 64-bit address arithmetic.
+  unsigned branches (`jae`, `bhs`, `ja`) against the 32-bit asize. The index
+  scaling was 64 bit on arm64 only; x64 needed the fix below.
 - 5.4 integer keys: `inarray()` uses `(MSize)key < asize`; int32 keys stay
   array slots, int64 keys above INT_MAX go to the hash part; the two paths
   (interpreter and recorder) use the same threshold.
 - `table.move`/`table.concat`/`unpack`/`#`: indices/end are int32 and lengths
   return `MSize`/int32 values bounded by `asize-1` (<= INT_MAX); `table.maxn`
   casts the last slot index (<= 2^31-2) safely.
+
+## Index scaling (review fix)
+
+The first version of this change audited the limits and the comparisons, and
+stated that the index was scaled in 64 bit address arithmetic everywhere. It
+was not. The old limit of 2^27+1 slots had kept `8*index` below 2^30, and
+three places relied on that:
+
+- `vm_x64.dasc`, TGETV/TGETB/TGETR/TSETV/TSETB/TSETR/TSETM: `shl RCd, 3`
+  shifts a 32 bit register. From index 2^29 on the product wraps, and
+  `t[2^29+n]` read and wrote slot `n`: silent wrong data in the interpreter.
+  Now `shl RC, 3`; the three instructions whose `RC` still carries the tag of
+  the key (TGETV, TSETV, TSETR) clear the upper half first, which the 32 bit
+  shift had done on the side.
+- `lj_asm_x86.h` `asm_fusearef`: a constant index was fused as the
+  displacement `8*index` in an `int32_t`. `t[2^28+2]` in compiled code
+  addressed 2 GiB below the array (SIGSEGV), `t[2^29]` addressed slot 0. A
+  constant index is fused only if base offset + `8*index` fits `int32`;
+  otherwise it is loaded into a register like a variable index.
+- `lj_asm_arm64.h` `asm_aref` and the fused load/store operand: the same
+  product in an `int32_t`, wrapped before the immediate-range checks, so
+  `t[2^29]` in compiled code addressed slot 0. Computed in 64 bits now.
+
+`ipairs_aux`, ITERN and `vm_next` on x64 and every arm64 interpreter path
+already used 64 bit address arithmetic.
+
+`tests/lib/array-huge.lua` covers this with a table of 2^29+17 array slots
+(about 4.3 GiB): variable and constant indices above 2^28 and 2^29 in the
+interpreter and in hot functions, `next`/`pairs`, `table.unpack`,
+`table.concat` and `table.move` at a high index. It runs with `-joff` and
+`-jon` as a stage of `tests/ci-box.sh` and skips itself when less than 6 GiB
+is available; it is not part of the public CI workflow because of its size.
+Before the fix: 11 failed checks with `-joff` and a crash with `-jon` on
+x86_64, 3 failed checks with `-jon` on aarch64.
 
 ## Test
 

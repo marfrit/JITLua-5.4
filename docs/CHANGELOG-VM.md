@@ -107,6 +107,14 @@ target x86_64 (GC64) and arm64.
   by the check in `lj_gc_checkfinalizer`; FFI cdata by the disabled finalizer
   table. Tests `tests/d54/udfin_01_close.lua` (modes B,R, 20 s timeout) and
   `tests/capi/udfinal.c` (same counters as the PUC 5.4.9 reference).
+- Array parts above 2^28 slots: with the array limit at 2^31-1 slots under
+  GC64 the x64 interpreter (`shl RCd, 3` in TGETV/TGETB/TGETR/TSETV/TSETB/
+  TSETR/TSETM) and the x86 and arm64 backends (a constant index fused as
+  `8*index` in an `int32_t`) scaled the index in 32 bits: `t[2^29+n]`
+  addressed slot `n`, and a constant index from 2^28 on addressed memory
+  below the array on x86_64. All of them scale in 64 bits now
+  (`tests/lib/array-huge.lua`, a 4.3 GiB table, in `tests/ci-box.sh`;
+  docs/notes/asize64.md).
 - Tail-call error names: a tail call to a C function (fast function
   or C closure) now keeps the Lua caller frame alive and enters the C function
   through a new `LJ_CONT_TAILRET` continuation frame that makes the caller
@@ -195,8 +203,12 @@ target x86_64 (GC64) and arm64.
   again (it returned a boolean, so the `__name` branch in `luaL_tolstring`,
   `luaL_typeerror` never fired). `print()` uses `luaL_tolstring` per argument
   like PUC 5.4.9 and no longer calls a replaced global `tostring`.
-  `table.concat` and `..` stay non-`__tostring` paths. Tests
-  `tests/d54/tostring_01..04`, the capi `tolstring` group; benchmark
+  `table.concat` and `..` stay non-`__tostring` paths. A `__tostring` stored
+  into a basic type's metatable later is seen by compiled code as well (the
+  recorder records the lookup; a compiled store of the key clears the
+  negative cache bit), and `string.format("%s")` calls the string metatable's
+  method for a string argument. Tests
+  `tests/d54/tostring_01..05`, the capi `tolstring` group; benchmark
   `tests/bench/b6_tostring.lua` (no-metamethod hot paths flat, the
   `__tostring` case +23 % interpreted and no longer traced); design and path
   table: `docs/notes/tostring54.md`.

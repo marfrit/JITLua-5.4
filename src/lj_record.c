@@ -2020,6 +2020,9 @@ static int nommstr(jit_State *J, TRef key)
       for (mm = 0; mm <= MM_FAST; mm++)
 	if (mmname_str(J2G(J), mm) == str)
 	  return 0;  /* MUST be one the fast metamethod names. */
+      /* __tostring has a negative cache bit, too (MM_TOSTR_ABSENT). */
+      if (mmname_str(J2G(J), MM_tostring) == str)
+	return 0;
     } else {
       return 0;  /* Variable string key MAY be a metamethod name. */
     }

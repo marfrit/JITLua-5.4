@@ -538,6 +538,20 @@ static int recff_metacall(jit_State *J, RecordFFData *rd, MMS mm)
   return 0;
 }
 
+/* Record the lookup of __tostring for an argument. Returns 1 if the value
+** has one. The lookup is recorded like any other metamethod lookup, so a
+** trace that found none carries the guards for that: the metatable of a
+** table or userdata, and the absent field in a metatable that exists (the
+** string metatable always does; the other base metatables are constants that
+** lua_setmetatable flushes the traces for). */
+static int recff_has_tostring(jit_State *J, RecordFFData *rd, ptrdiff_t arg)
+{
+  RecordIndex ix;
+  ix.tab = J->base[arg];
+  copyTV(J->L, &ix.tabv, &rd->argv[arg]);
+  return lj_record_mm_lookup(J, &ix, MM_tostring);
+}
+
 static void LJ_FASTCALL recff_tostring(jit_State *J, RecordFFData *rd)
 {
   TRef tr = J->base[0];
@@ -545,9 +559,9 @@ static void LJ_FASTCALL recff_tostring(jit_State *J, RecordFFData *rd)
   ** per-type base metatable for a primitive, and checks its result. Leave
   ** such a call to the interpreter: the result type has to be validated (a
   ** number is converted, anything else raises), which a tail-call trace cannot
-  ** express. The plain paths below stay traced. */
-  if (tr && J->maxslot >= 1 &&
-      !tvisnil(lj_meta_lookup(J->L, &rd->argv[0], MM_tostring))) {
+  ** express. The plain paths below stay traced, guarded against a method
+  ** that appears later. */
+  if (tr && J->maxslot >= 1 && recff_has_tostring(J, rd, 0)) {
     recff_nyiu(J, rd);
     return;
   }
@@ -1320,7 +1334,10 @@ static void recff_format(jit_State *J, RecordFFData *rd, TRef hdr, int sbufx)
 			lj_ir_kint(J, (int32_t)STRFMT_D), tra);
 	break;
       }
-      if (!tref_isstr(tra)) {
+      /* 5.4: plain %s calls a __tostring in the string metatable, %q does
+      ** not (lj_strfmt_putarg). The lookup guards the absent method. */
+      if (!tref_isstr(tra) ||
+	  (!(sf & STRFMT_T_QUOTED) && recff_has_tostring(J, rd, arg))) {
 	recff_nyiu(J, rd);  /* NYI: __tostring and non-string types for %s. */
 	/* NYI: also buffers. */
 	return;

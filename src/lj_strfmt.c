@@ -402,6 +402,13 @@ SBuf *lj_strfmt_putfnum_uint(SBuf *sb, SFormat sf, lua_Number n)
 }
 
 /* Format stack arguments to buffer. */
+/* True unless the string metatable is known to have no __tostring. */
+static LJ_AINLINE int strfmt_strmm(lua_State *L)
+{
+  GCtab *mt = tabref(basemt_it(G(L), LJ_TSTR));
+  return mt && !(mt->nomm & MM_TOSTR_ABSENT);
+}
+
 int lj_strfmt_putarg(lua_State *L, SBuf *sb, int arg, int retry)
 {
   int narg = (int)(L->top - L->base);
@@ -518,7 +525,11 @@ int lj_strfmt_putarg(lua_State *L, SBuf *sb, int arg, int retry)
 	    lj_err_arg(L, arg, LJ_ERR_NOLITERAL);
 	  }
 	}
-	if (LJ_UNLIKELY(!tvisstr(o) && !tvisbuf(o)) && retry >= 0 &&
+	/* 5.4 luaL_tolstring: %s calls __tostring for every value, a string
+	** included when the string metatable has the method (%q does not).
+	** The negative cache bit keeps a plain string to one test. */
+	if (LJ_UNLIKELY(tvisstr(o) ? (!(sf & STRFMT_T_QUOTED) && strfmt_strmm(L)) :
+				     !tvisbuf(o)) && retry >= 0 &&
 	    !tvisnil(mo = lj_meta_lookup(L, o, MM_tostring))) {
 	  /* Call __tostring metamethod once. */
 	  copyTV(L, L->top++, mo);

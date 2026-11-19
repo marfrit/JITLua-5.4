@@ -1543,6 +1543,141 @@ static void test_lauxlib54(void)
   lua_close(L);
 }
 
+static int l_tolstring(lua_State *L)
+{
+  size_t len;
+  const char *s = luaL_tolstring(L, 1, &len);
+  lua_pushlstring(L, s, len);
+  return 1;
+}
+
+/* Call luaL_tolstring on a global value through lua_pcall and compare the
+** whole result. */
+static void check_tols(lua_State *L, const char *name, const char *want)
+{
+  lua_getglobal(L, name);
+  lua_pushcfunction(L, l_tolstring);
+  lua_pushvalue(L, -2);
+  if (lua_pcall(L, 1, 1, 0) != LUA_OK) {
+    ok(0, name);
+  } else {
+    size_t len;
+    const char *s = lua_tolstring(L, -1, &len);
+    ok(s != NULL && len == strlen(want) && memcmp(s, want, len) == 0, name);
+  }
+  lua_pop(L, 3);
+}
+
+/* Same, but the whole result must be a prefix (heap addresses differ). */
+static void check_tols_prefix(lua_State *L, const char *name, const char *prefix)
+{
+  lua_getglobal(L, name);
+  lua_pushcfunction(L, l_tolstring);
+  lua_pushvalue(L, -2);
+  if (lua_pcall(L, 1, 1, 0) != LUA_OK) {
+    ok(0, name);
+  } else {
+    const char *s = lua_tostring(L, -1);
+    ok(s != NULL && strncmp(s, prefix, strlen(prefix)) == 0 &&
+       s[strlen(prefix)] != '\0', name);
+  }
+  lua_pop(L, 3);
+}
+
+/* Same, but the call must raise PUC 5.4.9's wording. A location prefix
+** ("chunk:line: ") may precede it when the raise has a Lua caller. */
+static int msg_has(const char *s, const char *want)
+{
+  size_t ls = strlen(s), lw = strlen(want);
+  if (ls == lw) return strcmp(s, want) == 0;
+  return ls > lw && strcmp(s + ls - lw, want) == 0 && s[ls - lw - 1] == ' ';
+}
+
+static void check_tols_err(lua_State *L, const char *name, const char *want)
+{
+  lua_getglobal(L, name);
+  lua_pushcfunction(L, l_tolstring);
+  lua_pushvalue(L, -2);
+  if (lua_pcall(L, 1, 1, 0) == LUA_OK) {
+    ok(0, name);
+  } else {
+    const char *s = lua_tostring(L, -1);
+    ok(s != NULL && msg_has(s, want), name);
+  }
+  lua_pop(L, 2);
+}
+
+static void test_tolstring(void)
+{
+  lua_State *L = newL();
+  static const char *setup =
+    "local function ret(v) return function() return v end end\n"
+    "local function mk(f) return setmetatable({}, {__tostring=f}) end\n"
+    "tol_str = mk(ret('S'))\n"
+    "tol_num = mk(ret(42))\n"
+    "tol_num3 = mk(ret(3.0))\n"
+    "tol_nil = mk(ret(nil))\n"
+    "tol_tab = mk(ret({}))\n"
+    "tol_bool = mk(ret(true))\n"
+    "tol_two = mk(function() return 'A','B' end)\n"
+    "tol_err = mk(function() error('E') end)\n"
+    "tol_name = setmetatable({}, {__name='PName'})\n"
+    "tol_name42 = setmetatable({}, {__name=42})\n"
+    "tol_plain = {}\n";
+  if (luaL_dostring(L, setup) != LUA_OK) {
+    printf("FAIL tolstring setup: %s\n", lua_tostring(L, -1));
+    failures++;
+    lua_close(L);
+    return;
+  }
+  check_tols(L, "tol_str", "S");
+  check_tols(L, "tol_num", "42");
+  check_tols(L, "tol_num3", "3.0");
+  check_tols_err(L, "tol_nil", "'__tostring' must return a string");
+  check_tols_err(L, "tol_tab", "'__tostring' must return a string");
+  check_tols_err(L, "tol_bool", "'__tostring' must return a string");
+  check_tols(L, "tol_two", "A");
+  check_tols_err(L, "tol_err", "E");
+  /* __name: a string metafield names the value, a non-string one is ignored. */
+  check_tols_prefix(L, "tol_name", "PName: 0x");
+  check_tols_prefix(L, "tol_name42", "table: 0x");
+  check_tols_prefix(L, "tol_plain", "table: 0x");
+  {
+    lua_getglobal(L, "tol_name");
+    ok(luaL_getmetafield(L, -1, "__name") == LUA_TSTRING,
+       "luaL_getmetafield returns the field type");
+    ok(lua_tostring(L, -1) != NULL && strcmp(lua_tostring(L, -1), "PName") == 0,
+       "luaL_getmetafield leaves the field");
+    lua_pop(L, 2);
+  }
+  /* Base-type metatables: 5.4 consults them before the default rendering. */
+  if (luaL_dostring(L,
+      "getmetatable('').__tostring = function() return 'STR-MM' end\n"
+      "tol_s = 'abc'\n") == LUA_OK) {
+    check_tols(L, "tol_s", "STR-MM");
+  } else {
+    ok(0, "tolstring string base metatable setup");
+  }
+  lua_pop(L, 1);
+  luaL_dostring(L, "getmetatable('').__tostring = nil");
+  lua_pop(L, 1);
+  if (luaL_dostring(L,
+      "debug.setmetatable(1, {__tostring=function() return 2 end})\n"
+      "tol_n7 = 7\n") == LUA_OK) {
+    check_tols(L, "tol_n7", "2");
+  } else {
+    ok(0, "tolstring number base metatable setup");
+  }
+  lua_pop(L, 1);
+  luaL_dostring(L, "debug.setmetatable(1, {__tostring=function() return nil end})");
+  lua_pop(L, 1);
+  check_tols_err(L, "tol_n7", "'__tostring' must return a string");
+  luaL_dostring(L, "debug.setmetatable(1, nil)");
+  lua_pop(L, 1);
+  check_tols(L, "tol_n7", "7");
+  lua_close(L);
+}
+
 static void test_rotate(void)
 {
   lua_State *L = newL();
@@ -1698,6 +1833,7 @@ int main(void)
   if (want("closethread")) test_closethread();
   if (want("oom_pcall")) test_oom_pcall();
   if (want("lauxlib")) test_lauxlib54();
+  if (want("tolstring")) test_tolstring();
   if (want("bare_state")) test_bare_state();
   printf("== capi: %d checks, %d failures ==\n", checks, failures);
   return failures ? 1 : 0;

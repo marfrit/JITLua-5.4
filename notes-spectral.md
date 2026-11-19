@@ -47,3 +47,23 @@ enters; the counter leaks/overflows and the interpreter's bound fires. The
 proper fix is the trace-level counter with an increment AND a matching
 decrement (and an exit near the limit), which was not implemented. The
 recording is reverted again; only the benchmark (838e414e) and this note stay.
+
+## KEEP (compaction 2026-11-19 06:36)
+- Worktree ~/src/LuaJIT-5.4-spectral, branch spectral (integ5 merged, 2aad38af).
+- Commits to keep: a7a617df (spectral-measure.py + notes), f6ce1d07 (corrected
+  tab.meta finding), 1d982c7d (penlight cause note), 838e414e (b5_pcall bench).
+- Reverted recording: 87416a0a ("jit: record top-level pcall/xpcall in traces
+  again") - re-apply with `git revert --no-edit <its revert>` if needed.
+- Penlight cause: tests/test-pretty.lua, pl/pretty.lua:281 (pcall inside a
+  `for ... in` loop) -> "LUA: C stack overflow" under -jon with the
+  `ccallnest == 0` guard; the guard does not count the nesting. Prerequisite
+  for recording pcall/xpcall: a trace-level counter with increment AND
+  decrement (and exit near the limit).
+- Gates: `sh tests/ci-box.sh` AND `sh tests/ci-local.sh --sanitizers-only`,
+  both arches. Only x64-box/arm-box wrappers; NEVER build or test on pica.
+  X64_BOX_HOST only for A/B benchmarks on one box.
+- Commit tagline: "Implemented by DeepSeek-4.1-Flash (cloud); briefed by
+  Claude." + Co-Authored-By lines (noreply@example.invalid). Tests first, then
+  src, then docs.
+- (1) result: stock 2.1 emits the same tab.meta guard; real delta is SLOAD
+  flags (ours RI/TI vs stock CRI/CI) + ~2x traces; gap ~4%, no reduction done.

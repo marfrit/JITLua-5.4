@@ -1775,7 +1775,7 @@ static TRef rec_idx_key(jit_State *J, RecordIndex *ix, IRRef *rbref,
 	} else {
 	  /* Truncating conversion of any FP value; the EQ guard below rejects
 	  ** non-integral keys and keeps the fold narrowing of (i64)(a+b)
-	  ** honest (a rounded double sum fails the guard). IRCONV_ANY is the
+	  ** exact (a rounded double sum fails the guard). IRCONV_ANY is the
 	  ** mode the narrowing fold expects (the assert build caught plain 0,
 	  ** which is the cache-only TOBIT mode). */
 	  TRef i = emitir(IRT(IR_CONV, IRT_I64), key, IRCONV_I64_NUM|IRCONV_ANY);

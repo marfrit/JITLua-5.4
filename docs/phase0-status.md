@@ -300,7 +300,7 @@ Benchmark gate ran (arm-box, four arms) BEFORE 2b: b1/b2 fail with
 "number has no integer representation" because integer literals beyond int32
 are still floats. Measured meanwhile: b3 int32 control ours JIT 46.5 ms vs
 stock 38.1 vs PUC 264; b2b (~2^41) ours 143 ms/8 MB, stock(float) 127.8, PUC 172
--- b2b was NOT honest (values came from a float literal, not boxes).
+-- b2b did NOT measure boxes (values came from a float literal).
 
 IN PROGRESS (edits applied, NOT yet compiled):
 - `lj_bc.h`: new `_(KI64, dst, ___, cdata, ___)` after KCDATA.
@@ -316,9 +316,9 @@ IN PROGRESS (edits applied, NOT yet compiled):
   udata constant breaks string.dump; add a BCDUMP_KGC_I64BOX tag writing the
   int64 bits and reading them back through lj_i64_box.
 - Then: literals test (`lex_01_literals` mode A), full gates both boxes,
-  benchmark gate again (now honest), commit per step.
+  benchmark gate again (now measuring boxes), commit per step.
 
-## Session 10 — step 2b done; benchmark gate measured (honest)
+## Session 10 — step 2b done; benchmark gate measured (on boxes)
 
 Committed `425eaedb` (boxed int64 literals + BC_KI64 + BCDUMP_KGC_I64BOX).
 Both boxes green (47/128/32).

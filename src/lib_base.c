@@ -179,7 +179,10 @@ LJLIB_CF(getfenv)		LJLIB_REC(.)
     if (LJ_FR2) o--;
   }
   fn = &gcval(o)->fn;
-  settabV(L, L->top++, isluafunc(fn) ? tabref(fn->l.env) : tabref(L->env));
+  if (isluafunc(fn))
+    copyTV(L, L->top++, &fn->l.envv);
+  else
+    settabV(L, L->top++, tabref(L->env));
   return 1;
 }
 
@@ -206,6 +209,7 @@ LJLIB_CF(setfenv)
   if (!isluafunc(fn))
     lj_err_caller(L, LJ_ERR_SETFENV);
   setgcref(fn->l.env, obj2gco(t));
+  settabV(L, &fn->l.envv, t);
   lj_gc_objbarrier(L, obj2gco(fn), t);
   setfuncV(L, L->top++, fn);
   return 1;
@@ -423,16 +427,14 @@ static int load_aux(lua_State *L, int status, int envarg)
     if (envarg > 0 && tvisfunc(L->top-1)) {
       GCfunc *fn = funcV(L->top-1);
       cTValue *ev = L->base+envarg-1;
-      if (tvistab(ev)) {
-	GCtab *t = tabV(ev);
-	setgcref(fn->c.env, obj2gco(t));
-	lj_gc_objbarrier(L, fn, t);
-      } else if (tvisnil(ev)) {
-	/* PUC 5.4 loadfile(file,'t',nil): _ENV is nil inside the chunk. */
-	setgcrefnull(fn->c.env);
-      }
+      /* 5.4: any value is a valid _ENV (PUC stores it as the 1st upvalue).
+      ** The table cache fn->l.env is NULL for a non-table value; the
+      ** interpreter and recorder then use the generic index path. */
+      lj_func_setenvv(fn, ev);
+      if (tvisgcv(ev))
+	lj_gc_barrier(L, fn, ev);
       /* 5.4: _ENV reads/writes inside the chunk are the GGET/GSET special
-      ** case on the interned key (VM and recorder); the table itself must
+      ** case on the interned key (VM and recorder); the value itself must
       ** not carry an "_ENV" entry (PUC: _G._ENV == nil, pairs(_G) has none). */
     }
     return 1;

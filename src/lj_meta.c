@@ -140,8 +140,9 @@ static TValue *mmcall(lua_State *L, ASMFunction cont, cTValue *mo,
 
 /* -- C helpers for some instructions, called from assembler VM ----------- */
 
-/* Helper for TGET*. __index chain and metamethod. */
-cTValue *lj_meta_tget(lua_State *L, cTValue *o, cTValue *k)
+/* Helper for TGET*. __index chain and metamethod. isenv selects the 5.4
+** _ENV error wording ("upvalue '_ENV'") on the no-metamethod path. */
+static cTValue *meta_tget(lua_State *L, cTValue *o, cTValue *k, int isenv)
 {
   int loop;
   for (loop = 0; loop < LJ_MAX_IDXCHAIN; loop++) {
@@ -153,6 +154,7 @@ cTValue *lj_meta_tget(lua_State *L, cTValue *o, cTValue *k)
 	  !(mo = lj_meta_fast(L, tabref(t->metatable), MM_index)))
 	return tv;
     } else if (tvisnil(mo = lj_meta_lookup(L, o, MM_index))) {
+      if (isenv) lj_err_envtype(L, o);
       lj_err_optype(L, o, LJ_ERR_OPINDEX);
       return NULL;  /* unreachable */
     }
@@ -166,8 +168,21 @@ cTValue *lj_meta_tget(lua_State *L, cTValue *o, cTValue *k)
   return NULL;  /* unreachable */
 }
 
-/* Helper for TSET*. __newindex chain and metamethod. */
-TValue *lj_meta_tset(lua_State *L, cTValue *o, cTValue *k)
+/* Helper for TGET*. __index chain and metamethod. */
+cTValue *lj_meta_tget(lua_State *L, cTValue *o, cTValue *k)
+{
+  return meta_tget(L, o, k, 0);
+}
+
+/* 5.4: TGET* on a function's non-table _ENV value. */
+cTValue *lj_meta_tget_env(lua_State *L, cTValue *o, cTValue *k)
+{
+  return meta_tget(L, o, k, 1);
+}
+
+/* Helper for TSET*. __newindex chain and metamethod. isenv selects the 5.4
+** _ENV error wording ("upvalue '_ENV'") on the no-metamethod path. */
+static TValue *meta_tset(lua_State *L, cTValue *o, cTValue *k, int isenv)
 {
   TValue tmp;
   int loop;
@@ -192,6 +207,7 @@ TValue *lj_meta_tset(lua_State *L, cTValue *o, cTValue *k)
 	return lj_tab_set(L, t, k);
       }
     } else if (tvisnil(mo = lj_meta_lookup(L, o, MM_newindex))) {
+      if (isenv) lj_err_envtype(L, o);
       lj_err_optype(L, o, LJ_ERR_OPINDEX);
       return NULL;  /* unreachable */
     }
@@ -205,6 +221,18 @@ TValue *lj_meta_tset(lua_State *L, cTValue *o, cTValue *k)
   }
   lj_err_msg(L, LJ_ERR_SETLOOP);
   return NULL;  /* unreachable */
+}
+
+/* Helper for TSET*. __newindex chain and metamethod. */
+TValue *lj_meta_tset(lua_State *L, cTValue *o, cTValue *k)
+{
+  return meta_tset(L, o, k, 0);
+}
+
+/* 5.4: TSET* on a function's non-table _ENV value. */
+TValue *lj_meta_tset_env(lua_State *L, cTValue *o, cTValue *k)
+{
+  return meta_tset(L, o, k, 1);
 }
 
 static cTValue *str2num(lua_State *L, cTValue *o, TValue *n)

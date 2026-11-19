@@ -471,10 +471,12 @@ typedef struct GCupval {
 
 /* -- Function object (closures) ------------------------------------------ */
 
-/* Common header for functions. env should be at same offset in GCudata. */
+/* Common header for functions. env should be at same offset in GCudata.
+** envv is the authoritative 5.4 _ENV value (any type); env is a cache that
+** holds the table iff envv is a table, else NULL (the GGET/GSET fast path). */
 #define GCfuncHeader \
   GCHeader; uint8_t ffid; uint8_t nupvalues; \
-  GCRef env; GCRef gclist; MRef pc
+  GCRef env; GCRef gclist; MRef pc; TValue envv
 
 typedef struct GCfuncC {
   GCfuncHeader;

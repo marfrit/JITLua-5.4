@@ -749,12 +749,12 @@ static void build_subroutines(BuildCtx *ctx)
   |   str PC, SAVE_PC
   |  bl extern lj_meta_tget		// (lua_State *L, TValue *o, TValue *k)
   |  // Returns TValue * (finished) or NULL (metamethod).
-  |  cbz CRET1, >3
+  |  cbz CRET1, ->vmeta_tget_mm
   |  ldr TMP0, [CRET1]
   |  str TMP0, [BASE, RA, lsl #3]
   |  ins_next
   |
-  |3:  // Call __index metamethod.
+  |->vmeta_tget_mm:  // Call __index metamethod.
   |  // BASE = base, L->top = new base, stack = cont/func/t/k
   |   sub TMP1, BASE, #FRAME_CONT
   |  ldr BASE, L->top
@@ -808,12 +808,12 @@ static void build_subroutines(BuildCtx *ctx)
   |  bl extern lj_meta_tset		// (lua_State *L, TValue *o, TValue *k)
   |  // Returns TValue * (finished) or NULL (metamethod).
   |   ldr TMP0, [BASE, RA, lsl #3]
-  |  cbz CRET1, >3
+  |  cbz CRET1, ->vmeta_tset_mm
   |  // NOBARRIER: lj_meta_tset ensures the table is not black.
   |   str TMP0, [CRET1]
   |  ins_next
   |
-  |3:  // Call __newindex metamethod.
+  |->vmeta_tset_mm:  // Call __newindex metamethod.
   |  // BASE = base, L->top = new base, stack = cont/func/t/k/(v)
   |   sub TMP1, BASE, #FRAME_CONT
   |  ldr BASE, L->top
@@ -3533,19 +3533,16 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  ldr LFUNC:CARG1, [BASE, FRAME_FUNC]
     |   mvn RC, RC
     |  and LFUNC:CARG1, CARG1, #LJ_GCVMASK
-    |  ldr TAB:CARG2, LFUNC:CARG1->env
     |   ldr STR:RC, [KBASE, RC, lsl #3]
     |  ldr CARG3, GL->gcroot[GCROOT_ENVSTR]
     |  cmp STR:RC, CARG3			// implicit 5.4 _ENV?
     |  bne >1
     if (op == BC_GGET) {
-      |  cbz TAB:CARG2, >3		// no env (load with env=nil): _ENV is nil
-      |  movn TMP0, #~LJ_TTAB
-      |   add TMP0, TAB:CARG2, TMP0, lsl #47	// tagged env table
-      |  str TMP0, [BASE, RA, lsl #3]
-      |  ins_next
-      |3:
-      |  str TISNIL, [BASE, RA, lsl #3]
+      |  str BASE, L->base
+      |  add CARG2, BASE, RA, lsl #3
+      |   mov CARG1, L
+      |  bl extern lj_func_getenv	// (L, TValue *dst)
+      |  ldr BASE, L->base
       |  ins_next
     } else {
       |  str BASE, L->base
@@ -3556,10 +3553,35 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
       |  ins_next
     }
     |1:
+    |  ldr TAB:CARG2, LFUNC:CARG1->env
+    |  cbz TAB:CARG2, >2			// non-table _ENV: generic path
     if (op == BC_GGET) {
       |  b ->BC_TGETS_Z
     } else {
       |  b ->BC_TSETS_Z
+    }
+    |2:  // non-table _ENV: generic index path with the _ENV error wording
+    |  add CARG2, LFUNC:CARG1, #offsetof(GCfuncL, envv)
+    |  movn CARG4, #~LJ_TSTR
+    |  add CARG4, STR:RC, CARG4, lsl #47
+    |  str CARG4, TMPD
+    |  add CARG3, sp, TMPDofs
+    |  str BASE, L->base
+    |  mov CARG1, L
+    |   str PC, SAVE_PC
+    if (op == BC_GGET) {
+      |  bl extern lj_meta_tget_env	// (L, TValue *o, TValue *k)
+      |  cbz CRET1, ->vmeta_tget_mm
+      |  ldr TMP0, [CRET1]
+      |  str TMP0, [BASE, RA, lsl #3]
+      |  ins_next
+    } else {
+      |  bl extern lj_meta_tset_env	// (L, TValue *o, TValue *k)
+      |   ldr TMP0, [BASE, RA, lsl #3]
+      |  cbz CRET1, ->vmeta_tset_mm
+      |  // NOBARRIER: lj_meta_tset ensures the table is not black.
+      |  str TMP0, [CRET1]
+      |  ins_next
     }
     break;
 

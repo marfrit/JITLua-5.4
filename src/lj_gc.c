@@ -239,7 +239,9 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
 /* Traverse a function. */
 static void gc_traverse_func(global_State *g, GCfunc *fn)
 {
-  gc_markobj(g, tabref(fn->c.env));
+  gc_marktv(g, &fn->c.envv);  /* The 5.4 _ENV value (any type). */
+  if (gcref(fn->c.env) != NULL)  /* Table cache, NULL for a non-table env. */
+    gc_markobj(g, tabref(fn->c.env));
   if (isluafunc(fn)) {
     uint32_t i;
     lj_assertG(fn->l.nupvalues <= funcproto(fn)->sizeuv,

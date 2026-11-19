@@ -1116,6 +1116,13 @@ LJ_NOINLINE void lj_err_optype(lua_State *L, cTValue *o, ErrMsg opm)
   err_msgv(L, LJ_ERR_BADOPRV, opname, tname);
 }
 
+/* Typecheck error for the implicit 5.4 _ENV operand: PUC names the upvalue. */
+LJ_NOINLINE void lj_err_envtype(lua_State *L, cTValue *o)
+{
+  const char *tname = err_typename(L, o);
+  err_msgv(L, LJ_ERR_BADOPRT, err2msg(LJ_ERR_OPINDEX), tname, "upvalue", "_ENV");
+}
+
 /* Typecheck error for ordered comparisons. */
 LJ_NOINLINE void lj_err_comp(lua_State *L, cTValue *o1, cTValue *o2)
 {

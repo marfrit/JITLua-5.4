@@ -745,6 +745,8 @@ static void build_subroutines(BuildCtx *ctx)
   |  cmp RA, 1
   |  jbe >1
   |.endif
+  |  cmp RA, 2
+  |  je ->cont_tailret
   |  mov LFUNC:KBASE, [BASE-16]
   |  cleartp LFUNC:KBASE
   |  mov KBASE, LFUNC:KBASE->pc
@@ -761,6 +763,19 @@ static void build_subroutines(BuildCtx *ctx)
   |  lea RDd, [RBd-3]
   |  jmp ->vm_call_tail
   |.endif
+  |
+  |->cont_tailret:			// Return from a tail-called C function.
+  |  // BASE = caller base, RC = result, RB = meta base.
+  |  // cont_dispatch clobbered RD (RC == RD), so reload nresults+1
+  |  // from MULTRES, which the C/ff return path left there.
+  |  endbr
+  |  mov RA, RC
+  |  sub RA, BASE			// RA = resultofs (bytes).
+  |  mov PC, [BASE-8]			// Caller's own return PC.
+  |  mov RDd, MULTRES
+  |  test PCd, FRAME_TYPE
+  |  jnz ->vm_return			// Non-standard frame (e.g. pcall).
+  |  jmp ->BC_RET_Z			// Make the caller return the C results.
   |
   |->cont_cat:				// BASE = base, RC = result, RB = mbase
   |  endbr
@@ -4593,10 +4608,15 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  mov LFUNC:RB, [RA-16]
     |  checktp_nc LFUNC:RB, LJ_TFUNC, ->vmeta_call
     |->BC_CALLT_Z:
+    |  mov SAVE_PC, PC			// Remember the CALLT pc for the C path.
     |  mov PC, [BASE-8]
     |  test PCd, FRAME_TYPE
     |  jnz >7
     |1:
+    |  mov TMPR, LFUNC:RB
+    |  cleartp TMPR
+    |  cmp byte CFUNC:TMPR->ffid, 0
+    |  jne >9				// C function: keep the caller frame.
     |  mov [BASE-16], LFUNC:RB		// Copy func+tag down, reloaded below.
     |  mov MULTRES, NARGS:RDd
     |  sub NARGS:RDd, 1
@@ -4613,20 +4633,45 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |3:
     |  cleartp LFUNC:RB
     |  mov NARGS:RDd, MULTRES
-    |  cmp byte LFUNC:RB->ffid, 1	// (> FF_C) Calling a fast function?
-    |  ja >5
     |4:
     |  ins_callt
     |
-    |5:  // Tailcall to a fast function.
-    |  test PCd, FRAME_TYPE		// Lua frame below?
-    |  jnz <4
-    |  movzx RAd, PC_RA
-    |  neg RA
-    |  mov LFUNC:KBASE, [BASE+RA*8-32]	// Need to prepare KBASE.
-    |  cleartp LFUNC:KBASE
-    |  mov KBASE, LFUNC:KBASE->pc
-    |  mov KBASE, [KBASE+PC2PROTO(k)]
+    |9:  // Tailcall to a C function: keep the caller frame alive and push a
+    |    // continuation frame (LJ_CONT_TAILRET) above it. The caller returns
+    |    // the C results, but its frame stays in the chain, so error names,
+    |    // levels and hooks see the CALLT position, like PUC 5.4.
+    |    // NB = RA+16: [NB-32]=cont id, [NB-24]=contpc, [NB-16]=func,
+    |    // [NB-8]=delta|FRAME_CONT, args at [NB..].
+    |  lea TMPR, [RA+16]			// TMPR = NB (new C base).
+    |  mov ITYPE, RD			// ITYPE = nargs+1 (kept).
+    |  mov RB, ITYPE
+    |  sub RB, 1				// RB = nargs.
+    |  jz >6
+    |5:  // Move args up by 16 bytes (highest first, no overlap).
+    |  mov RC, [RA+RB*8-8]
+    |  mov [RA+RB*8+8], RC
+    |  sub RB, 1
+    |  jnz <5
+    |6:
+    |  mov RC, [RA-16]			// Copy func up to [NB-16].
+    |  mov [RA], RC
+    |  mov qword [RA-16], LJ_CONT_TAILRET	// [NB-32] = cont id.
+    |  mov RC, SAVE_PC
+    |  mov [RA-8], RC			// [NB-24] = contpc.
+    |  mov RC, TMPR
+    |  sub RC, BASE
+    |  add RC, FRAME_CONT
+    |  mov [RA+8], RC			// [NB-8] = delta | FRAME_CONT.
+    |  mov BASE, TMPR
+    |  mov L:RB, SAVE_L
+    |  mov L:RB->base, BASE
+    |  mov RC, ITYPE
+    |  shl RC, 3
+    |  lea RC, [BASE+RC-8]			// L->top = NB + nargs*8.
+    |  mov L:RB->top, RC
+    |  mov RD, ITYPE			// Restore nargs+1.
+    |  mov LFUNC:RB, [BASE-16]
+    |  cleartp LFUNC:RB
     |  jmp <4
     |
     |7:  // Tailcall from a vararg function.

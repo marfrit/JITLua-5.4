@@ -83,9 +83,17 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   finalizers. Implemented on x64 and arm64; the other backends need the same
   interpreter fast-path guard before they can be trusted for table
   finalizers (`tests/d54/gc_01_tbc_gc.lua`, `gc_02_table_finalizers.lua`).
-- `PENDING` Tail-call error names: LuaJIT reuses the caller frame, so a manual
-  module path reports `string.rep` where PUC reports the short `rep`
-  (`err_02_tailname`; non-tail and pcall paths match).
+- `FIXED` Tail-call error names: a tail call to a C function (fast function
+  or C closure) now keeps the Lua caller frame alive and enters the C function
+  through a new `LJ_CONT_TAILRET` continuation frame that makes the caller
+  return the C results. Error names resolve from the CALLT site, so LuaJIT
+  reports the short `rep`/`move` like PUC 5.4, and `__call` resolving to a C
+  function in tail position names the object (`err_02_tailname`,
+  `err_04_tailcall_c`). Tail calls to Lua functions keep the frame-replacement
+  path (constant stack depth); tail calls to C functions consume Lua stack,
+  bounded by the C-call limit, like PUC. The trace recorder mirrors the same
+  continuation frame, so traces keep recording such tail calls inline; the
+  mechanism and the model layout are in `docs/notes/tailname.md`.
 - `PENDING` `debug.getinfo(1,"t").istailcall` is not true without a call hook;
   PUC reports true (`db.lua` line 619; Fable tail marks need a hook).
 - `IMPL-DEFINED` Inside a `__close` handler on an error path, debug level 2 is

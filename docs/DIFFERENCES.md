@@ -69,6 +69,15 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   `lua_State`. Adding one would need a layout change in `GG_State` and in every
   per-thread allocation, moving the GC object/interior pointer and the assembler
   offsets; not done. Modules using it need a portable side area instead.
+- `FIXED` A state created without the base library (`luaL_newstate()` with no
+  `luaopen_base`) segfaulted in `var_lookup` on any chunk that names a global:
+  the 5.4 `_ENV` special case reads the interned `_ENV` string from
+  `gcroot[GCROOT_ENVSTR]`, which `lib_base` installed only when the base
+  library was opened; `lj_record.c` read the same root. The string is now
+  interned at state creation (`lj_state.c`), so parsing and recording work on
+  bare states. Regression test `tests/capi` `test_bare_state` (reads, writes,
+  loops, `lua_getglobal`/`lua_setglobal`, and a JIT-on hot global loop); the
+  portable PUC 5.4.9 parity check is `tests/capi/bare_state_ref.c`.
 
 ### Known JIT/performance rows (not semantic divergences)
 - `FIXED` arm64 `bit.lshift/rshift/arshift/rol/ror` returned 0 for native and

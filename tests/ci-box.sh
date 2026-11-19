@@ -65,6 +65,7 @@ stage 'tail -12' tests/harness.sh --strict --mode R --corpus tests/d54 --timeout
 echo "=== lib checks ==="
 for j in -joff -jon; do timeout 120 ./src/luajit $j tests/lib/bit-checkint.lua || exit 1; done
 for j in -joff -jon; do timeout 120 ./src/luajit $j tests/lib/ffrec-54.lua || exit 1; done
+for j in -joff -jon; do timeout 120 ./src/luajit $j tests/lib/env-noflush.lua || exit 1; done
 # x64 math.random/negative-int-key JIT bug (known-bad math B): hangs on the
 # buggy build, so bound it.
 for j in -joff -O0 -O3; do timeout 120 ./src/luajit $j tests/lib/math-random-jit.lua || exit 1; done

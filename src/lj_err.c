@@ -988,7 +988,6 @@ LJ_NOINLINE void LJ_FASTCALL lj_err_run(lua_State *L)
 	setstrV(L, top-1, lj_err_str(L, LJ_ERR_ERRERR));
 	L->errnest = 0;
 	L->errnestofs = 0;
-	L->ccallnest = 0;
 	lj_err_throw(L, LUA_ERRERR);
       }
     }

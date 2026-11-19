@@ -21,10 +21,11 @@
 # fork's additions. It needs no VM, no JIT and no buildvm -- it is a fraction
 # of a second, so it belongs in the gate.
 #
-# Scope: the object layout only. The non-GC64 x86_64 build also needs a VM for
-# 32 bit GC references (src/Makefile picks vm_x86.dasc when LJ_FR2 is off),
-# which does not carry the 5.4 port yet; see docs/DIFFERENCES.md, "Platform
-# scope".
+# Scope: the object layout only. A non-GC64 x86_64 build stops in lj_arch.h
+# with a message that names the VM pieces vm_x86.dasc is missing (the 5.4
+# interpreter port for 32 bit GC references is an open ticket, see
+# docs/notes/nogc64-2026-11-19.md); this check bypasses only that message, not
+# the missing VM. Platform scope: docs/DIFFERENCES.md, "Platforms".
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 CC=${CC:-cc}
@@ -79,9 +80,15 @@ FAILED=""
 # src/Makefile forces -DLUAJIT_NUMMODE=2 for every build (5.4 needs both
 # number types and x64 would default to single-number mode), so the check has
 # to set it too -- via the preprocessor here, exactly as CFLAGS would.
+#
+# The non-GC64 arm also sets LUAJIT_GC64LESS_LAYOUT_PROBE: lj_arch.h stops a
+# non-GC64 x86_64 build with a message naming the missing VM pieces (a build
+# that works would need the vm_x86.dasc port). That define skips only this
+# message, so the *object layout* of the configuration can still be compiled
+# and checked here; nothing else in the tree may set it.
 for mode in gc64 nogc64; do
   flags="-DLUAJIT_NUMMODE=2"
-  [ "$mode" = nogc64 ] && flags="$flags -DLUAJIT_DISABLE_GC64"
+  [ "$mode" = nogc64 ] && flags="$flags -DLUAJIT_DISABLE_GC64 -DLUAJIT_GC64LESS_LAYOUT_PROBE"
   printf '%-8s ' "$mode"
   if $CC -c -o "$OUT.o" -I"$ROOT/src" $flags "$OUT.c" 2>"$OUT.err"; then
     cc -o "$OUT.bin" "$OUT.o" 2>>"$OUT.err" && "$OUT.bin" || echo "link failed"

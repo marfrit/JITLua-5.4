@@ -217,6 +217,23 @@
 #define LJ_TARGET_GC64		1
 #elif LJ_TARGET_OSX
 #error "macOS requires GC64 -- don't disable it"
+#elif !defined(LUAJIT_GC64LESS_LAYOUT_PROBE)
+/*
+** JITLua-5.4 implements the 5.4 VM in vm_x64.dasc (GC64) and vm_arm64.dasc.
+** src/Makefile chooses the VM by LJ_FR2, so an x64 build without GC64
+** assembles vm_x86.dasc (the VM for 32 bit GC references) instead, and that VM
+** has no handler for BC_IDIV, BC_KI64, BC_TBC or BC_TBCCLO and no cont_tbc or
+** cont_tailret: such a build used to stop in buildvm with the unrelated-looking
+** 'Error: undefined opcode BC_IDIV'. Name the missing pieces here instead.
+** Platform scope: docs/DIFFERENCES.md, 'Platforms'.
+**
+** The object layout of that configuration is still checked, because the 5.4
+** fork adds fields to GC objects: tests/nogc64-layout.sh ('make layout-check')
+** compiles the GC object headers with and without LUAJIT_DISABLE_GC64. Only
+** that probe may set LUAJIT_GC64LESS_LAYOUT_PROBE, which skips this message
+** and nothing else -- it does not make a non-GC64 build work.
+*/
+#error "x86_64 without GC64 is not supported by JITLua-5.4: the 5.4 interpreter is in vm_x64.dasc, which requires GC64; a non-GC64 x86_64 build would use vm_x86.dasc and lacks BC_IDIV, BC_KI64, BC_TBC, BC_TBCCLO, cont_tbc and cont_tailret. See docs/DIFFERENCES.md (Platforms)."
 #endif
 
 #if !defined(LJ_ABI_BRANCH_TRACK) && (__CET__ & 1) && \

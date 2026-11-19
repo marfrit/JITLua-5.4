@@ -1163,6 +1163,23 @@ void lj_record_call(jit_State *J, BCReg func, ptrdiff_t nargs)
 /* Record tail call. */
 void lj_record_tailcall(jit_State *J, BCReg func, ptrdiff_t nargs)
 {
+  /* A tail call to a C function (directly or via __call) keeps the Lua caller
+  ** frame alive and pushes an LJ_CONT_TAILRET continuation frame in the VM.
+  ** The recorder does not model that continuation frame (it would have to
+  ** synthesize the caller's return after the C function), so bail out and let
+  ** the interpreter run the call. This also keeps the error path in the
+  ** interpreter, which resolves the C function's short name correctly. */
+  {
+    TValue *ftv = &J->L->base[func];
+    if (tvisfunc(ftv)) {
+      if (!isluafunc(funcV(ftv)))
+	lj_trace_err(J, LJ_TRERR_NYIRETL);
+    } else {
+      cTValue *mo = lj_meta_lookup(J->L, ftv, MM_call);
+      if (!mo || !tvisfunc(mo) || !isluafunc(funcV(mo)))
+	lj_trace_err(J, LJ_TRERR_NYIRETL);
+    }
+  }
   rec_call_setup(J, func, nargs);
   if (frame_isvarg(J->L->base - 1)) {
     BCReg cbase = (BCReg)frame_delta(J->L->base - 1);
@@ -1314,6 +1331,12 @@ void lj_record_ret(jit_State *J, BCReg rbase, ptrdiff_t gotresults)
       }
     } else if (cont == lj_cont_tbc) {
       lj_trace_err(J, LJ_TRERR_NYIRETL);  /* 5.4 __close return: not recorded. */
+    } else if (frame_contv(frame) == LJ_CONT_TAILRET) {
+      /* A tail call to a C function keeps the caller frame and pushes an
+      ** LJ_CONT_TAILRET continuation frame in the VM. lj_record_tailcall()
+      ** bails out on such a call, so this is a defensive guard against
+      ** mis-recording the continuation frame. */
+      lj_trace_err(J, LJ_TRERR_NYIRETL);
     } else if (cont == lj_cont_nop) {
       /* Nothing to do here. */
     } else if (cont == lj_cont_cat) {

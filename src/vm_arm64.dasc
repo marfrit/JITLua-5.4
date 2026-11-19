@@ -691,6 +691,8 @@ static void build_subroutines(BuildCtx *ctx)
   |.endif
   |  ldr CARG3, LFUNC:CARG3->pc
   |  ldr KBASE, [CARG3, #PC2PROTO(k)]
+  |  cmp CARG1, #2
+  |  beq ->cont_tailret
   |  // BASE = base, RA = resultptr, CARG4 = meta base
   |    br_auth CARG1
   |
@@ -702,6 +704,16 @@ static void build_subroutines(BuildCtx *ctx)
   |   sub RC, CARG4, BASE
   |  b ->vm_call_tail
   |.endif
+  |
+  |->cont_tailret:			// Return from a tail-called C function.
+  |  // RB = caller base, RA = resultptr, RC = (nresults+1)*8.
+  |  bti_jump
+  |  mov BASE, RB			// Restore the caller base.
+  |  ldr PC, [BASE, FRAME_PC]		// Caller's own return PC.
+  |   str RCw, SAVE_MULTRES
+  |  ands CARG1, PC, #FRAME_TYPE
+  |  bne ->vm_return			// Non-standard frame (e.g. pcall).
+  |  b ->BC_RET_Z			// Make the caller return the C results.
   |
   |->cont_cat:				// RA = resultptr, CARG4 = meta base
   |  bti_jump
@@ -3970,35 +3982,57 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  ldr TMP1, [RA], #16
     |   sub NARGS8:RC, NARGS8:RC, #8
     |  checktp CARG3, TMP1, LJ_TFUNC, ->vmeta_callt
+    |   str PC, SAVE_PC			// Remember the CALLT pc.
     |  ldr PC, [BASE, FRAME_PC]
     |->BC_CALLT2_Z:
     |   mov RB, #0
-    |   ldrb TMP2w, LFUNC:CARG3->ffid
     |  tst PC, #FRAME_TYPE
     |  bne >7
     |1:
-    |  str TMP1, [BASE, FRAME_FUNC]	// Copy function down, but keep PC.
-    |  cbz NARGS8:RC, >3
+    |  ldrb TMP2w, LFUNC:CARG3->ffid
+    |  cbz TMP2w, >2
+    |  b >9				// C function: keep the caller frame.
     |2:
+    |  str TMP1, [BASE, FRAME_FUNC]	// Copy function down, but keep PC.
+    |  cbz NARGS8:RC, >4
+    |3:
     |  ldr TMP0, [RA, RB]
     |   add TMP1, RB, #8
     |   cmp TMP1, NARGS8:RC
     |  str TMP0, [BASE, RB]
     |    mov RB, TMP1
-    |   bne <2
-    |3:
-    |  cmp TMP2, #1			// (> FF_C) Calling a fast function?
-    |  bhi >5
+    |   bne <3
     |4:
     |  ins_callt
     |
-    |5:  // Tailcall to a fast function with a Lua frame below.
-    |  ldrb RAw, [PC, #-4+OFS_RA]
-    |  sub CARG1, BASE, RA, lsl #3
-    |  ldr LFUNC:CARG1, [CARG1, #-32]
-    |  and LFUNC:CARG1, CARG1, #LJ_GCVMASK
-    |  ldr CARG1, LFUNC:CARG1->pc
-    |  ldr KBASE, [CARG1, #PC2PROTO(k)]
+    |9:  // Tailcall to a C function: keep the caller frame alive and push a
+    |    // continuation frame (LJ_CONT_TAILRET) above it. The caller returns
+    |    // the C results, but its frame stays in the chain, so error names,
+    |    // levels and hooks see the CALLT position, like PUC 5.4.
+    |    // NB = RA+16: [NB-32]=cont id, [NB-24]=contpc, [NB-16]=func,
+    |    // [NB-8]=delta|FRAME_CONT, args at [NB..].
+    |  add TMP3, RA, #16			// TMP3 = NB (new C base).
+    |  cbz NARGS8:RC, >6
+    |  sub TMP0, RC, #8			// TMP0 = (nargs-1)*8.
+    |5:  // Move args up by 16 bytes (highest first, no overlap).
+    |  ldr TMP2, [RA, TMP0]
+    |  add ITYPE, TMP0, #16
+    |  str TMP2, [RA, ITYPE]
+    |  subs TMP0, TMP0, #8
+    |  bge <5
+    |6:
+    |  str TMP1, [RA]			// [NB-16] = func.
+    |  mov TMP0, #LJ_CONT_TAILRET
+    |  str TMP0, [RA, #-16]		// [NB-32] = cont id.
+    |  ldr TMP0, SAVE_PC
+    |  str TMP0, [RA, #-8]			// [NB-24] = contpc.
+    |  sub TMP0, TMP3, BASE
+    |  add TMP0, TMP0, #FRAME_CONT
+    |  str TMP0, [RA, #8]			// [NB-8] = delta | FRAME_CONT.
+    |  mov BASE, TMP3
+    |  str BASE, L->base
+    |  add TMP0, BASE, RC
+    |  str TMP0, L->top
     |  b <4
     |
     |7:  // Tailcall from a vararg function.

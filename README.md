@@ -25,19 +25,17 @@ Status as measured, not a compatibility claim:
   of A+B+R is **220 PASS / 0 FAIL / 5 XFAIL**; C API checks **204 + 14**.
 - Full corpus (PUC 5.4.9 test suite plus `tests/d54`) with `--strict`, the
   exact command of the public CI: **276 PASS / 0 FAIL / 9 XFAIL / 12 SKIP /
-  0 TIMEOUT**. Every XFAIL is a known-bad entry with its reason in
-  `tests/known-bad.tsv`.
-- The remaining known gaps and deliberate divergences are recorded in
-  [docs/DIFFERENCES.md](docs/DIFFERENCES.md) and
-  [tests/known-bad.tsv](tests/known-bad.tsv). Open items include the `__call`
-  chain in the `calls.lua` corpus, tail-call error names, `debug.getinfo(...).istailcall` without a hook, a private dump
-  format, and implementation-defined table/GC edges.
-- Open performance items: `heavy.lua` requires a box above 8 GiB; classic
-  benchmark runs show remaining gaps in deltablue, x64 spectral-norm and x64
-  k-nucleotide
-  ([docs/perf-regression-2026-11-17.md](docs/perf-regression-2026-11-17.md)).
-- **Not yet covered:** the no-op `lua_setcstacklimit` and the `__call`
-  chain VM work. See the two files above for the exact list.
+  0 TIMEOUT**. Every XFAIL has its reason in one of two lists:
+  [tests/known-bad.tsv](tests/known-bad.tsv) for real defects, and
+  [tests/known-different.tsv](tests/known-different.tsv) for deliberate or
+  implementation-defined differences.
+- Known defects (known-bad.tsv): the `__call` chain in the `calls.lua`
+  corpus, `debug.getinfo(...).istailcall` without a hook, and the C-call
+  nesting count across coroutines.
+- Known differences (known-different.tsv, all described in
+  [docs/DIFFERENCES.md](docs/DIFFERENCES.md)): a private bytecode dump format,
+  the border of runtime-built sparse tables, LuaJIT's maximum table array size
+  (`heavy.lua`), and the inherited LuaJIT 3.0 short-function syntax `->`.
 
 ## Build
 

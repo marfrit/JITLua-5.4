@@ -2,7 +2,7 @@
 
 User-facing list of deliberate divergences and known pending differences.
 Every entry is recorded in this repository (MISSION.md, docs/phase0-status.md,
-tests/known-bad.tsv, docs/ffi-int-semantics.md). Features that are implemented
+tests/known-bad.tsv, tests/known-different.tsv, docs/ffi-int-semantics.md). Features that are implemented
 with PUC parity are not listed.
 
 Status tags: `FORK` (deliberate fork decision), `IMPL-DEFINED` (the 5.4 manual
@@ -181,7 +181,7 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   memory" at `#a=134217728` (peak ~2.0 GiB RSS) while LuaJIT stops with
   `heavy.lua:154: table overflow` at `#a=201326592` (peak ~3.3 GiB), and the
   `collectgarbage` byte counts differ in every mode. Excluded from the default
-  corpus; see `tests/known-bad.tsv`.
+  corpus; see `tests/known-different.tsv`.
 - `PENDING` Classic benchmarks slower than stock 2.1 (>10%): deltablue both
   arches (missing-metamethod trace loss), k-nucleotide x64
   (`__index`/string-key path); see `docs/perf-regression-2026-11-17.md` and

@@ -7,6 +7,10 @@
 #define _LJ_DEF_H
 
 #include "lua.h"
+/* The limits below depend on LJ_GC64, which lj_arch.h defines. LuaJIT
+** historically included lj_def.h before lj_arch.h, so include it here as
+** well (the include guard makes a later include a no-op). */
+#include "lj_arch.h"
 
 #if defined(_MSC_VER) && (_MSC_VER < 1700)
 /* Old MSVC is stuck in the last century and doesn't have C99's stdint.h. */
@@ -57,8 +61,18 @@ typedef unsigned int uintptr_t;
 
 #define LJ_MAX_STRTAB	(1<<26)		/* Max. string table size. */
 #define LJ_MAX_HBITS	26		/* Max. hash bits. */
+#if LJ_GC64
+/* PUC 5.4 MAXABITS is 31. The array part limit is 2^31-1, not 2^31: asize
+** itself has to stay a positive int32, because the JIT loads it as an int
+** (IRFL_TAB_ASIZE) and constant-folds it; every array index or computed
+** length then still fits int32, and a key at INT_MAX simply stays in the
+** hash part instead of needing a 16 GiB array. */
+#define LJ_MAX_ABITS	31		/* Max. bits of array key. */
+#define LJ_MAX_ASIZE	((1u<<31)-1)	/* Max. array part size. */
+#else
 #define LJ_MAX_ABITS	28		/* Max. bits of array key. */
 #define LJ_MAX_ASIZE	((1<<(LJ_MAX_ABITS-1))+1)  /* Max. array part size. */
+#endif
 #define LJ_MAX_COLOSIZE	16		/* Max. elems for colocated array. */
 
 #define LJ_MAX_LINE	LJ_MAX_MEM32	/* Max. source code line number. */

@@ -116,7 +116,11 @@ XCFLAGS=
 # LJ_NUMMODE_SINGLE, so forcing 2 is always legal.
 XCFLAGS+= -DLUAJIT_NUMMODE=2
 #
-# Disable LJ_GC64 mode for x64.
+# Disable LJ_GC64 mode for x64. Not supported by JITLua-5.4: the 5.4 VM is
+# written for GC64 (vm_x64.dasc), and a non-GC64 x64 build would assemble
+# vm_x86.dasc, which lacks the 5.4 bytecodes and continuations. lj_arch.h stops
+# it with a message. The object layout of that configuration is still checked:
+# make layout-check.
 #XCFLAGS+= -DLUAJIT_DISABLE_GC64
 #
 ##############################################################################

@@ -178,6 +178,14 @@ check: $(INSTALL_DEP)
 clean:
 	$(MAKE) -C src clean
 
-.PHONY: all install amalg check clean
+# Object-layout check for the two x86_64 reference layouts: the default (GC64)
+# and the one selected by CFLAGS=-DLUAJIT_DISABLE_GC64 (32 bit GC references).
+# Compiles one header-only translation unit in each mode, no VM, no JIT. The
+# 5.4 fork adds fields to GC objects, so the lj_obj.h layout asserts must be
+# evaluated in both; only one of them is ever built here.
+layout-check:
+	@sh tests/nogc64-layout.sh
+
+.PHONY: all install amalg check layout-check clean
 
 ##############################################################################

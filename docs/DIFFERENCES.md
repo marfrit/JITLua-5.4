@@ -37,13 +37,14 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   bounded at PUC's LUAI_MAXCCALLS (200) with "C stack overflow" and a
   repeatedly erroring message handler ends in "error in error handling"
   (`tests/d54/err_04_ccall_bound.lua`).
-- `PENDING` pcall/xpcall are not recorded in traces (`recff_pcall`/
-  `recff_xpcall` abort the trace): a compiled pcall bypasses the fast-path
-  C-call counter, so a recursive pcall/error cascade in a trace would not be
-  bounded. A hot loop containing pcall therefore falls back to the
-  interpreter and is blacklisted (a performance regression against stock 2.1;
-  the classic benchmark set does not use pcall). A trace-level C-call counter
-  is future work.
+- `PENDING` pcall/xpcall are recorded in traces only at the top level: a
+  compiled pcall bypasses the interpreter fast path that bounds the C-call
+  nesting, so `recff_pcall`/`recff_xpcall` emit a `ccallnest == 0` guard and
+  a nested or recursive pcall exits the trace to the interpreter, where the
+  bound applies. A hot loop with a top-level pcall/xpcall compiles again
+  (`tests/bench/b5_pcall.lua`: x64 2M iterations, pcall 150->44 ms, xpcall
+  150->2.9 ms). A trace-level C-call counter that also covers nested pcall is
+  future work.
 - `IMPL-DEFINED` Sparse-table border for runtime-built tables may differ: 5.4
   allows any border; LuaJIT's array-growth policy differs from PUC's alimit hint
   (`tbl_03_border_divergence`).

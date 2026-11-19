@@ -30,6 +30,87 @@
 #include "lj_vm.h"
 #include "lj_vmevent.h"
 
+/* Optional GC pause instrumentation (measurement builds only). Compile with
+** -DLUAJIT_GC_STATS. Nothing below is compiled in a default build.
+*/
+#ifdef LUAJIT_GC_STATS
+#include <stdio.h>
+#include <stdint.h>
+#include <sys/time.h>
+
+typedef struct GCStats {
+  uint64_t steps, cycles, fullgc, atomic_calls;
+  uint64_t step_ns, step_max_ns, full_ns, full_max_ns;
+  uint64_t atomic_ns, atomic_max_ns;
+  uint32_t step_hist[64], full_hist[64], atomic_hist[64];
+} GCStats;
+
+static GCStats gcstats;
+
+static uint64_t gcstats_now(void)
+{
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  return (uint64_t)tv.tv_sec * 1000000000ull + (uint64_t)tv.tv_usec * 1000ull;
+}
+
+/* Log2 histogram: bucket b holds durations in [2^b, 2^(b+1)) nanoseconds. */
+static void gcstats_add(uint32_t *hist, uint64_t ns)
+{
+  int b = 0;
+  if (ns == 0) ns = 1;
+  while (ns > 1 && b < 63) { ns >>= 1; b++; }
+  hist[b]++;
+}
+
+static double gcstats_pct(const uint32_t *hist, uint64_t total, double p)
+{
+  uint64_t want, cum = 0;
+  int b;
+  if (total == 0) return 0.0;
+  want = (uint64_t)(p * (double)total);
+  if (want == 0) want = 1;
+  for (b = 0; b < 64; b++) {
+    cum += hist[b];
+    if (cum >= want) return (double)(1ull << (b + 1)) / 1000.0;
+  }
+  return 0.0;
+}
+
+static void __attribute__((destructor)) gcstats_dump(void)
+{
+  fprintf(stderr,
+    "GCSTATS steps=%llu cycles=%llu full=%llu atomic=%llu "
+    "step_total_us=%.3f step_p50_us=%.3f step_p99_us=%.3f step_max_us=%.3f "
+    "full_total_us=%.3f full_p99_us=%.3f full_max_us=%.3f "
+    "atomic_total_us=%.3f atomic_p50_us=%.3f atomic_p99_us=%.3f atomic_max_us=%.3f\n",
+    (unsigned long long)gcstats.steps, (unsigned long long)gcstats.cycles,
+    (unsigned long long)gcstats.fullgc, (unsigned long long)gcstats.atomic_calls,
+    (double)gcstats.step_ns / 1000.0,
+    gcstats_pct(gcstats.step_hist, gcstats.steps, 0.50),
+    gcstats_pct(gcstats.step_hist, gcstats.steps, 0.99),
+    (double)gcstats.step_max_ns / 1000.0,
+    (double)gcstats.full_ns / 1000.0,
+    gcstats_pct(gcstats.full_hist, gcstats.fullgc, 0.99),
+    (double)gcstats.full_max_ns / 1000.0,
+    (double)gcstats.atomic_ns / 1000.0,
+    gcstats_pct(gcstats.atomic_hist, gcstats.atomic_calls, 0.50),
+    gcstats_pct(gcstats.atomic_hist, gcstats.atomic_calls, 0.99),
+    (double)gcstats.atomic_max_ns / 1000.0);
+}
+
+#define GCSTATS_STEP_RET(v) do { \
+  uint64_t _t = gcstats_now() - gcstats_t0; \
+  gcstats.steps++; gcstats.step_ns += _t; \
+  if (_t > gcstats.step_max_ns) gcstats.step_max_ns = _t; \
+  gcstats_add(gcstats.step_hist, _t); \
+  if ((v) == 1) gcstats.cycles++; \
+  return (v); \
+} while (0)
+#else
+#define GCSTATS_STEP_RET(v) return (v)
+#endif
+
 #define GCSTEPSIZE	1024u
 #define GCSWEEPMAX	40
 #define GCSWEEPCOST	10
@@ -693,7 +774,18 @@ static size_t gc_onestep(lua_State *L)
   case GCSatomic:
     if (tvref(g->jit_base))  /* Don't run atomic phase on trace. */
       return LJ_MAX_MEM;
+#ifdef LUAJIT_GC_STATS
+    {
+      uint64_t t0 = gcstats_now();
+      atomic(g, L);
+      uint64_t dt = gcstats_now() - t0;
+      gcstats.atomic_calls++; gcstats.atomic_ns += dt;
+      if (dt > gcstats.atomic_max_ns) gcstats.atomic_max_ns = dt;
+      gcstats_add(gcstats.atomic_hist, dt);
+    }
+#else
     atomic(g, L);
+#endif
     g->gc.state = GCSsweepstring;  /* Start of sweep phase. */
     g->gc.sweepstr = 0;
     return 0;
@@ -750,6 +842,9 @@ int LJ_FASTCALL lj_gc_step(lua_State *L)
   global_State *g = G(L);
   GCSize lim;
   int32_t ostate = g->vmstate;
+#ifdef LUAJIT_GC_STATS
+  uint64_t gcstats_t0 = gcstats_now();
+#endif
   setvmstate(g, GC);
   lim = (GCSTEPSIZE/100) * g->gc.stepmul;
   if (lim == 0)
@@ -761,18 +856,18 @@ int LJ_FASTCALL lj_gc_step(lua_State *L)
     if (g->gc.state == GCSpause) {
       g->gc.threshold = (g->gc.estimate/100) * g->gc.pause;
       g->vmstate = ostate;
-      return 1;  /* Finished a GC cycle. */
+      GCSTATS_STEP_RET(1);  /* Finished a GC cycle. */
     }
   } while (sizeof(lim) == 8 ? ((int64_t)lim > 0) : ((int32_t)lim > 0));
   if (g->gc.debt < GCSTEPSIZE) {
     g->gc.threshold = g->gc.total + GCSTEPSIZE;
     g->vmstate = ostate;
-    return -1;
+    GCSTATS_STEP_RET(-1);
   } else {
     g->gc.debt -= GCSTEPSIZE;
     g->gc.threshold = g->gc.total;
     g->vmstate = ostate;
-    return 0;
+    GCSTATS_STEP_RET(0);
   }
 }
 
@@ -802,6 +897,9 @@ void lj_gc_fullgc(lua_State *L)
 {
   global_State *g = G(L);
   int32_t ostate = g->vmstate;
+#ifdef LUAJIT_GC_STATS
+  uint64_t gcstats_t0 = gcstats_now();
+#endif
   setvmstate(g, GC);
   if (g->gc.state <= GCSatomic) {  /* Caught somewhere in the middle. */
     setmref(g->gc.sweep, &g->gc.root);  /* Sweep everything (preserving it). */
@@ -820,6 +918,15 @@ void lj_gc_fullgc(lua_State *L)
   do { gc_onestep(L); } while (g->gc.state != GCSpause);
   g->gc.threshold = (g->gc.estimate/100) * g->gc.pause;
   g->vmstate = ostate;
+#ifdef LUAJIT_GC_STATS
+  {
+    uint64_t dt = gcstats_now() - gcstats_t0;
+    gcstats.fullgc++; gcstats.cycles++;
+    gcstats.full_ns += dt;
+    if (dt > gcstats.full_max_ns) gcstats.full_max_ns = dt;
+    gcstats_add(gcstats.full_hist, dt);
+  }
+#endif
 }
 
 /* -- Write barriers ------------------------------------------------------ */

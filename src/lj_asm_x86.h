@@ -174,7 +174,10 @@ static void asm_fusearef(ASMState *as, IRIns *ir, RegSet allow)
   lj_assertA(ir->o == IR_AREF, "expected AREF");
   as->mrm.base = (uint8_t)ra_alloc1(as, asm_fuseabase(as, ir->op1), allow);
   irx = IR(ir->op2);
-  if (irref_isk(ir->op2)) {
+  /* A constant index is fused as a displacement only if 8*index fits one:
+  ** under LJ_GC64 the array part may have up to 2^31-1 slots. */
+  if (irref_isk(ir->op2) &&
+      checki32((int64_t)as->mrm.ofs + 8*(int64_t)irx->i)) {
     as->mrm.ofs += 8*irx->i;
     as->mrm.idx = RID_NONE;
   } else {

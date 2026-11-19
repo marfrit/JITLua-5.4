@@ -186,9 +186,10 @@ static Reg asm_fuseahuref(ASMState *as, IRRef ref, int32_t *ofsp, RegSet allow,
 	  IRRef tab = IR(ir->op1)->op1;
 	  int32_t ofs = asm_fuseabase(as, tab);
 	  IRRef refa = ofs ? tab : ir->op1;
-	  ofs += 8*IR(ir->op2)->i;
-	  if (emit_checkofs(ins, ofs)) {
-	    *ofsp = ofs;
+	  /* 64 bit: the array part may have up to 2^31-1 slots. */
+	  int64_t ofs64 = (int64_t)ofs + 8*(int64_t)IR(ir->op2)->i;
+	  if (emit_checkofs(ins, ofs64)) {
+	    *ofsp = (int32_t)ofs64;
 	    return ra_alloc1(as, refa, allow);
 	  }
 	} else {
@@ -785,7 +786,8 @@ static void asm_aref(ASMState *as, IRIns *ir)
     IRRef tab = IR(ir->op1)->op1;
     int32_t ofs = asm_fuseabase(as, tab);
     IRRef refa = ofs ? tab : ir->op1;
-    uint32_t k = emit_isk12(ofs + 8*IR(ir->op2)->i);
+    /* 64 bit: the array part may have up to 2^31-1 slots. */
+    uint32_t k = emit_isk12((int64_t)ofs + 8*(int64_t)IR(ir->op2)->i);
     if (k) {
       base = ra_alloc1(as, refa, RSET_GPR);
       emit_dn(as, A64I_ADDx^k, dest, base);

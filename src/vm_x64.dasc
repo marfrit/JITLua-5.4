@@ -4289,7 +4289,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |.endif
     |  cmp RCd, TAB:RB->asize		// Takes care of unordered, too.
     |  jae ->vmeta_tgetv		// Not in array part? Use fallback.
-    |  shl RCd, 3
+    |  mov RCd, RCd			// Drop the tag: 64 bit index scaling.
+    |  shl RC, 3
     |  add RC, TAB:RB->array
     |  // Get array slot.
     |  mov ITYPE, [RC]
@@ -4356,7 +4357,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  checktab TAB:RB, ->vmeta_tgetb
     |  cmp RCd, TAB:RB->asize
     |  jae ->vmeta_tgetb
-    |  shl RCd, 3
+    |  shl RC, 3			// RC is zero-extended: 64 bit scaling.
     |  add RC, TAB:RB->array
     |  // Get array slot.
     |  mov ITYPE, [RC]
@@ -4385,7 +4386,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |.endif
     |  cmp RCd, TAB:RB->asize
     |  jae ->vmeta_tgetr		// Not in array part? Use fallback.
-    |  shl RCd, 3
+    |  shl RC, 3			// RC is zero-extended: 64 bit scaling.
     |  add RC, TAB:RB->array
     |  // Get array slot.
     |->BC_TGETR_Z:
@@ -4415,7 +4416,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |.endif
     |  cmp RCd, TAB:RB->asize		// Takes care of unordered, too.
     |  jae ->vmeta_tsetv
-    |  shl RCd, 3
+    |  mov RCd, RCd			// Drop the tag: 64 bit index scaling.
+    |  shl RC, 3
     |  add RC, TAB:RB->array
     |  cmp aword [RC], LJ_TNIL
     |  je >3				// Previous value is nil?
@@ -4516,7 +4518,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  checktab TAB:RB, ->vmeta_tsetb
     |  cmp RCd, TAB:RB->asize
     |  jae ->vmeta_tsetb
-    |  shl RCd, 3
+    |  shl RC, 3			// RC is zero-extended: 64 bit scaling.
     |  add RC, TAB:RB->array
     |  cmp aword [RC], LJ_TNIL
     |  je >3				// Previous value is nil?
@@ -4554,7 +4556,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |2:
     |  cmp RCd, TAB:RB->asize
     |  jae ->vmeta_tsetr
-    |  shl RCd, 3
+    |  mov RCd, RCd			// Drop the tag: 64 bit index scaling.
+    |  shl RC, 3
     |  add RC, TAB:RB->array
     |  // Set array slot.
     |->BC_TSETR_Z:
@@ -4584,7 +4587,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  cmp RDd, TAB:RB->asize
     |  ja >5				// Doesn't fit into array part?
     |  sub RDd, TMPRd
-    |  shl TMPRd, 3
+    |  shl TMPR, 3			// TMPR is zero-extended: 64 bit scaling.
     |  add TMPR, TAB:RB->array
     |3:  // Copy result slots to table.
     |  mov RB, [RA]

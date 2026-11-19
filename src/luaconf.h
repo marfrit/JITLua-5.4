@@ -101,6 +101,11 @@
 #define LUAI_MAXCSTACK	8000	/* Max. # of stack slots for a C func (<10K). */
 #define LUAI_GCPAUSE	200	/* Pause GC until memory is at 200%. */
 #define LUAI_GCMUL	200	/* Run GC at 200% of allocation speed. */
+/* Opt-in memory-friendly policy (LUAJIT_GC / -G): collect at 100% live.
+** Same step speed as the default, so only the pause changes.
+** See docs/gc-newgen-plan.md, Stage 0(a), and docs/DIFFERENCES.md. */
+#define LUAI_GCMEM_PAUSE	100
+#define LUAI_GCMEM_MUL		200
 #define LUA_MAXCAPTURES	32	/* Max. pattern captures. */
 
 /* Raw per-thread memory area reachable through lua_getextraspace (Lua 5.4). */

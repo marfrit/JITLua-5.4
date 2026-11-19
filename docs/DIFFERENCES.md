@@ -205,3 +205,11 @@ allows it / observable is implementation-defined), `PENDING` (known gap on
   optimizations remain; 5.4 pattern behaviors are covered by `str_03_patterns`.
 - `EXTENSION` `string.dump` bytecode format and `-b`/`bcsave` are
   LuaJIT-specific; `dump_03_version` records the fork format.
+- `EXTENSION` GC policy mode `LUAJIT_GC=speed|memory` (`src/lib_aux.c`,
+  `luaL_newstate`, so every embedder honours it) and the equivalent
+  `luajit -G speed|memory` option; `-G` overrides the environment, `-E`
+  ignores it, unknown values are ignored silently. `memory` sets pause 100 /
+  stepmul 200 (the Stage 0(a) row in `docs/gc-newgen-plan.md`); `speed` is the
+  unchanged default 200/200. Runtime `collectgarbage("setpause" /
+  "setstepmul")` overrides either. The default build is byte-for-byte the same
+  policy as stock LuaJIT 2.1.

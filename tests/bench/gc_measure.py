@@ -100,6 +100,7 @@ def arms():
     """Timing arms and stats arms.  A missing stats binary drops that arm."""
     t = [
         ("ours", "ours", [str(OURS), "-jon"]),
+        ("ours-memory", "ours", [str(OURS), "-G", "memory", "-jon"]),
         ("ours-defer", "ours", [str(OURS), "-jon", "-e", DEFER]),
         ("ours-pause100", "ours", [str(OURS), "-jon", "-e",
                                    'collectgarbage("setpause",100)']),
@@ -395,7 +396,7 @@ def print_workload(s):
               "-" if r["maxrss_kb"] is None else "%.1f" % (r["maxrss_kb"] / 1024.0),
               ("%d (single)" % r["n"]) if r["n"] == 1 else str(r["n"])))
     for base, defer in (("ours", "ours-defer"), ("stock", "stock-defer"),
-                        ("ours", "ours-pause100")):
+                        ("ours", "ours-pause100"), ("ours", "ours-memory")):
         if base in s["rows"] and defer in s["rows"]:
             b = s["rows"][base]; d = s["rows"][defer]
             if b["wall_ms"] and d["wall_ms"]:

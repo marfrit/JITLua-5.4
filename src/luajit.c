@@ -54,6 +54,7 @@ static void signal_set(int sig, void (*h)(int))
 
 static lua_State *globalL = NULL;
 static const char *progname = LUA_PROGNAME;
+static const char *gcmode_opt = NULL;  /* -G option (JITLua-5.4 extension). */
 static char *empty_argv[2] = { NULL, NULL };
 
 #if !LJ_TARGET_CONSOLE
@@ -86,6 +87,7 @@ static void print_usage(void)
   "  -b ...    Save or list bytecode.\n"
   "  -j cmd    Perform LuaJIT control command.\n"
   "  -O[opt]   Control LuaJIT optimizations.\n"
+  "  -G mode   Set the GC policy: " LUA_QL("speed") " (default) or " LUA_QL("memory") ".\n"
   "  -i        Enter interactive mode after executing " LUA_QL("script") ".\n"
   "  -v        Show version information.\n"
   "  -E        Ignore environment variables.\n"
@@ -481,6 +483,16 @@ static int collectargs(char **argv, int *flags)
       }
       break;
     case 'O': break;  /* LuaJIT extension */
+    case 'G':  /* JITLua-5.4 extension: GC policy mode. */
+      *flags |= FLAGS_OPTION;
+      if (argv[i][2] == '\0') {
+	i++;
+	if (argv[i] == NULL) return -1;
+	gcmode_opt = argv[i];
+      } else {
+	gcmode_opt = argv[i] + 2;
+      }
+      break;
     case 'b':  /* LuaJIT extension */
       if (*flags) return -1;
       *flags |= FLAGS_EXEC;
@@ -535,6 +547,9 @@ static int runargs(lua_State *L, char **argv, int argn)
       if (dojitopt(L, argv[i] + 2))
 	return 1;
       break;
+    case 'G':  /* JITLua-5.4 extension: value consumed, applied in pmain. */
+      if (argv[i][2] == '\0') i++;
+      break;
     case 'b':  /* LuaJIT extension. */
       return dobytecode(L, argv+i);
     default: break;
@@ -565,6 +580,20 @@ static struct Smain {
   int status;
 } smain;
 
+/* Apply a GC policy mode by name.  Unknown names are ignored silently; the
+** runtime collectgarbage() settings still override this afterwards. */
+static void apply_gcmode(lua_State *L, const char *mode)
+{
+  if (mode == NULL) return;
+  if (strcmp(mode, "memory") == 0) {
+    lua_gc(L, LUA_GCSETPAUSE, LUAI_GCMEM_PAUSE);
+    lua_gc(L, LUA_GCSETSTEPMUL, LUAI_GCMEM_MUL);
+  } else if (strcmp(mode, "speed") == 0) {
+    lua_gc(L, LUA_GCSETPAUSE, LUAI_GCPAUSE);
+    lua_gc(L, LUA_GCSETSTEPMUL, LUAI_GCMUL);
+  }
+}
+
 static int pmain(lua_State *L)
 {
   struct Smain *s = &smain;
@@ -579,6 +608,15 @@ static int pmain(lua_State *L)
     print_usage();
     s->status = 1;
     return 0;
+  }
+
+  /* GC policy mode: -G overrides LUAJIT_GC, -E ignores LUAJIT_GC.  The
+  ** environment variable was already applied by luaL_newstate() in
+  ** lua_open(); do this before the collector is restarted below. */
+  if (gcmode_opt != NULL) {
+    apply_gcmode(L, gcmode_opt);
+  } else if ((flags & FLAGS_NOENV)) {
+    apply_gcmode(L, "speed");
   }
 
   if ((flags & FLAGS_NOENV)) {

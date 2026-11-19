@@ -597,10 +597,13 @@ static void LJ_FASTCALL recff_xpairs(jit_State *J, RecordFFData *rd)
 
 static void LJ_FASTCALL recff_pcall(jit_State *J, RecordFFData *rd)
 {
-  /* The 5.4 C-call bound lives in the interpreter fast path; keep pcall out
-  ** of traces so a recursive pcall/error cascade stays bounded. */
-  lj_trace_err(J, LJ_TRERR_BADTYPE);
   if (J->maxslot >= 1) {
+    /* A compiled pcall bypasses the interpreter fast path that bounds the
+    ** C-call nesting. Record it only at the top level (ccallnest == 0); a
+    ** nested or recursive pcall exits the trace and stays bounded. */
+    TRef th = emitir(IRT(IR_LREF, IRT_THREAD), 0, 0);
+    TRef cn = emitir(IRT(IR_FLOAD, IRT_INT), th, IRFL_THREAD_CCALLNEST);
+    emitir(IRTG(IR_EQ, IRT_INT), cn, lj_ir_kint(J, 0));
 #if LJ_FR2
     /* Shift function arguments up. */
     memmove(J->base + 1, J->base, sizeof(TRef) * J->maxslot);
@@ -621,9 +624,11 @@ static TValue *recff_xpcall_cp(lua_State *L, lua_CFunction dummy, void *ud)
 
 static void LJ_FASTCALL recff_xpcall(jit_State *J, RecordFFData *rd)
 {
-  /* 5.4 C-call bound is in the fast path; keep xpcall out of traces. */
-  lj_trace_err(J, LJ_TRERR_BADTYPE);
   if (J->maxslot >= 2) {
+    /* Same top-level-only guard as pcall (see recff_pcall). */
+    TRef th = emitir(IRT(IR_LREF, IRT_THREAD), 0, 0);
+    TRef cn = emitir(IRT(IR_FLOAD, IRT_INT), th, IRFL_THREAD_CCALLNEST);
+    emitir(IRTG(IR_EQ, IRT_INT), cn, lj_ir_kint(J, 0));
     TValue argv0, argv1;
     TRef tmp;
     int errcode;

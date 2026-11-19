@@ -161,6 +161,7 @@ LJLIB_ASM(setmetatable)		LJLIB_REC(.)
     lj_err_caller(L, LJ_ERR_PROTMT);
   setgcref(t->metatable, obj2gco(mt));
   if (mt) { lj_gc_objbarriert(L, t, mt); }
+  lj_gc_checkfinalizer(L, obj2gco(t), mt);
   settabV(L, L->base-1-LJ_FR2, t);
   return FFH_RES(1);
 }

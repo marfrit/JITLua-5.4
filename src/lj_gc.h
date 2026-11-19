@@ -21,6 +21,7 @@ enum {
 #define LJ_GC_WEAKKEY	0x08
 #define LJ_GC_WEAKVAL	0x10
 #define LJ_GC_CDATA_FIN	0x10
+#define LJ_GC_TABFIN	0x80	/* Table marked for finalization (5.4 __gc). */
 #define LJ_GC_FIXED	0x20
 #define LJ_GC_SFIXED	0x40
 
@@ -46,6 +47,7 @@ enum {
 #define markfinalized(x)	((x)->gch.marked |= LJ_GC_FINALIZED)
 
 /* Collector. */
+LJ_FUNC void lj_gc_checkfinalizer(lua_State *L, GCobj *o, GCtab *mt);
 LJ_FUNC size_t lj_gc_separateudata(global_State *g, int all);
 LJ_FUNC void lj_gc_finalize_udata(lua_State *L);
 #if LJ_HASFFI

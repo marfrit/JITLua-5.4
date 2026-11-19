@@ -1577,6 +1577,9 @@ LUA_API int lua_setmetatable(lua_State *L, int idx)
     setgcref(tabV(o)->metatable, obj2gco(mt));
     if (mt)
       lj_gc_objbarriert(L, tabV(o), mt);
+    /* 5.4: a table getting a metatable with __gc is marked for finalization
+    ** now, not when the metatable is later given a __gc field. */
+    lj_gc_checkfinalizer(L, obj2gco(tabV(o)), mt);
   } else if (tvisudata(o)) {
     setgcref(udataV(o)->metatable, obj2gco(mt));
     if (mt)

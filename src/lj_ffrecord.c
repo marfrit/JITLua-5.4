@@ -274,6 +274,28 @@ static void LJ_FASTCALL recff_setmetatable(jit_State *J, RecordFFData *rd)
     ix.tab = tr;
     copyTV(J->L, &ix.tabv, &rd->argv[0]);
     lj_record_mm_lookup(J, &ix, MM_metatable); /* Guard for no __metatable. */
+    if (tref_istab(mt)) {
+      /* 5.4: a table that gets a metatable with __gc must be marked for
+      ** finalization at set time. IR cannot express that marking, so record
+      ** the store only when the metatable provably has no __gc and guard
+      ** that absence with a constant-key lookup (as for __mode). Otherwise
+      ** stop/stitch and let the interpreter do the marking. */
+      GCtab *mtv = tabV(&rd->argv[1]);
+      GCstr *gcstr = mmname_str(J2G(J), MM_gc);
+      cTValue *gc = lj_tab_getstr(mtv, gcstr);
+      RecordIndex mix;
+      if (gc && !tvisnil(gc)) {
+	recff_nyiu(J, rd);  /* Has __gc: let the interpreter mark it. */
+	return;
+      }
+      mix.tab = mt;
+      copyTV(J->L, &mix.tabv, &rd->argv[1]);
+      mix.key = lj_ir_kstr(J, gcstr);
+      setstrV(J->L, &mix.keyv, gcstr);
+      mix.val = 0;
+      mix.idxchain = 0;
+      lj_record_idx(J, &mix);  /* Guards the absence of __gc at runtime. */
+    }
     fref = emitir(IRT(IR_FREF, IRT_PGC), tr, IRFL_TAB_META);
     mtref = tref_isnil(mt) ? lj_ir_knull(J, IRT_TAB) : mt;
     emitir(IRT(IR_FSTORE, IRT_TAB), fref, mtref);

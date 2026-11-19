@@ -487,13 +487,14 @@ static int panic(lua_State *L)
 }
 
 #ifndef LUAJIT_DISABLE_VMEVENT
+/* PUC luaE_warnerror(L, "__gc"): an error in a finalizer becomes a warning
+** (off by default, like PUC), never a propagated error. */
 static int error_finalizer(lua_State *L)
 {
   const char *s = lua_tostring(L, -1);
-  fputs("ERROR in finalizer: ", stderr);
-  fputs(s ? s : "?", stderr);
-  fputc('\n', stderr);
-  fflush(stderr);
+  lua_warning(L, "error in __gc (", 1);
+  lua_warning(L, s ? s : "error object is not a string", 1);
+  lua_warning(L, ")", 0);
   return 0;
 }
 #endif

@@ -24,9 +24,9 @@ macros and constants below.
 
 | Header | Added |
 |---|---|
-| `luaconf.h` | `lua_numbertointeger`, `lua_str2number`, `lua_strx2number`, `lua_pointer2str`, `lua_number2strx`, `lua_getlocaledecpoint`, `LUAI_MAXCCALLS` (200), `luai_likely`/`luai_unlikely` (`l_likely`/`l_unlikely` under `LUA_CORE`/`LUA_LIB`) |
+| `luaconf.h` | `lua_numbertointeger`, `lua_str2number`, `lua_strx2number`, `lua_pointer2str`, `lua_number2strx`, `lua_getlocaledecpoint`, `LUAI_MAXCCALLS` (200), `luai_likely`/`luai_unlikely` (`l_likely`/`l_unlikely` under `LUA_CORE`/`LUA_LIB`), `LUAMOD_API` |
 | `lua.h` | `LUA_NUMTYPES` (9), `LUA_NUMTAGS` |
-| `lauxlib.h` | `LUA_GNAME`, `LUA_PRELOAD_TABLE`, `LUAL_NUMSIZES`; `luaL_checkversion` now passes `LUAL_NUMSIZES` |
+| `lauxlib.h` | `LUA_GNAME`, `LUA_PRELOAD_TABLE`, `LUAL_NUMSIZES`; `luaL_checkversion` passes the fork ABI stamp (`LUAL_NUMABI`) |
 
 Two existing macros were corrected rather than added:
 
@@ -70,28 +70,46 @@ PUC compares the numeric-type size stamp and the version and raises a Lua
 error. JITLua's version lived in `lj_api.c`, asserted `sz == LUAL_BUFFERSIZE`
 (not `LUAL_NUMSIZES`), and the assert compiled out in release builds, so a
 module built against PUC 5.4.9 headers could pass a mismatched stamp silently.
-It moved to `lib_aux.c` and now raises PUC's errors:
+It moved to `lib_aux.c`, compares `sz` and the version, and raises PUC's
+errors:
 
 ```
 core and library have incompatible numeric types
 version mismatch: app. needs %f, Lua core provides %f
 ```
 
-What the check does not see: a module compiled against PUC's own 5.4
-headers. `LUAL_NUMSIZES` has PUC's value, so such a module passes. The headers
-are source-compatible with PUC 5.4, the binary interface is only partly so:
-`LUA_REGISTRYINDEX` and `lua_upvalueindex` have LuaJIT's values, and
-`luaL_Buffer` has another size (`LUAL_BUFFERSIZE`). A PUC-built module works
-as long as it uses neither (the fixtures in `tests/corpus/puc54/libs` are
-built that way and loaded by both interpreters in mode A); one that takes a
-registry reference, uses C closure upvalues or a `luaL_Buffer` runs with the
-wrong constants and is not stopped. Build modules against these headers.
-Giving the stamp a mark of its own would turn that into a clean
-`luaL_newlib` error, at the price of rejecting the modules that work today;
-that decision is open.
+Source compatibility only: the C API is not a binary drop-in for PUC 5.4 in a
+running installation, and C modules must be rebuilt against JITLua's headers.
+`LUAL_NUMSIZES` deliberately keeps PUC's value so source code that uses it
+still compiles and behaves, but `luaL_checkversion()` now passes
+`LUAL_NUMABI` = `LUAL_NUMSIZES + LUAL_ABISTAMP`, a fork-specific stamp
+(`LUAL_ABISTAMP` = `0x4a49544c`, "JITL"). `luaL_checkversion_` recognises
+PUC's own numeric stamp (`sizeof(lua_Integer)*16 + sizeof(lua_Number)` in
+this build's types) and rejects it with a hint:
+
+```
+core and library have incompatible numeric types: module built for a
+  different Lua ABI; rebuild it against JITLua headers
+```
+
+A module whose numeric types really differ still gets PUC's plain mismatch
+error; the ABI hint is reserved for a module that passed PUC's numeric stamp.
+This catches every module that calls `luaL_checkversion` — including through
+`luaL_newlib`, which most modules use. A raw `luaopen_*` that never calls it
+cannot be caught: it loads and may read the wrong `LUA_REGISTRYINDEX`,
+`lua_upvalueindex`, `luaL_Buffer` or extraspace. Rebuild every module; the
+check is a guard, not a proof.
 
 A module compiled against JITLua headers from before this change passes
-`LUAL_BUFFERSIZE` as its stamp and is rejected: rebuild it.
+`LUAL_NUMSIZES` (PUC's value) as its stamp and is rejected the same way:
+rebuild it.
+
+The differences that make a rebuild necessary: `LUA_REGISTRYINDEX` (-10000)
+and `lua_upvalueindex(i)` (-10002-i) keep LuaJIT's pseudo-indices where PUC
+5.4 uses -LUAI_MAXSTACK-1000 and `LUA_REGISTRYINDEX-(i)`; `luaL_Buffer` is
+larger (`LUAL_BUFFERSIZE` is 8192/BUFSIZ, PUC's is
+`16*sizeof(void*)*sizeof(lua_Number)`); `lua_getextraspace` is a function and
+its area sits after `struct lua_State`.
 
 ## `lua_setcstacklimit`
 
@@ -101,6 +119,11 @@ JITLua already did. The constant now lives in `luaconf.h` and
 
 ## Tests
 
+- `tests/capi/abi_probe.c` is built twice from one source: against PUC 5.4.9's
+  headers it must be rejected when JITLua loads it (the driver
+  `abi_probe_reject.lua` checks the ABI hint), and against JITLua's headers it
+  must load and use `lua_upvalueindex` and `LUA_REGISTRYINDEX`
+  (`abi_probe.lua`).
 - `tests/capi/headers_probe.c` is compiled as a loadable module and does
   **not** include `<limits.h>`; it fails with `#error` if a macro is missing.
   `tests/capi/headers_probe.lua` checks the read-back values under `-joff`
@@ -115,6 +138,11 @@ JITLua already did. The constant now lives in `luaconf.h` and
 - `headers_probe.c` also expands the conversion macros (`lua_integer2str`,
   `lua_number2str`, `lua_number2strx`, `lua_pointer2str`, `lua_str2number`,
   `lua_strx2number`, `lua_getlocaledecpoint`) and calls `luaL_checkversion_`
-  with a wrong version and with wrong numeric sizes; both must raise PUC's
-  messages.
+  with a wrong version, with wrong numeric sizes, and with PUC's numeric
+  stamp; each must raise its message, the last with the ABI rebuild hint.
 - `tests/capi/test_capi.c` checks the `lua_setcstacklimit` no-op contract.
+- `tests/ref/build-puc54-libs.sh` builds the `tests/corpus/puc54/libs` C
+  fixtures twice, into `tests/capi/build/corpus-libs/{puc,jit}`. The harness
+  installs the arm's build in the test's private `libs/` directory and sets
+  that arm's `LUA_CPATH` to it, so `attrib.lua` (which uses `loadlib` with a
+  relative path) stays green in modes A, B and R.

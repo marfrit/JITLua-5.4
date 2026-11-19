@@ -337,10 +337,11 @@ static const char *searchpath (lua_State *L, const char *name,
   for (p = expanded; p <= end; p++) {
     const char *s = strchr(p, *LUA_PATHSEP);
     size_t len = (s != NULL) ? (size_t)(s - p) : (size_t)(end - p);
+    /* Add the prefix while the buffer placeholder is the top slot (-1). */
+    if (appended) luaL_addstring(&msg, "\n\t");
     lua_pushlstring(L, p, len);  /* candidate file name */
     if (readable(lua_tostring(L, -1)))  /* does file exist and is readable? */
       return lua_tostring(L, -1);  /* return that file name */
-    if (appended) luaL_addstring(&msg, "\n\t");
     lua_pushfstring(L, "no file " LUA_QS, lua_tostring(L, -1));
     lua_remove(L, -2);  /* remove file name */
     luaL_addvalue(&msg);  /* concatenate error msg. entry */
@@ -462,9 +463,14 @@ static void findloader(lua_State *L, const char *name)
     luaL_error(L, LUA_QL("package.searchers") " must be a table");
   luaL_buffinit(L, &msg);
   for (i = 1; ; i++) {
+    /* Add the prefix while the buffer placeholder is the top slot (-1);
+    ** remove it again when this searcher has no error message. luaL_addstring
+    ** requires the placeholder at -1 (PUC 5.4 luaL_Buffer discipline). */
+    luaL_addstring(&msg, "\n\t");  /* error-message prefix */
     lua_rawgeti(L, 3, i);  /* get a searcher */
     if (lua_isnil(L, -1)) {  /* no more searchers? */
       lua_pop(L, 1);  /* remove nil */
+      luaL_buffsub(&msg, 2);  /* remove the last prefix */
       luaL_pushresult(&msg);  /* create error message */
       luaL_error(L, "module " LUA_QS " not found:%s",
 		 name, lua_tostring(L, -1));
@@ -475,10 +481,10 @@ static void findloader(lua_State *L, const char *name)
       return;  /* module loader found */
     else if (lua_isstring(L, -2)) {  /* searcher returned error message? */
       lua_pop(L, 1);  /* remove extra return */
-      luaL_addstring(&msg, "\n\t");  /* error-message prefix */
       luaL_addvalue(&msg);  /* concatenate error message */
     } else {  /* no error message */
       lua_pop(L, 2);  /* remove both returns */
+      luaL_buffsub(&msg, 2);  /* remove the prefix again */
     }
   }
 }

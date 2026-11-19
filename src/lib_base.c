@@ -159,7 +159,8 @@ LJLIB_ASM(setmetatable)		LJLIB_REC(.)
   GCtab *mt = lj_lib_checktabornil(L, 2);
   if (!tvisnil(lj_meta_lookup(L, L->base, MM_metatable)))
     lj_err_caller(L, LJ_ERR_PROTMT);
-  setgcref(t->metatable, obj2gco(mt));
+  if (mt) setgcref(t->metatable, obj2gco(mt));
+  else setgcrefnull(t->metatable);
   if (mt) { lj_gc_objbarriert(L, t, mt); }
   lj_gc_checkfinalizer(L, obj2gco(t), mt);
   settabV(L, L->base-1-LJ_FR2, t);

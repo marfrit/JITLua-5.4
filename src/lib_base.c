@@ -774,16 +774,6 @@ static int ffh_resume(lua_State *L, lua_State *co, int wrap)
     setstrV(L, L->base-LJ_FR2, lj_err_str(L, em));
     return FFH_RES(2);
   }
-  /* PUC lua_resume: the resumed thread inherits the resumer's C-call count
-  ** plus one for the resume itself, so only 200-(count+1) pcall levels remain
-  ** usable inside the coroutine. At the bound the resume is the error. */
-  if (L->ccallnest >= LJ_MAX_XLEVEL) {
-    if (wrap) lj_err_caller(L, LJ_ERR_CSTKOV);
-    setboolV(L->base-1-LJ_FR2, 0);
-    setstrV(L, L->base-LJ_FR2, lj_err_str(L, LJ_ERR_CSTKOV));
-    return FFH_RES(2);
-  }
-  co->ccallnest = L->ccallnest + 1;
   if (lj_state_cpgrowstack(co, (MSize)(L->top - L->base)) != LUA_OK) {
     cTValue *msg = --co->top;
     lj_err_callermsg(L, strVdata(msg));

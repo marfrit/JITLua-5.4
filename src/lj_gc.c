@@ -907,6 +907,7 @@ static void gc_call_finalizer(global_State *g, lua_State *L,
   GCSize oldt = g->gc.threshold;
   int errcode;
   lua_State *VL = vmthread(g);
+  MSize oldfin = g->finbase;
   TValue *top;
   lj_trace_abort(g);
   hook_entergc(g);  /* Disable hooks and new traces during __gc. */
@@ -917,7 +918,10 @@ static void gc_call_finalizer(global_State *g, lua_State *L,
   if (LJ_FR2) setnilV(top++);
   setgcV(VL, top, o, ~o->gch.gct);
   VL->top = top+1;
+  /* 5.4 debug.getinfo names this frame "metamethod '__gc'". */
+  g->finbase = (MSize)((top-1) - tvref(VL->stack));
   errcode = lj_vm_pcall(VL, top, 1+0, -1);  /* Stack: |mo|o| -> | */
+  g->finbase = oldfin;
   setgcref(g->cur_L, obj2gco(L));
   hook_restore(g, oldh);
   if (LJ_HASPROFILE && (oldh & HOOK_PROFILE)) lj_dispatch_update(g, 0);

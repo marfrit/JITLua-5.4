@@ -688,6 +688,7 @@ typedef struct global_State {
   int32_t hookcstart;	/* Start count for instruction hook counter. */
   lua_Hook hookf;	/* Hook function. */
   MSize hookbase;	/* Stack offset of the frame a hook is running for (5.4 'hook' frames). */
+  MSize finbase;	/* VM thread stack offset of the running __gc call's frame, or 0. */
   MSize hookftransfer;	/* 5.4 getinfo 'r' for the running hook. */
   MSize hookntransfer;
   MSize ffretry;	/* Set by the VM when a fast function retries after its fallback. */

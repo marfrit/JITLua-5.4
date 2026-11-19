@@ -494,7 +494,9 @@ LJLIB_CF(debug_traceback)
   int arg;
   lua_State *L1 = getthread(L, &arg);
   const char *msg = lua_tostring(L, arg+1);
-  if (msg == NULL && L->top > L->base+arg)
+  /* 5.4: a message that is neither a string nor nil is returned untouched;
+  ** nil is no message, also with a level after it. */
+  if (msg == NULL && L->top > L->base+arg && !tvisnil(L->base+arg))
     L->top = L->base+arg+1;
   else
     luaL_traceback(L, L1, msg, lj_lib_optint(L, arg+2, (L == L1)));

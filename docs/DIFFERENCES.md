@@ -33,6 +33,22 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
 ## Against PUC Lua 5.4.9
 
 ### Language and VM
+- `PENDING` A C function that calls a Lua function which calls the same C
+  function again (e.g. `string.gsub("a", ".", f)` with `f` recursive) is not
+  bounded: the port counts only pcall/xpcall and coroutine resume/close
+  nesting (`L->ccallnest`), while PUC bounds every C-boundary call
+  (`L->nCcalls`, `LUAI_MAXCCALLS` = 200) with a recoverable "C stack
+  overflow". Here the real C stack exhausts and the process dies with
+  SIGSEGV (both arms, both architectures; `tests/known-bad.tsv`, the PUC
+  suite file `cstack.lua` lines 47-65). Design: `docs/notes/cstack-ccall-bound.md`.
+- `IMPL-DEFINED` Stack-overflow depth: PUC grows to `LUAI_MAXSTACK`
+  (1000000 slots, plus the error stack) before failing, this tree caps at
+  `LJ_STACK_MAX` (plus `LJ_STACK_ERREX` for the handler), so a recursive
+  function dies far earlier here, and the JIT-on and JIT-off arms differ by
+  a frame or two. The PUC suite file `cstack.lua` prints the depth (its
+  "final count" lines), so its mode A and mode B cannot match; the
+  message it asserts on line 29 ("error in error handling") is fixed
+  (`tests/d54/err_11_errerr_msg.lua`). Rows in `tests/known-different.tsv`.
 - `PENDING` An integer argument that has no integer value is truncated or
   saturated instead of raising "number has no integer representation":
   `("hello"):sub(1.5)` is `"hello"`, `string.char(65.5)` is `"A"`, and a

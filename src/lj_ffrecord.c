@@ -778,16 +778,25 @@ static void LJ_FASTCALL recff_math_round(jit_State *J, RecordFFData *rd)
   TRef tr = J->base[0];
   /* 5.4: an integer (int32 or int64 ref) is its own floor and ceil. */
   if (!(tref_isinteger(tr) || tref_istype(tr, IRT_I64))) {
-    lua_Number n = lj_vm_foldfpm(numberVnum(&rd->argv[0]), rd->data);
+    lua_Number n;
+    if (!tref_isnum(tr)) {
+      /* A numeric string (or an argument the interpreter rejects): the slot
+      ** holds no number to round at recording time. Interpreter. */
+      recff_nyiu(J, rd);
+      return;
+    }
+    n = lj_vm_foldfpm(numV(&rd->argv[0]), rd->data);
     /* 5.4 returns an integer when the rounded value has one. Record the
     ** int32 case under a guard (the exit covers NaN, +-inf and values
     ** outside int32, which the interpreter then handles: float or int64).
     ** A result outside int32 would need an IRT_I64 ref under the
     ** representation rule of lj_record.c; not recorded, the call is
     ** stitched / left to the interpreter for that trace. */
-    if (!lj_num2int_ok(n))
-      recff_nyi(J, rd);  /* Does not return. */
-    tr = emitir(IRTN(IR_FPMATH), lj_ir_tonum(J, tr), rd->data);
+    if (!lj_num2int_ok(n)) {
+      recff_nyi(J, rd);  /* Stitches or stops the trace, and returns. */
+      return;
+    }
+    tr = emitir(IRTN(IR_FPMATH), tr, rd->data);
     J->base[0] = emitir(IRTGI(IR_CONV), tr, IRCONV_INT_NUM|IRCONV_CHECK);
   }
 }

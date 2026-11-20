@@ -3403,10 +3403,10 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
       |  cleartp TAB:RA
       |  mov TAB:RB, TAB:RA->metatable
       |  test TAB:RB, TAB:RB
-      |  jz >6				// No metatable: let the helper decide.
+      |  jz >7				// No metatable: let the helper decide.
       |  test byte TAB:RB->nomm, 1<<MM_eq
-      |  jnz >6				// 'no __eq' on the first: helper decides.
-      |6:
+      |  jnz >7				// 'no __eq' on the first: helper decides.
+      |7:
       if (vk) {
 	|  xor RBd, RBd			// ne = 0
       } else {

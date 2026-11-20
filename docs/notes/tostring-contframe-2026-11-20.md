@@ -132,3 +132,69 @@ Their values are checked in both modes (`tostring-mm` 900, `tostring-mm-num`
 600/900). No hot path changed on this branch, so the timings from the
 predecessor note still stand: `b6_tostring.lua` `obj` case 2.4 ms traced before
 `tostring54`, 182 ms now, `-joff` 149 ms.
+
+## Review addendum: what is ruled out, and the route that is left
+
+Read the title with this limit: what the frame arithmetic above rules out is
+a continuation frame *retrofitted by the recorder* under the `FRAME_C` frame
+that `lua_call` creates. It does not rule out a continuation frame for this
+call. The marker of a continuation frame is the frame word of the *called*
+function (`delta + FRAME_CONT`), with the continuation and its PC in the two
+slots below the function slot (`lj_frame.h`); nothing is written into the
+frame word of the caller. If the interpreter builds the metamethod frame that
+way, above the argument, `base-1` keeps the resume PC of the `tostring` call:
+
+```
+base-2      base-1      base  base+1  base+2    base+3  base+4           base+5
+[tostring]  [resumePC]  (o)   [cont]  [contpc]  [mo]    [5|FRAME_CONT]   (o)   <- metamethod base
+```
+
+This is the layout of every metamethod call the interpreter makes (`mmcall`
+in `lj_meta.c`); the only new thing is that the frame below is a fast
+function's frame and not a Lua function's. `pcall` is the precedent for a
+fast function that stays on the frame chain below the function it calls.
+Checked in the review, in JITLua and in PUC 5.4.9 alike: from inside a
+function called through `pcall`, `debug.getinfo(2, "S").what` is `"C"`, and
+`error(msg, 3)` is attributed to the caller of `pcall`. So route 1 above does
+not lose the frame level: the `tostring` frame stays where it is, and
+`frame-whats` and `level3` of `tostring_08_cboundary.lua` are expected to
+hold without extra work. (Reasoned from the layout and from `pcall`; not
+built.) A detail of the text above: the resume PC is read back by
+`->fff_fallback` / `->fff_res` (`mov PC, [BASE-8]`), the path of an asm fast
+function, not by `BC_FUNCC`.
+
+What does need explicit work is the yield. Without a C frame,
+`coroutine.yield` inside the metamethod succeeds, so `yield-direct` and
+`yield-deep` change (`yield-print` and `yield-format` keep their C frames).
+Either that is accepted and listed as a difference, or the coroutine keeps a
+count of its open `__tostring` continuation frames, which `coroutine.yield`
+and `lua_yield` test: incremented where the frame is built, decremented in
+the continuation, decremented by the unwinder for every such frame it drops,
+and added by `lj_snap_restore` for every such frame in a restored snapshot (a
+trace that inlines the call builds the frame only when it exits inside the
+metamethod). This is the bookkeeping of `L->ccallnest`, with the same failure
+mode: one missed path and the count leaks.
+
+The pieces, on x86_64 and arm64:
+
+1. `lj_ffh_tostring` builds the frame instead of calling `lua_call`, and
+   `->fff_fallback` gets a way to enter `->vm_call_dispatch` with it (as the
+   `pcall` fast path does with its own frame type).
+2. `lj_cont_tostr`: a string result goes to the result slot of the fast
+   function, which then returns as `->fff_res` does; everything else goes
+   through `lj_strfmt_tolstrres` (converts a number, raises otherwise).
+3. Recorder: `recff_tostring` mirrors the frame in the IR slots as
+   `rec_mm_prep` does and records the call; `lj_record_ret` gets a branch for
+   this continuation that checks the type of the result reference (a string
+   passes, a number is converted, anything else aborts the trace and the
+   interpreter raises), pops the frame and records the return of the fast
+   function. `rec_check_slots` holds, because the real stack has the frame.
+   The `rec_tostrres` guard of the predecessor note is this check.
+4. Tests: the count on every path (error inside the metamethod caught by a
+   `pcall` in the same coroutine and a yield afterwards, a trace exit inside
+   the metamethod, a coroutine created inside it).
+
+Expected gain, to size the work: the 2.4 ms of `b6_tostring.lua` is a loop
+whose metamethod returns a constant, which the old trace hoisted completely.
+What a real conversion saves is the stitch, the C fallback and the nested
+`lj_vm_call`, about 90 ns per call on the measured box (182 ms for 2M calls).

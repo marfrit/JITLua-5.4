@@ -147,6 +147,9 @@ A+B 212 PASS / 0 FAIL / 4 XFAIL, opt levels 0-3 468, R 114, ASan/UBSan A+B+R
   of that ticket, is now also ruled out with the frame arithmetic and the
   PUC-equal C-call-boundary tests (`tests/d54/tostring_08_cboundary.lua`) in
   [tostring-contframe-2026-11-20.md](tostring-contframe-2026-11-20.md).
+  What that rules out is a frame built by the recorder; the review addendum
+  at the end of that note describes the route that is left, a continuation
+  frame built by the interpreter above the fast function's own frame.
 - An FFI cdata value has `__tostring` in its per-type base metatable
   (`ffi_meta`), so `tostring(cdata)` now leaves the trace to the interpreter
   like every other value with a metamethod. Output is unchanged (a ctype

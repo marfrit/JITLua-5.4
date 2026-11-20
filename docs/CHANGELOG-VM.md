@@ -7,6 +7,29 @@ target x86_64 (GC64) and arm64.
 
 ## Language and VM
 
+- String to number conversion (Lua 5.4 numeral rules), one conversion for the
+  interpreter, the library and compiled code. Four defects, all in the two
+  functions every such conversion goes through (`lj_strscan_scan`, and
+  `str2num` in `lj_meta.c`): `"inf"`, `"infinity"` and `"nan"` were accepted
+  as numbers in arithmetic, as library arguments and as `for` bounds (PUC:
+  not numerals); `"0x1e" + 0` was the float 30.0, because the hex digit `e`
+  was taken for an exponent; a string denoting an integer outside int32 next
+  to a float operand (`"9223372036854775807" + 0.5`) returned the integer
+  operand; and the always-double conversion (`lj_strscan_num`: library
+  number arguments, and `IR_STRTO` in compiled code) gave -0.0 for `"-0"`
+  and 1.8e19 for `"0xffffffffffffffff"`, where 5.4 converts the integer 0
+  and the wrapped integer -1. The last one made `1 / s` and `s ^ 1` differ
+  between the interpreter and a trace. Also: `%d`/`%x` convert a numeric
+  string exactly (`string.format("%d", "9223372036854775807")` raised), and
+  the recorder of the string functions no longer converts a string argument
+  in place before the function runs (`("hello"):sub("0xffffffffffffffff")`
+  returned `"hello"` in the recorded iteration, `"o"` otherwise).
+  `tests/d54/numeric_08_strcoerce.lua`.
+- `string.format("%s", v)` in compiled code with an integer outside int32
+  wrote the number without looking for a `__tostring` in the number
+  metatable; the interpreter called it. The lookup is recorded now, and with
+  a method the conversion is left to the interpreter, as for `tostring`.
+  `tests/d54/tostring_09_format_i64mt.lua`.
 - String arithmetic subtypes (Lua 5.4): a numeric string that denotes an
   integer (`"2"`, `"0x10"`) is an *integer* operand in 5.4 (`luaV_tonumber_`),
   so `5 + "2"` is the integer 7, `- "2"` the integer -2, `5 % "2"` the integer
@@ -20,11 +43,17 @@ target x86_64 (GC64) and arm64.
   guard on. So a string operand now leaves those five operations to the
   interpreter (`lj_trace_err` `BADTYPE`, the same escape as the existing
   i47w/i64 punts); `/` and `^` keep the traced `IR_STRTO` path because 5.4
-  gives a float there for every string form and the STRTO double is the same
-  conversion the interpreter uses. `tests/d54/numeric_05_strarith.lua` (both
-  operand orders, hex/oct/whitespace strings, values above 2^53, non-numeric
-  strings, and the reverse `"2.0"`-then-`"2"` case) passes modes A, B@0..3
-  and R on x86_64; the pure-numeric arithmetic path is untouched.
+  gives a float there for every string form. That the STRTO double is the
+  value the interpreter computes holds since the string-to-number entry
+  above; before it, `"-0"` and a wrapping hexadecimal integer differed.
+  `tests/d54/numeric_05_strarith.lua` (both operand orders, hex, whitespace
+  and exponent strings, values above 2^53, non-numeric strings, and the
+  reverse `"2.0"`-then-`"2"` case) passes modes A, B@0..3 and R on x86_64
+  and arm64; the pure-numeric arithmetic path is untouched. A loop with such
+  an operation is not compiled: the recorder aborts until the loop is
+  blacklisted (11 attempts measured), an inner loop without string
+  arithmetic stays compiled, and a loop that sees a string operand only
+  later keeps its trace and leaves it at that operand.
 - Arbitrary `_ENV` values: LuaJIT stored only a table as a function
   environment, so `load("return _ENV", nil, nil, 123)()` returned the global
   table and a non-table env was silently ignored. The function now carries the

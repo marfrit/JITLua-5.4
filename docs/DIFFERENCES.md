@@ -33,6 +33,19 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
 ## Against PUC Lua 5.4.9
 
 ### Language and VM
+- `PENDING` An integer argument that has no integer value is truncated or
+  saturated instead of raising "number has no integer representation":
+  `("hello"):sub(1.5)` is `"hello"`, `string.char(65.5)` is `"A"`, and a
+  numeric string beyond the int64 range is converted the same way.
+- `PENDING` `math.max` and `math.min` accept numeric strings; PUC compares the
+  arguments as they are and raises "attempt to compare string with number".
+- `PENDING` A numeric string as a `for` bound is converted with the
+  int32-or-double rule: a decimal integer string outside int32 makes the loop
+  a float loop (PUC: integer loop), and a hexadecimal one does not wrap
+  (`for i = 1, "0xffffffffffffffff"` runs; PUC runs it zero times).
+- `IMPL-DEFINED` String arithmetic is part of the VM's arithmetic fallback;
+  the string metatable has no `__add`, `__sub`, ... entries (PUC implements
+  the coercion through them, so there it can be inspected and replaced).
 - `FORK` String interning: LuaJIT interns every string; PUC does not intern long
   strings, so `%p`/`lua_topointer` identity after concat/gsub differs (design
   decision, Markus 2026-11-16; C probe `tests/capi` `probe_549`).

@@ -7,6 +7,26 @@ target x86_64 (GC64) and arm64.
 
 ## Language and VM
 
+- `string.format` conversion rules (Lua 5.4): the format parser accepted
+  specifications PUC rejects and printed others differently. Fixed after
+  lstrlib.c's `getformat`/`checkformat`: the allowed flags per conversion, a
+  width that must not start with `0` where `0` is no flag, a precision only
+  where the conversion allows one, at most two digits for width and precision,
+  a specification of 21 characters or more answered as "invalid format (too
+  long)", `%q` refuses every modifier ("specifier '%q' cannot have modifiers"),
+  `%F`/`%I`/`%t` are "invalid conversion '<spec>' to 'format'", a missing
+  argument says "no value" (was "value expected"), and a `%s` with modifiers
+  raises "string contains zeros" before it is formatted and appends a string
+  of 100 bytes or more without a precision as it is. A value without a pointer
+  is `%p`-formatted as "(null)", a real pointer under the same width, and the
+  `'-'` flag and width apply to both (the specifier is rewritten to `s` in
+  lstrlib.c). PUC's suite checks the rules in `strings.lua:160-194` and
+  `strings.lua:15` via 371-385; `tests/d54/fmt_03_format_rules.lua` and
+  `tests/d54/fmt_04_ptr.lua` cover every rejected and accepted specification.
+- The x86_64 `__eq` fast path once more reaches the int64 box comparison:
+  the new helper branch label reused the number `6` of the "RA/RD hold both
+  TValue words" label, so an interned int64 userdata went into the
+  metatable read and crashed (`math.maxinteger == math.maxinteger`).
 - `collectgarbage("isrunning")` and the user stop flag: the answer was derived
   from the GC threshold, and an explicit `collectgarbage("step")` reset that
   threshold, so after `collectgarbage("stop")` the collector ran again and

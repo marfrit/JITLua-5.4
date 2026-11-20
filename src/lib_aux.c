@@ -517,7 +517,10 @@ static int panic(lua_State *L)
 /* Opt-in GC policy mode, read once when the state is created so that every
 ** embedder using luaL_newstate() honours LUAJIT_GC.  Unknown values are
 ** ignored silently.  Runtime collectgarbage("setpause"/"setstepmul")
-** overrides this.  Default is the unchanged stock policy (200/200).
+** overrides this.  The default is the speed policy, pause 300 / stepmul 200
+** (LUAI_GCPAUSE / LUAI_GCMUL in luaconf.h: a deliberate divergence from stock
+** LuaJIT 2.1's 200/200, measured on both arches and taken 2026-11-19).
+** LUAJIT_GC=memory is the RSS-first setting and asks for 100 / 200.
 */
 static void gc_policy_mode(lua_State *L)
 {

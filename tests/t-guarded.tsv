@@ -1,0 +1,23 @@
+# Vendored PUC 5.4.9 suite files that mention the internal test library T.
+# Neither arm has the PUC ltests hooks (ltests.c, -DLUA_USER_H='"ltests.h"').
+# "run" keeps such a file in the corpus: its T uses are all inside
+# `assert(not T or ...)`, `if T then ... end` or an early
+# `if T == nil then ... return end`, so with T undefined those blocks are dead
+# code in both arms and only the rest of the file is compared -- the T-guarded
+# blocks are skipped, not the file. "skip" keeps the documented SKIP with the
+# reason below. A file moves to "run" only once every failure it shows is
+# classified: a defect in tests/known-bad.tsv, a difference in
+# tests/known-different.tsv with its docs/DIFFERENCES.md entry, or a skip row.
+# Read by tests/lib/runner.py (plan(), --t-guarded).
+tests/corpus/puc54/all.lua	skip	T-guarded itself, but it is the suite driver: it loads and runs every other suite file and prints PUC's own summary, so the harness would run the corpus twice without comparing one feature
+tests/corpus/puc54/api.lua	skip	uses T.testC unguarded from line 31: the file is a testC harness, nothing left to compare without the PUC test library
+tests/corpus/puc54/code.lua	skip	uses T.listk and T.listcode unguarded (lines 38, 91): the file inspects PUC's constant and code lists
+tests/corpus/puc54/coroutine.lua	skip	T-guarded blocks only; first stop point reported by the reviewer at line 50, triage owned by another branch
+tests/corpus/puc54/cstack.lua	skip	T-guarded blocks only; first stop point reported by the reviewer at line 29, triage owned by another branch
+tests/corpus/puc54/errors.lua	skip	T-guarded blocks only; first stop point reported by the reviewer at line 30, triage owned by another branch
+tests/corpus/puc54/events.lua	skip	T-guarded blocks only; first stop point reported by the reviewer at line 299, triage owned by another branch
+tests/corpus/puc54/gc.lua	skip	T-guarded blocks only; first stop point reported by the reviewer at line 209, triage owned by another branch
+tests/corpus/puc54/gengc.lua	run	runs to its end with T absent on both arches; its single unguarded assertion (line 122) is a difference from PUC, listed in tests/known-different.tsv and docs/DIFFERENCES.md
+tests/corpus/puc54/locals.lua	skip	T-guarded blocks only; first stop point reported by the reviewer at line 463 (419 on x86_64), triage owned by another branch
+tests/corpus/puc54/nextvar.lua	skip	T-guarded blocks only; first stop point reported by the reviewer at line 78, triage owned by another branch
+tests/corpus/puc54/strings.lua	skip	T-guarded blocks only; first stop point reported by the reviewer at line 165, triage owned by another branch

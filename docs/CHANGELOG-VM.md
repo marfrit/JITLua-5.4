@@ -372,3 +372,16 @@ target x86_64 (GC64) and arm64.
   k-nucleotide at -2.94% with the head faster in 10/10. Off on arm64 because
   the hint costs there. `tests/bench/gc-strsweep.sh` reproduces the A/B,
   `tests/d54/gc_05_strsweep.lua` guards the sweep.
+- Error unwinding truncated the chain of pending `<close>` values
+  nondeterministically: `lj_err.c:tbc_closeunwound` kept the `level` stack
+  pointer across `lj_state_checkstack()` and passed it on to
+  `lj_meta_tbccloseall()`, which saved it again as an offset after the stack
+  had possibly been resized. The offset then described the freed old stack, so
+  the "slot at or above level" test skipped handlers and the last error of the
+  chain was not the one that propagated (`@z` instead of PUC's `@x`,
+  measured on x86_64 in 5-8 of 10 runs of one chain, 8/10 of a second).
+  `level` and `base` are saved as offsets before the check and restored after
+  it. The stale pointer was compared, never dereferenced, so a sanitizer cannot
+  report it; the stress test `tests/d54/close_07_unwind_chain.lua` runs the
+  shape in fresh coroutines after deep recursion, and the deterministic
+  evidence is the file-scope chain described above.

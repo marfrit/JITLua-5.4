@@ -154,4 +154,8 @@ Within noise; the constructor/format/select loops dropped from +28 %/+49 %/
 - The continuation frame stores the cont id at `[NB-32]`; any future
   continuation id must not collide (0 = tailcall, 1 = ffi callback,
   2 = tailret).
-- `docs/DIFFERENCES.md` still lists the unrelated `istailcall` PENDING item.
+- The unrelated `istailcall` item that `docs/DIFFERENCES.md` still listed when
+  this note was written is fixed since (`83e0121d`, docs `8a50a0f9`, merged
+  `35854613`); it moved to `docs/CHANGELOG-VM.md` and its mechanism is in
+  `docs/notes/istailcall.md`. The return-hook item above, this note's own open
+  point, is still `PENDING` in `docs/DIFFERENCES.md`.

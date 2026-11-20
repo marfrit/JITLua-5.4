@@ -225,3 +225,14 @@ target x86_64 (GC64) and arm64.
   OR-ed the type tag into it, so negative int32 keys corrupted the hash
   part. See `docs/bug-math-random-jit.md`; `tests/lib/math-random-jit.lua` is
   the regression test.
+- String-sweep prefetch (`LJ_STR_PREFETCH`, x86_64 default 16, off on other
+  targets; `-DLJ_STR_PREFETCH=N` overrides, `N=0` is the unmodified
+  collector): `gc_sweepstr` is a pointer chase over the intern table, one
+  cache miss per interned string, so the chain head a few buckets ahead is
+  prefetched as a hint -- no layout and no semantics change. x86_64, one box,
+  base and head interleaved in one job, median of 7: k-nucleotide 70.35 ->
+  68.35 ms (-2.84%), binary-trees 855.7 -> 843.7 ms (-1.40%), lpeg -0.45%,
+  lua-cjson flat, the rest within noise; 10 alternating pairs put
+  k-nucleotide at -2.94% with the head faster in 10/10. Off on arm64 because
+  the hint costs there. `tests/bench/gc-strsweep.sh` reproduces the A/B,
+  `tests/d54/gc_05_strsweep.lua` guards the sweep.

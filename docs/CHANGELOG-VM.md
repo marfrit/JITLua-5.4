@@ -7,6 +7,15 @@ target x86_64 (GC64) and arm64.
 
 ## Language and VM
 
+- `collectgarbage("isrunning")` and the user stop flag: the answer was derived
+  from the GC threshold, and an explicit `collectgarbage("step")` reset that
+  threshold, so after `collectgarbage("stop")` the collector ran again and
+  `isrunning` said true; `"collect"` did the same. 5.4 keeps `GCSTPUSR`
+  (lapi.c): a step clears the flag only for the duration of the step and
+  restores it (threshold included), `luaC_fullgc` ignores it, and `isrunning`
+  reports the flag. `GCState.stopped` holds it now.
+  PUC's suite checks this in `gc.lua:209`;
+  `tests/d54/gc_06_stopped_flag.lua` covers stop, step, collect and restart.
 - `collectgarbage` inside a `__gc` metamethod: 5.4 stops the collector
   internally while a finalizer runs (`lapi.c`, `GCSTPGC`) and returns -1 for
   every option; `luaB_collectgarbage` turns that into fail, i.e. nil. Here

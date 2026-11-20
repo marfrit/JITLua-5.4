@@ -7,6 +7,19 @@ target x86_64 (GC64) and arm64.
 
 ## Language and VM
 
+- `__eq` selection (Lua 5.4): equality used the 5.1 rule, i.e. both operands
+  had to carry the same `__eq` handler, so comparing a plain table or userdata
+  against one with a handler never called the metamethod and
+  `set == {3,5,1}` was false. 5.4 (`lobject.c luaV_equalobj`) uses the first
+  operand's handler, and only if it has none the second one's, passing the
+  operands in source order. The C helper `lj_meta_equal` now implements that,
+  and the assembler fast paths of x86_64 and arm64 no longer take their "not
+  equal" shortcut when the first operand lacks a handler: they fall through to
+  the helper, which also owns the negative cache. The x86 and arm backends send
+  every such comparison to the helper (no inline second-operand check there).
+  PUC's suite checks this in `events.lua:299`; `tests/d54/meta_06_eq_54.lua`
+  covers one-sided handlers, the first-handler rule, call order, the handler
+  result as truth value, and the `Set` case from events.lua.
 - String to number conversion (Lua 5.4 numeral rules), one conversion for the
   interpreter, the library and compiled code. Four defects, all in the two
   functions every such conversion goes through (`lj_strscan_scan`, and

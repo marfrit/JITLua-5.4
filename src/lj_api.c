@@ -1962,6 +1962,11 @@ LUA_API int lua_gc(lua_State *L, int what, int data)
 {
   global_State *g = G(L);
   int res = 0;
+  /* 5.4 lapi.c: every option is invalid while a __gc metamethod runs (the
+  ** collector is internally stopped); luaB_collectgarbage turns the -1 into
+  ** fail (nil). */
+  if (g->gc.finalizing)
+    return -1;
   switch (what) {
   case LUA_GCSTOP:
     g->gc.threshold = LJ_MAX_MEM;

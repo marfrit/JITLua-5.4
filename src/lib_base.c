@@ -556,11 +556,15 @@ LJLIB_CF(collectgarbage)
   int opt = lj_lib_checkopt(L, 1, LUA_GCCOLLECT,  /* ORDER LUA_GC* */
     "\4stop\7restart\7collect\5count\1\377\4step\10setpause\12setstepmul\1\377\11isrunning\x0cgenerational\x0bincremental");
   int32_t data = lj_lib_optint(L, 2, 0);
-  if (opt == LUA_GCCOUNT) {
+  if (G(L)->gc.finalizing) {  /* 5.4: every option fails inside a __gc */
+    setnilV(L->top);
+  } else if (opt == LUA_GCCOUNT) {
     setnumV(L->top, (lua_Number)G(L)->gc.total/1024.0);
   } else {
     int res = lua_gc(L, opt, data);
-    if (opt == LUA_GCSTEP || opt == LUA_GCISRUNNING) {
+    if (res == -1) {  /* 5.4: -1 while a __gc runs, pushed as fail (nil) */
+      setnilV(L->top);
+    } else if (opt == LUA_GCSTEP || opt == LUA_GCISRUNNING) {
       setboolV(L->top, res);
     } else if (opt == LUA_GCGEN || opt == LUA_GCINC) {
       /* 5.4 collectgarbage returns the previous mode as a string. */

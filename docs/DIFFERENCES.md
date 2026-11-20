@@ -114,14 +114,38 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   past the old 2^27+1 limit under GC64 (up to 2^31-1 slots, PUC MAXABITS=31);
   the remaining difference is only the stop size and the per-MiB counters.
   Excluded from the default corpus; see `tests/known-different.tsv`.
-- `PENDING` Classic benchmarks slower than stock 2.1 (>10%): deltablue both
-  arches (missing-metamethod trace loss), k-nucleotide x64
-  (`__index`/string-key path); see `docs/perf-regression-2026-11-17.md` and
-  `docs/bench-classic-2026-11-17.md`. spectral-norm x64 is ~4% (interleaved
-  median of 9: stock 15.4 ms, ours 16.0 ms) and arm64 is at parity, below
-  the threshold; the extra SLOAD flags and side traces are the 5.4
-  integer/float loop model and are not redundant
-  (`docs/notes/for-intfloat.md`).
+- `PENDING` Classic benchmarks slower than stock 2.1 (>10%): deltablue and
+  k-nucleotide are **no longer** above the threshold, and the causes named for
+  them in `docs/perf-regression-2026-11-17.md` were retracted by that note
+  itself. Only spectral-norm x86_64 is still open, and its number is not
+  settled. The 2026-11-17 tables in `docs/bench-classic-2026-11-17.md` are
+  kept as dated snapshots.
+  - **deltablue**: the missing-metamethod trace aborts came from a
+    miscompilation in the folder's alias analysis, fixed by `60cc7371`; what
+    was left was the weak-table guard, fixed by `ccd4dc0d` (merge `8d4b3740`).
+    On the merged tree (main at `f51a7608`, measured on the `deltablue` branch
+    and merged back as `f05b7283`), one pinned x86_64 host with the arms
+    interleaved: **0.964** (median of 9, the acceptance job), **1.018** and
+    **1.025** (median of 7) with the JIT on, **0.989** with it off
+    (`docs/notes/deltablue.md`).
+  - **k-nucleotide**: not the `__index`/string-key path. Parity came from the
+    default pause 200 → 300 (`7a85607e`, the GC policy `EXTENSION` row below),
+    and the merged classic set measures **1.002** (`docs/notes/deltablue.md`,
+    `docs/notes/knuc-phase-align-2026-11.md`).
+  - **spectral-norm x86_64**: the measurement made for this benchmark, `python3
+    tests/bench/spectral-measure.py` (it alone, interleaved against stock 2.1,
+    x86_64), is a **median of 7**: stock 15.4 ms, this tree 16.0 ms, about
+    **4 %** slower -- below the threshold, and nothing was changed for it
+    (`docs/notes/spectral.md`). The classic-set run on the merged tree reports
+    **0.499** for it (`docs/notes/deltablue.md`, merged `f05b7283`): the
+    spectral branch forked at `9073ddc8`, so between the two trees the
+    guardperf fix (`ccd4dc0d`, merged `8d4b3740`) and `d9e447fc` landed, and
+    the runner differs too. The two are not reconciled and neither has been
+    repeated: **needs re-measuring**. arm64 was
+    at parity in the 2026-11-17 set (**1.00**, where x86_64 was 0.71 then) and
+    has no measurement of its own. The extra SLOAD flags and side traces are
+    the 5.4 integer/float loop model and are not redundant
+    (`docs/notes/for-intfloat.md`).
 
 ## Against stock LuaJIT 2.1
 

@@ -21,6 +21,7 @@
 #include "lj_ctype.h"
 #endif
 #include "lj_lib.h"
+#include "lj_strscan.h"
 
 /* -- Format parser ------------------------------------------------------- */
 
@@ -428,6 +429,9 @@ int lj_strfmt_putarg(lua_State *L, SBuf *sb, int arg, int retry)
 	lj_err_arg(L, arg, LJ_ERR_NOVAL);
       switch (STRFMT_TYPE(sf)) {
       case STRFMT_INT:
+	/* 5.4 (luaL_checkinteger): a numeric string is converted first, an
+	** integer numeral exactly ("9223372036854775807" has 19 digits). */
+	if (tvisstr(o)) (void)lj_strscan_number64(L, strV(o), o);
 	if (tvisi64(o)) {
 	  lj_strfmt_putfxint(sb, sf, (uint64_t)i64V(o));
 	  break;
@@ -460,6 +464,7 @@ int lj_strfmt_putarg(lua_State *L, SBuf *sb, int arg, int retry)
 	}
 	break;
       case STRFMT_UINT:
+	if (tvisstr(o)) (void)lj_strscan_number64(L, strV(o), o);
 	if (tvisi64(o)) {
 	  lj_strfmt_putfxint(sb, sf, (uint64_t)i64V(o));
 	  break;

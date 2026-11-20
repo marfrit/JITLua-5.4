@@ -237,20 +237,25 @@ TValue *lj_meta_tset_env(lua_State *L, cTValue *o, cTValue *k)
   return meta_tset(L, o, k, 1);
 }
 
+/* Float value of a number operand; an integer outside int32 (inline 47 bit
+** or boxed) has no number tag, so numberVnum() must not see it. */
+static LJ_AINLINE lua_Number num2float(cTValue *o)
+{
+  int64_t v;
+  return lj_i64_getint(o, &v) ? (lua_Number)v : numV(o);
+}
+
 static cTValue *str2num(lua_State *L, cTValue *o, TValue *n)
 {
   if (tvisnum(o) || tvisint(o) || tvisi64(o))
     return o;  /* Floats and 5.4 integers (inline, widened, boxed) stay as-is. */
   else if (tvisstr(o)) {
-    const char *p = strdata(strV(o)), *e = p + strV(o)->len;
-    int floaty = 0;
-    for (; p < e; p++)
-      if (*p == '.' || *p == 'e' || *p == 'E' || *p == 'p' || *p == 'P')
-	floaty = 1;
 #if LJ_DUALNUM
     /* 5.4: integer-syntax strings stay integers, decimal/exponent strings
-    ** are floats ("1e2" * 2 is 200.0, "10" + 5 is 15). */
-    if (floaty ? lj_strscan_num(strV(o), n) : lj_strscan_number64(L, strV(o), n))
+    ** are floats ("1e2" * 2 is 200.0, "10" + 5 is 15). The scanner makes
+    ** that distinction itself; guessing it from the characters took the hex
+    ** digit 'e' for an exponent ("0x1e" + 0 was 30.0). */
+    if (lj_strscan_number64(L, strV(o), n))
 #else
     if (lj_strscan_num(strV(o), n))
 #endif
@@ -318,15 +323,15 @@ TValue *lj_meta_arith(lua_State *L, TValue *ra, cTValue *rb, cTValue *rc,
 	  return NULL;
 	}
       }
-      setnumV(ra, -numberVnum(b));
+      setnumV(ra, -num2float(b));
       return NULL;
     }
     if (mm == MM_idiv) {  /* no IR op for idiv: floor, as 5.4 does */
-      setnumV(ra, lj_vm_floor(numberVnum(b) / numberVnum(c)));
+      setnumV(ra, lj_vm_floor(num2float(b) / num2float(c)));
       return NULL;
     }
     {
-      lua_Number x = numberVnum(b), y = numberVnum(c), r;
+      lua_Number x = num2float(b), y = num2float(c), r;
       switch (mm) {
       case MM_add: r = x + y; break;
       case MM_sub: r = x - y; break;

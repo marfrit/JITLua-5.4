@@ -130,7 +130,7 @@ static StrScanFmt strscan_hex(const uint8_t *p, TValue *o,
       o->i = neg ? (int32_t)(~x+1u) : (int32_t)x;
       return STRSCAN_INT;  /* Fast path for 32 bit integers. */
     }
-    if ((opt & STRSCAN_OPT_TOI64) && ex2in == 0) {
+    if ((opt & (STRSCAN_OPT_TOI64|STRSCAN_OPT_TONUM)) && ex2in == 0) {
       /* 5.4: a hexadecimal integer wraps around modulo 2^64, i.e. its value
       ** is that of the last 16 digits (an integer has no '.' in it). */
       if (dig > 16) {
@@ -140,7 +140,14 @@ static StrScanFmt strscan_hex(const uint8_t *p, TValue *o,
 	  x = (x << 4) + (d & 15);
 	}
       }
-      o->u64 = neg ? ~x+1u : x;
+      if (neg) x = ~x+1u;
+      if ((opt & STRSCAN_OPT_TONUM)) {
+	/* The float value of that integer ("0xffffffffffffffff" is -1.0,
+	** "-0x0" is +0.0), as luaV_tonumber_ converts it. */
+	o->n = (double)(int64_t)x;
+	return STRSCAN_NUM;
+      }
+      o->u64 = x;
       return STRSCAN_I64;
     }
     if (!(opt & STRSCAN_OPT_C)) { fmt = STRSCAN_NUM; break; }
@@ -362,22 +369,11 @@ StrScanFmt lj_strscan_scan(const uint8_t *p, MSize len, TValue *o,
   if (LJ_UNLIKELY(!lj_char_isdigit(*p))) {
     while (lj_char_isspace(*p)) p++;
     if (*p == '+' || *p == '-') neg = (*p++ == '-');
-    if (LJ_UNLIKELY(*p >= 'A')) {  /* Parse "inf", "infinity" or "nan". */
-      TValue tmp;
-      setnanV(&tmp);
-      if (casecmp(p[0],'i') && casecmp(p[1],'n') && casecmp(p[2],'f')) {
-	if (neg) setminfV(&tmp); else setpinfV(&tmp);
-	p += 3;
-	if (casecmp(p[0],'i') && casecmp(p[1],'n') && casecmp(p[2],'i') &&
-	    casecmp(p[3],'t') && casecmp(p[4],'y')) p += 5;
-      } else if (casecmp(p[0],'n') && casecmp(p[1],'a') && casecmp(p[2],'n')) {
-	p += 3;
-      }
-      while (lj_char_isspace(*p)) p++;
-      if (*p || p < pe) return STRSCAN_ERROR;
-      o->u64 = tmp.u64;
-      return STRSCAN_NUM;
-    }
+    /* Lua 5.4 has no "inf", "infinity" or "nan" numerals (l_str2d rejects
+    ** them): a string that spells one is not a number, in arithmetic, as a
+    ** library argument and in a for loop alike. LuaJIT 2.1 accepted them. */
+    if (LJ_UNLIKELY(*p >= 'A'))
+      return STRSCAN_ERROR;
   }
 
   /* Parse regular number. */
@@ -479,7 +475,9 @@ StrScanFmt lj_strscan_scan(const uint8_t *p, MSize len, TValue *o,
     if (fmt == STRSCAN_INT && base == 10 &&
 	(dig < 10 || (dig == 10 && *sp <= '2' && x < 0x80000000u+neg))) {
       if ((opt & STRSCAN_OPT_TONUM)) {
-	o->n = neg ? -(double)x : (double)x;
+	/* 5.4: the float value of an integer numeral is that of the integer,
+	** and "-0" is the integer 0: +0.0, not -0.0 (only "-0.0" is that). */
+	o->n = (neg && x) ? -(double)x : (double)x;
 	return STRSCAN_NUM;
       } else {
 	/* 5.4: "-0" is the integer 0 (only "-0.0" is a negative zero float). */

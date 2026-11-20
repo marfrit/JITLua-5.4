@@ -70,7 +70,20 @@ typedef void (LJ_FASTCALL *RecordFunc)(jit_State *J, RecordFFData *rd);
 /* Get runtime value of int argument. */
 static int32_t argv2int(jit_State *J, TValue *o)
 {
-  if (!lj_strscan_numberobj(o))
+  if (tvisstr(o)) {
+    /* 5.4: the interpreter converts a numeric string as lj_lib_checkint
+    ** does (an integer numeral exactly, a hexadecimal one wrapping). Take
+    ** the value without converting the slot in place -- the fast function
+    ** runs on that slot right after this -- and only compile the plain
+    ** int32 case; STRTO gives the same value for it at run time. */
+    TValue tmp;
+    GCstr *s = strV(o);
+    if (lj_strscan_scan((const uint8_t *)strdata(s), s->len, &tmp,
+			STRSCAN_OPT_TOINT|STRSCAN_OPT_TOI64) != STRSCAN_INT)
+      lj_trace_err(J, LJ_TRERR_BADTYPE);
+    return tmp.i;
+  }
+  if (!tvisnumber(o))
     lj_trace_err(J, LJ_TRERR_BADTYPE);
   return numberVint(o);
 }
@@ -1293,6 +1306,12 @@ static void recff_format(jit_State *J, RecordFFData *rd, TRef hdr, int sbufx)
 	tr = lj_ir_call(J, IRCALL_lj_strfmt_putfxint, tr, trsf, tra);
 	break;
       }
+      if (tref_isstr(tra)) {
+	/* 5.4: a numeric string converts like luaL_checkinteger, an integer
+	** numeral exactly; STRTO only has the double. Interpreter. */
+	recff_nyiu(J, rd);
+	return;
+      }
       if (!tref_isinteger(tra)) {
 #if LJ_HASFFI
 	if (tref_iscdata(tra)) {
@@ -1329,7 +1348,10 @@ static void recff_format(jit_State *J, RecordFFData *rd, TRef hdr, int sbufx)
       if (LJ_SOFTFP32) lj_needsplit(J);
       break;
     case STRFMT_STR:
-      if (tref_istype(tra, IRT_I64) && sf == STRFMT_STR) {  /* Plain %s. */
+      /* Plain %s of a 5.4 integer outside int32, unless the number metatable
+      ** has a __tostring (the lookup guards a method that appears later). */
+      if (tref_istype(tra, IRT_I64) && sf == STRFMT_STR &&
+	  !recff_has_tostring(J, rd, arg)) {
 	tr = lj_ir_call(J, IRCALL_lj_strfmt_putfxint, tr,
 			lj_ir_kint(J, (int32_t)STRFMT_D), tra);
 	break;

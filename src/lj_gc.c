@@ -499,6 +499,11 @@ size_t lj_gc_separateudata(global_State *g, int all)
   GCRef *p = &mainthread(g)->nextgc;
   GCobj *o;
   while ((o = gcref(*p)) != NULL) {
+    /* Only userdata and candidate tables are linked after the main thread;
+    ** the else branches below read the object as a userdata. */
+    lj_assertG(o->gch.gct == ~LJ_TTAB || o->gch.gct == ~LJ_TUDATA,
+	       "bad object type %d in the finalizer candidate list",
+	       (int)~o->gch.gct);
     if (o->gch.gct == ~LJ_TTAB) {
       GCtab *t = gco2tab(o);
       /* A candidate table sits in the list after the main thread. Move it

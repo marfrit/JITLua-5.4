@@ -1,5 +1,6 @@
 -- Acceptance test for the re-enabled fast-function recorders with Lua 5.4
--- semantics: type(), rawlen(), math.abs(), math.floor(), math.ceil(). Each
+-- semantics: type(), rawlen(), math.abs(), math.floor(), math.ceil() and
+-- tostring() with a __tostring metamethod in hot loops. Each
 -- hot loop must compile to a root loop trace (no stitch around a C call),
 -- and the compiled results must equal the interpreter's, including
 -- math.type() of the results. Exits 1 on any mismatch. Run with -joff and -jon.
@@ -93,7 +94,27 @@ local function type_udfirst_loop()
   end
   return nn, nu
 end
+local function tostring_mm_loop()
+  -- 5.4: __tostring must return a string. The recorder may still trace the
+  -- call, but it has to guard the result type (see the late-bad d54 test).
+  local o = setmetatable({}, { __tostring = function() return "abc" end })
+  local a = 0
+  for i = 1, 300 do a = a + #tostring(o) end
+  return a
+end
+local function tostring_mm_num_loop()
+  -- A number result is legal in 5.4 and converts with the number format.
+  local p = setmetatable({}, { __tostring = function() return 42 end })
+  local q = setmetatable({}, { __tostring = function() return 1.5 end })
+  local a, b = 0, 0
+  for i = 1, 300 do a = a + #tostring(p); b = b + #tostring(q) end
+  return a, b
+end
 local loop_fns = {type_loop, rawlen_loop, abs_loop, floor_loop, abs_wide_loop, floor_wide_loop, type_udfirst_loop}
+-- tostring_mm_loop and tostring_mm_num_loop are deliberately NOT registered here:
+-- their result values are checked below, but a __tostring call still leaves the
+-- trace (recff_tostring exits), so they do not compile to a root loop trace. See
+-- docs/notes/tostring-jit-2026-11-20.md for the measurement and the open ticket.
 local loop_set = {}
 for _, fn in ipairs(loop_fns) do loop_set[fn] = true end
 local trace_starts, loop_ok, stitched = {}, {}, {}
@@ -154,6 +175,11 @@ eq("type-udfirst-userdata", uu, 200)
 local fw, fwt = floor_wide_loop()
 eq("floor-wide", fw, 2 * 45150)
 eq("floor-wide-type", fwt, "integer")
+local tmm = tostring_mm_loop()
+eq("tostring-mm", tmm, 900)
+local tmn, tmf = tostring_mm_num_loop()
+eq("tostring-mm-num", tmn, 600)
+eq("tostring-mm-float", tmf, 900)
 if jit and jit.status() then
   for i, fn in ipairs(loop_fns) do
     local ju = require("jit.util")

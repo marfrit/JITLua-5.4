@@ -3,7 +3,7 @@
 Triage 2026-11-20 (batch 7, cstack.lua). Status: real defect, **deferred** —
 needs VM assembly work on both backends, see design below. Tracked by the
 `tests/corpus/puc54/cstack.lua` row in `tests/known-bad.tsv`; the file stays a
-documented skip in `tests/lib/runner.py` (a signal death is a hard FAIL the
+documented skip row in `tests/t-guarded.tsv` (a signal death is a hard FAIL the
 XFAIL machinery cannot cover).
 
 ## Repro
@@ -83,8 +83,8 @@ to protected calls) mirroring PUC's `nCcalls`:
 Acceptance: the two suite gsub blocks end in "C stack overflow" with PUC-like
 counts (~197/~99), `tests/d54/err_11_errerr_msg.lua` and
 `tests/d54/err_04_ccall_bound.lua` stay green, and `cstack.lua` runs to `OK`
-in all arms on both architectures — then drop the skip in
-`tests/lib/runner.py` and the known-bad row.
+in all arms on both architectures — then flip its row to `run` in
+`tests/t-guarded.tsv` and drop the known-bad row.
 
 ## Also observed (not tracked here)
 

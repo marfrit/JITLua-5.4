@@ -13,7 +13,7 @@ tests/corpus/puc54/all.lua	skip	T-guarded itself, but it is the suite driver: it
 tests/corpus/puc54/api.lua	skip	uses T.testC unguarded from line 31: the file is a testC harness, nothing left to compare without the PUC test library
 tests/corpus/puc54/code.lua	skip	uses T.listk and T.listcode unguarded (lines 38, 91): the file inspects PUC's constant and code lists
 tests/corpus/puc54/coroutine.lua	skip	T-guarded blocks only; first stop point reported by the reviewer at line 50, triage owned by another branch
-tests/corpus/puc54/cstack.lua	skip	T-guarded blocks only; first stop point reported by the reviewer at line 29, triage owned by another branch
+tests/corpus/puc54/cstack.lua	skip	triaged (branch g1cstack): the line-29 assertion is fixed (tests/d54/err_11_errerr_msg.lua), but the gsub block (lines 47-65) recurses C -> string.gsub -> Lua -> gsub and exhausts the real C stack (SIGSEGV in every arm, both architectures) where PUC stops at LUAI_MAXCCALLS=200 with a recoverable "C stack overflow" (counts 197/99): this tree's ccallnest counts pcall/xpcall/resume/close only. A signal death is a hard FAIL the XFAIL machinery cannot cover, so the file stays out until the C-call bound exists; known-bad row, design in docs/notes/cstack-ccall-bound.md
 tests/corpus/puc54/errors.lua	skip	T-guarded blocks only; first stop point reported by the reviewer at line 30, triage owned by another branch
 tests/corpus/puc54/events.lua	skip	T-guarded blocks only; first stop point reported by the reviewer at line 299, triage owned by another branch
 tests/corpus/puc54/gc.lua	skip	T-guarded blocks only; first stop point reported by the reviewer at line 209, triage owned by another branch

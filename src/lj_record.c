@@ -43,16 +43,28 @@
 /* Lua 5.4 int64 in traces (ADR-001b step 3). Representation rule: an IRT_INT
 ** ref always stands for an int32 inline TValue, an IRT_I64 ref for a 5.4
 ** integer that does not fit int32 (widened 47-bit inline or interned box).
-** Results that fit int32 are narrowed back under a guard right where they
-** are produced, so a slot's IR type follows the interpreter's representation
-** and exits can re-encode a value from its type alone (lj_snap.c).
-** One exception: a side trace replays its parent's snapshot with inherited
-** TRef types (lj_snap_replay), and the exit handler restores each value in
-** its canonical encoding (lj_snap.c). An I64 value that wrapped into the
-** int32 range therefore re-enters the stack as an int32 while the replayed
-** slot still carries the parent's I64 type; the replayed I64 SLOAD's
-** runtime guard exits in that case, so the value stays correct.
-** rec_check_slots accepts exactly this state. */
+** A result that fits int32 while the trace is recorded is narrowed back
+** under a guard right where it is produced, so during recording a slot's IR
+** type follows the interpreter's representation (rec_check_slots).
+**
+** The rule holds for the recorded values only, and in one direction only:
+** a 64-bit result that did not fit int32 while recording carries no guard,
+** so the machine code of an IRT_I64 ref can hold a value inside the int32
+** range (an accumulator that passes through 0, a sum of two int32 that
+** overflowed while the loop was hot). Whatever consumes an IRT_I64 ref must
+** therefore be exact for every 64-bit value and must not conclude anything
+** from the type alone:
+** - values leave a trace through the C encoder, which picks the canonical
+**   encoding by value (lj_snap.c, lj_i64_tvstore, the store helpers);
+** - a table key is guarded to be outside int32 (rec_idx_i64key);
+** - equality against an int32 ref compares the values (lj_record_objcmp);
+** - a side trace inherits the IR types of its parent's snapshot, but the
+**   stack it is recorded on holds what the exit handler restored. An
+**   inherited IRT_I64 slot whose value came back as an int32 is narrowed
+**   under a guard before the first instruction is recorded
+**   (rec_setup_side_i64), and so is a load forwarded from the replayed
+**   store of a sunk allocation (lj_record_idx), so the rule holds again
+**   for the recording. */
 #define tref_isi64(tr)		(tref_istype((tr), IRT_I64))
 #define tvisi64any(o)		(tvisi64((o)) || tvisi47w((o)))
 /* IR type of a loaded TValue, with int64 values as IRT_I64. */
@@ -191,14 +203,9 @@ static void rec_check_slots(jit_State *J)
 	lj_assertJ(!tref_isk(tr) || gcval(tv) == ir_kgc(ir),
 		   "slot %d function mismatch", s);
       } else {
-	/* Number repr. may differ, but other types must be the same. An I64
-	** TRef may face an int32 stack value: a side trace replays a parent
-	** loop slot whose I64 value wrapped into the int32 range and was
-	** restored canonically (see the representation rule above). The
-	** replayed I64 SLOAD's runtime guard exits in that case. */
+	/* Number repr. may differ, but other types must be the same. */
 	lj_assertJ(tvisi64any(tv) ? tref_isi64(tr) :
-		   tvisnumber(tv) ? (tref_isnumber(tr) ||
-				    (tvisint(tv) && tref_isi64(tr))) :
+		   tvisnumber(tv) ? tref_isnumber(tr) :
 				    itype2irt(tv) == tref_type(tr),
 		   "slot %d type mismatch: stack type %d vs IR type %d",
 		   s, itypemap(tv), tref_type(tr));
@@ -301,6 +308,24 @@ int lj_record_objcmp(jit_State *J, TRef a, TRef b, cTValue *av, cTValue *bv)
 	ta = IRT_NUM;
       } else if (ta == IRT_NUM && tb == IRT_INT) {
 	b = emitir(IRTN(IR_CONV), b, IRCONV_NUM_INT);
+      } else if ((ta == IRT_I64 && tb == IRT_INT) ||
+		 (ta == IRT_INT && tb == IRT_I64)) {
+	/* 5.4: an int64 ref is not guarded to stay outside the int32 range
+	** (see the representation rule at the top), so the two types do not
+	** make the integers different. Compare the 64-bit values. */
+	if (ta == IRT_INT)
+	  a = emitir(IRT(IR_CONV, IRT_I64), a, IRCONV_I64_INT|IRCONV_SEXT);
+	else
+	  b = emitir(IRT(IR_CONV, IRT_I64), b, IRCONV_I64_INT|IRCONV_SEXT);
+	ta = IRT_I64;
+      } else if ((ta == IRT_I64 && tb == IRT_NUM) ||
+		 (ta == IRT_NUM && tb == IRT_I64)) {
+	/* int64 vs. float is an exact comparison of the values in 5.4. The
+	** equality bytecodes do this before they get here; rawequal does not. */
+	TRef cmp = lj_ir_call(J, IRCALL_lj_i64_cmpnum, ta == IRT_I64 ? a : b,
+			      ta == IRT_I64 ? b : a);
+	emitir(IRTG(diff ? IR_NE : IR_EQ, IRT_INT), cmp, lj_ir_kint(J, 0));
+	return diff;
       } else {
 	/* Two different types are never equal -- for (userdata, int64/num)
 	** only under a udtype guard, which the BC_ISEQV path emits before
@@ -630,6 +655,27 @@ nocanon:
   lj_snap_add(J);  /* Add loop snapshot. */
   J->needsnap = 0;
   J->mergesnap = 1;  /* In case recording continues. */
+}
+
+/* A side trace starts from the IR types of its parent's snapshot
+** (lj_snap_replay) and is recorded on the stack the exit handler restored.
+** The two differ for an int64 ref whose value was inside the int32 range at
+** the exit: it came back as an int32 (see the representation rule at the
+** top). Narrow such a slot under a guard, so the recording sees one integer
+** in one representation. The guard belongs to the initial snapshot, which
+** still holds the inherited ref; if another run leaves the parent with a
+** value outside int32, this trace is left at once and the exit gets its own
+** side trace. */
+static void rec_setup_side_i64(jit_State *J)
+{
+  cTValue *base = J->L->base - J->baseslot;
+  BCReg s, nslots = J->baseslot + J->maxslot;
+  for (s = 0; s < nslots; s++) {
+    TRef tr = J->slot[s];
+    if (tref_isi64(tr) && !(tr & (TREF_FRAME|TREF_CONT|TREF_KEYINDEX)) &&
+	tvisint(&base[s]) && !tvisi47w(&base[s]))
+      J->slot[s] = emitir(IRTGI(IR_CONV), tr, IRCONV_INT_I64|IRCONV_CHECK);
+  }
 }
 
 /* Search bytecode backwards for a int/num constant slot initializer. */
@@ -2177,6 +2223,13 @@ static TRef rec_idx(jit_State *J, RecordIndex *ix, int tabguard)
       lj_ir_rollback(J, rbref);  /* Rollback to eliminate hmask guard. */
       J->guardemit = rbguard;
     }
+    if (t == IRT_INT && tref_isi64(res)) {
+      /* The load was forwarded from a store of an int64 ref, and the table
+      ** holds an int32: an allocation sunk in the parent trace and replayed
+      ** into this side trace with a value that was inside the int32 range at
+      ** the exit (see the representation rule at the top). Narrow it. */
+      res = emitir(IRTGI(IR_CONV), res, IRCONV_INT_I64|IRCONV_CHECK);
+    }
     if (t == IRT_NIL && ix->idxchain && lj_record_mm_lookup(J, ix, MM_index))
       goto handlemm;
     if (irtype_ispri(t)) res = TREF_PRI(t);  /* Canonicalize primitives. */
@@ -3622,6 +3675,7 @@ void lj_record_setup(jit_State *J)
       J->startpc = NULL;  /* Prevent forming an extra loop. */
     }
     lj_snap_replay(J, T);
+    rec_setup_side_i64(J);
   sidecheck:
     if ((traceref(J, J->cur.root)->nchild >= J->param[JIT_P_maxside] ||
 	 T->snap[J->exitno].count >= J->param[JIT_P_hotexit] +

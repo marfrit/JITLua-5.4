@@ -78,9 +78,10 @@ ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=0:halt_on_error=1 \
   MODLUAJIT="$ASSERTBUILD/src/luajit" \
   CAPI_OUT="$ASSERTBUILD/capi-build" tests/capi/run.sh
 # The d54 corpus under the assert build with a side trace after the first
-# taken exit: side-trace replay inherits the parent's snapshot slot types
-# (an I64 loop slot whose value wrapped into the int32 range is restored
-# canonically; rec_check_slots must accept it -- see src/lj_record.c).
+# taken exit: a side trace starts from its parent's snapshot slot types, and
+# rec_check_slots compares them with the stack the exit restored (an int64
+# slot that came back as an int32 is narrowed first, rec_setup_side_i64 in
+# src/lj_record.c).
 ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=print_stacktrace=0:halt_on_error=1 \
   LUAJIT="$ASSERTBUILD/src/luajit" tests/harness.sh --strict --mode B \
   --corpus tests/d54 --timeout 120 --jit-args="-Ohotexit=1"

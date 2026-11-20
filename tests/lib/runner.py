@@ -209,6 +209,9 @@ VENDORED_DIRECTIVES = {
     # Ends in a loop that waits for a finalizer (see known-different.tsv); it
     # gets there in well under a second.
     "tests/corpus/puc54/db.lua": {"timeout": "10"},
+    # GC1/GC2 wait for the finalizer of a table kept alive by a dead stack slot
+    # (lines 63/82/87/92); everything before that runs in well under a second.
+    "tests/corpus/puc54/gc.lua": {"timeout": "10"},
 }
 
 

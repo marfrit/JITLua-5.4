@@ -526,7 +526,11 @@ TRef LJ_FASTCALL lj_opt_narrow_cindex(jit_State *J, TRef tr)
 
 /* -- Narrowing of arithmetic operators ----------------------------------- */
 
-/* Convert string to number. Error out for non-numeric string values. */
+/* Convert string to number. Error out for non-numeric string values.
+** Only '/' and '^' reach here with a string operand: + - * % and unary-
+** punt on the string's integer/float subtype (see lj_opt_narrow_arith,
+** lj_opt_narrow_unm, lj_opt_narrow_mod), and those two always give a float.
+*/
 static TRef conv_str_tonum(jit_State *J, TRef tr, TValue *o)
 {
   if (tref_isstr(tr)) {
@@ -546,6 +550,17 @@ static TRef conv_str_tonum(jit_State *J, TRef tr, TValue *o)
 TRef lj_opt_narrow_arith(jit_State *J, TRef rb, TRef rc,
 			 TValue *vb, TValue *vc, IROp op)
 {
+  /* Lua 5.4 string coercion (luaV_tonumber_): a string that denotes an
+  ** integer ("2", "0x10") is an INTEGER operand, so 5 + "2" is the integer
+  ** 7, not 7.0. IR_STRTO only yields a float, and no guard can express
+  ** "the string denotes an integer": the slot may hold "2.0" at record time
+  ** and "2" at run time (or vice versa), flipping the result subtype -- and
+  ** the value above 2^53 -- under a committed trace. So a string operand
+  ** leaves + - * % to the interpreter. '/' and '^' always give a float in
+  ** 5.4, and the STRTO double is the same conversion the interpreter uses
+  ** (lj_strscan_num), so their float path stays in a trace. */
+  if (op >= IR_ADD && op <= IR_MUL && (tvisstr(vb) || tvisstr(vc)))
+    lj_trace_err(J, LJ_TRERR_BADTYPE);
   rb = conv_str_tonum(J, rb, vb);
   rc = conv_str_tonum(J, rc, vc);
   /* Must not narrow MUL in non-DUALNUM variant, because it loses -0. */
@@ -574,6 +589,11 @@ TRef lj_opt_narrow_arith(jit_State *J, TRef rb, TRef rc,
 /* Narrowing of unary minus operator. */
 TRef lj_opt_narrow_unm(jit_State *J, TRef rc, TValue *vc)
 {
+  /* Lua 5.4: -"2" is the integer -2 (luaV_tonumber_). As in
+  ** lj_opt_narrow_arith, STRTO is float-only and no guard can pin the
+  ** string's form, so a string operand punts to the interpreter. */
+  if (tvisstr(vc))
+    lj_trace_err(J, LJ_TRERR_BADTYPE);
   rc = conv_str_tonum(J, rc, vc);
   if (tref_isinteger(rc)) {
     uint32_t k = (uint32_t)numberVint(vc);
@@ -593,6 +613,10 @@ TRef lj_opt_narrow_unm(jit_State *J, TRef rc, TValue *vc)
 TRef lj_opt_narrow_mod(jit_State *J, TRef rb, TRef rc, TValue *vb, TValue *vc)
 {
   TRef tmp;
+  /* Lua 5.4: 5 % "2" is the integer 1 (both operands integer); as in
+  ** lj_opt_narrow_arith, a string operand punts to the interpreter. */
+  if (tvisstr(vb) || tvisstr(vc))
+    lj_trace_err(J, LJ_TRERR_BADTYPE);
   rb = conv_str_tonum(J, rb, vb);
   rc = conv_str_tonum(J, rc, vc);
   if ((LJ_DUALNUM || (J->flags & JIT_F_OPT_NARROW)) &&

@@ -45,7 +45,14 @@
 ** integer that does not fit int32 (widened 47-bit inline or interned box).
 ** Results that fit int32 are narrowed back under a guard right where they
 ** are produced, so a slot's IR type follows the interpreter's representation
-** and exits can re-encode a value from its type alone (lj_snap.c). */
+** and exits can re-encode a value from its type alone (lj_snap.c).
+** One exception: a side trace replays its parent's snapshot with inherited
+** TRef types (lj_snap_replay), and the exit handler restores each value in
+** its canonical encoding (lj_snap.c). An I64 value that wrapped into the
+** int32 range therefore re-enters the stack as an int32 while the replayed
+** slot still carries the parent's I64 type; the replayed I64 SLOAD's
+** runtime guard exits in that case, so the value stays correct.
+** rec_check_slots accepts exactly this state. */
 #define tref_isi64(tr)		(tref_istype((tr), IRT_I64))
 #define tvisi64any(o)		(tvisi64((o)) || tvisi47w((o)))
 /* IR type of a loaded TValue, with int64 values as IRT_I64. */
@@ -184,9 +191,14 @@ static void rec_check_slots(jit_State *J)
 	lj_assertJ(!tref_isk(tr) || gcval(tv) == ir_kgc(ir),
 		   "slot %d function mismatch", s);
       } else {
-	/* Number repr. may differ, but other types must be the same. */
+	/* Number repr. may differ, but other types must be the same. An I64
+	** TRef may face an int32 stack value: a side trace replays a parent
+	** loop slot whose I64 value wrapped into the int32 range and was
+	** restored canonically (see the representation rule above). The
+	** replayed I64 SLOAD's runtime guard exits in that case. */
 	lj_assertJ(tvisi64any(tv) ? tref_isi64(tr) :
-		   tvisnumber(tv) ? tref_isnumber(tr) :
+		   tvisnumber(tv) ? (tref_isnumber(tr) ||
+				    (tvisint(tv) && tref_isi64(tr))) :
 				    itype2irt(tv) == tref_type(tr),
 		   "slot %d type mismatch: stack type %d vs IR type %d",
 		   s, itypemap(tv), tref_type(tr));

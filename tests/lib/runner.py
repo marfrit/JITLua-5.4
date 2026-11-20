@@ -379,6 +379,8 @@ class Job:
             on = [jit, "-jon"]
             if "@" in self.mode:
                 on += ["-O" + self.mode.split("@", 1)[1]]
+            if o.jit_args:
+                on += shlex.split(o.jit_args)
             a = run(on + extra_pre + [name] + extra, cwd, to, ml,
                     env=arm_env("jit", scratch))
             b = run([jit, "-joff"] + extra_pre + [name] + extra, cwd, to, ml,
@@ -484,6 +486,9 @@ def main():
     ap.add_argument("--jobs", type=int, default=min(8, os.cpu_count() or 1))
     ap.add_argument("--opt-levels", default=None,
                     help="comma list of JIT opt levels for mode B (e.g. 0,1,2,3)")
+    ap.add_argument("--jit-args", default="",
+                    help="extra arguments for the JIT-on arm of mode B, "
+                         "e.g. '-Ohotexit=1'")
     ap.add_argument("--report-dir", default=str(REPORT_DIR))
     ap.add_argument("--update-known-bad", action="store_true",
                     help="rewrite known-bad.tsv from the failures of this run")

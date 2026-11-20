@@ -73,6 +73,12 @@ stage 'tail -12' tests/harness.sh --strict --mode B --opt-levels 0,1,2,3 --corpu
 
 say "harness: dump/reload (mode R)"
 stage 'tail -12' tests/harness.sh --strict --mode R --corpus tests/d54 --timeout 120
+
+say "assert build (LUA_USE_ASSERT + APICHECK): d54 corpus with -Ohotexit=1"
+# Side-trace replay inherits the parent's snapshot slot types; an I64 loop
+# slot whose value wrapped into the int32 range is restored canonically and
+# must not trip rec_check_slots (red before the fix: d54/numeric_07*, i64_02*).
+stage 'tail -16' sh tests/lib/assertbuild-d54.sh
 echo "=== lib checks ==="
 for j in -joff -jon; do timeout 120 ./src/luajit $j tests/lib/bit-checkint.lua || exit 1; done
 for j in -joff -jon; do timeout 120 ./src/luajit $j tests/lib/ffrec-54.lua || exit 1; done

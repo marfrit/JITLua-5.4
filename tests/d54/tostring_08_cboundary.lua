@@ -53,12 +53,12 @@ local a = 0
 for i = 1, 1200 do a = a + #tostring(t4) end   -- hot: compiled as well
 print("frame-whats", tostring(t4), a > 0)
 
--- 5. an error raised inside the metamethod is reported at the metamethod.
+-- 5. an error raised inside the metamethod is reported at the metamethod (its line is printed).
 local t5 = setmetatable({}, { __tostring = function() error("boom") end })
 local b = 0
 for i = 1, 1200 do
   local ok, e = pcall(tostring, t5)
-  if not ok then b = b + 1; if i == 1200 then print("mm-error", strip(e)) end end
+  if not ok then b = b + 1; if i == 1200 then print("mm-error", strip(e), "line", e:match(":(%d+): boom$")) end end
 end
 print("mm-error-count", b)
 

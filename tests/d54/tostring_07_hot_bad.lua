@@ -58,3 +58,18 @@ print("field-result", u, ok3, nometa(err3))
 local e = setmetatable({}, { __tostring = function() error("boom") end })
 local ok4, err4 = pcall(tostring, e)
 print("mm-raises", ok4, nometa(err4))
+
+-- 6. the result changes type inside one hot loop on one code path (the field
+-- is reassigned by the loop, not by a branch in the metamethod): a number is
+-- converted from that iteration on, a table raises at exactly its iteration.
+local box2 = { v = "xy" }
+local t2 = setmetatable({}, { __tostring = function() return box2.v end })
+local last, sum = 0, 0
+local ok5, err5 = pcall(function()
+  for i = 1, 2000 do
+    if i == 1400 then box2.v = 12345 elseif i == 1700 then box2.v = {} end
+    sum = sum + #tostring(t2)
+    last = i
+  end
+end)
+print("field-late-bad", ok5, nometa(err5), "last ok", last, "sum", sum)

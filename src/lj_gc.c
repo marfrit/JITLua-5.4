@@ -344,6 +344,29 @@ static void gcstats_cycle_hook(global_State *g)
 #define GCSWEEPCOST	10
 #define GCFINALIZECOST	100
 
+/* Stage-1 precursor: the string sweep is a pointer chase over the interned
+** strings -- the optional stats build measures 60-91 ns per string visited,
+** i.e. one cache miss each -- while the bucket array itself is walked in
+** increasing index order.  The chain head of the bucket a few slots ahead is
+** therefore a safe lookahead: prefetching it hides the miss without changing
+** what the sweep does.  A hint only; no layout, no semantics.
+**
+** The hint is architecture-dependent and the default is set from measurement:
+** it helps on x86_64 and costs on arm64, so it is off on every other target.
+** -DLJ_STR_PREFETCH=N overrides (N=0 is the base build). */
+#ifndef LJ_STR_PREFETCH
+#if LJ_TARGET_X86ORX64
+#define LJ_STR_PREFETCH	16
+#else
+#define LJ_STR_PREFETCH	0
+#endif
+#endif
+#if LJ_STR_PREFETCH > 0 && (defined(__GNUC__) || defined(__clang__))
+#define LJ_PREFETCH(p)	__builtin_prefetch(p)
+#else
+#define LJ_PREFETCH(p)	((void)0)
+#endif
+
 /* Macros to set GCobj colors and flags. */
 #define white2gray(x)		((x)->gch.marked &= (uint8_t)~LJ_GC_WHITES)
 #define gray2black(x)		((x)->gch.marked |= LJ_GC_BLACK)
@@ -1128,6 +1151,10 @@ static size_t gc_onestep(lua_State *L)
   case GCSsweepstring: {
     GCSize old = g->gc.total;
     gc_sweepstr(g, &g->str.tab[g->gc.sweepstr++]);  /* Sweep one chain. */
+#if LJ_STR_PREFETCH > 0
+    if (g->gc.sweepstr + LJ_STR_PREFETCH <= g->str.mask)
+      LJ_PREFETCH(gcref(g->str.tab[g->gc.sweepstr + LJ_STR_PREFETCH]));
+#endif
     if (g->gc.sweepstr > g->str.mask)
       g->gc.state = GCSsweep;  /* All string hash chains sweeped. */
     lj_assertG(old >= g->gc.total, "sweep increased memory");

@@ -31,7 +31,8 @@ backend, the same family as `adc0eb97` (snapshot restore).
   its predecessor (hang). The randomness came from which negative key
   collided first; `aux(1,32)`/`aux(1,33)` were never the trigger.
 
-Measured on x64-build before the fix (20 runs each, -O3): `math-jit-repro.lua`
+Measured on `x64-build` (a private wrapper that runs a command on a remote
+x86_64 test host) before the fix (20 runs each, -O3): `math-jit-repro.lua`
 17/20, `-O0` 20/20; `aux(1,32)` only 0/20; `aux(-10,10)` only 7/20;
 `aux(-40,-1)` only 20/20. After: 0/50 at -O0 and -O3, 0/20 on both negative
 ranges.

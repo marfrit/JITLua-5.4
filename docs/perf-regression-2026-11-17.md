@@ -6,13 +6,18 @@ Diagnosis only; no source/VM fix. Tools: `tests/lib/perf-diag.py` (`-jv`,
 `tests/lib/perf-knuc.lua`. Sources/workloads as in
 `docs/bench-classic-2026-11-17.md`.
 
+Commit hashes below are the ones in the current history. The 2026-11-18
+rewrite of this branch gave the same changes new hashes, so the hashes written
+when this note was first committed named the pre-rewrite commits; the changes
+themselves are the same ones, with identical patches.
+
 ## Baseline rerun after the arm64 fix
 
-`6e4d7bb9` removed the arm64 checkint TMP0 clobber. arm deltablue rerun
+`9cc89969` removed the arm64 checkint TMP0 clobber. arm deltablue rerun
 (stock 3593.4 ms, ours 4709.3 ms, ratio 0.76): it improved from 5685.8 ms
 (0.62) at the pre-fix measurement but remains a >10% finding (~31% slower).
 x64 is unchanged (19042.8 vs 27450.5, 0.69). x64 `checkint` still carries the
-widened-range test added in `cb2f6da`, but these benchmark hot traces contain
+widened-range test added in `ea371c60`, but these benchmark hot traces contain
 no bit/tobit fast-function calls (`calls=0`, `lj_i64=0`), so it is not the
 cause of deltablue/spectral/k-nucleotide. It remains a possible cost on
 int-heavy fast paths only.
@@ -78,7 +83,7 @@ function): ours is slower in `-joff` for K=3 ~15%, K=12 ~8%, K=18 ~9%, and in
 Both stock and ours intern strings, so interning policy is not the delta; the
 `__index`-function miss path and table string-key lookup are.
 
-arm rerun at `6e4d7bb9` (`BENCH_ONLY=k-nucleotide`): stock 24.4 ms, ours
+arm rerun at `9cc89969` (`BENCH_ONLY=k-nucleotide`): stock 24.4 ms, ours
 19.2 ms (1.27, ours faster). The earlier arm 0.88 figure was load/noise; the
 x64 finding stands and arm's JIT hides the interpreter table-path cost.
 
@@ -128,7 +133,7 @@ forwarding), `lj_opt_fwd_href_nokey` and the TDUP const-fold path (which also
 fed an IR_KINT64 key to lj_ir_kvalue, i.e. an FFI cdata). Probes
 (`tests/d54/jit_02_tabkey_alias.lua`): `#t` after `t[4] = nil` with 4 in the
 hash part was wrong in 2943/3000 iterations with -jon -- a silent wrong result,
-not an abort. Fixed in `56f9eea4`: NOMM aborts 74 -> 0 (arm), 0 (x64);
+not an abort. Fixed in `60cc7371`: NOMM aborts 74 -> 0 (arm), 0 (x64);
 all probes 0 wrong on both arches.
 
 That removed the abort but not most of the slowdown (arm 0.76x -> 0.73x..0.85x
@@ -167,7 +172,7 @@ interpreter on both arches (looped kernels on the real input:
 - `io.lines()`: the 5.4 port reads lines byte-wise (embedded NULs), with a
   locked getc(); 3.0-4.5 ms per MB against stock's fgets() 1.5-2.4 ms. An
   unlocked loop is no faster; POSIX `getline()` is (1.53-1.55 ms, parity).
-  `c62fa218`. ~0.5 ms of the x64 run.
+  `2366c609`, hardened by `ee7b31dd`. ~0.5 ms of the x64 run.
 - x64 `checkint` macro: tag check plus a second mask/branch stage for the
   widened 47-bit encoding on every interpreter int path. A one-compare form
   gains 12% on pure int loops but loses 20-25% on the string.sub/TGETV paths

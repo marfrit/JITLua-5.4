@@ -5,6 +5,9 @@ a C test); Lua-visible use is blocked by step 2/3. ADR-001 (16-byte `TValue`)
 demoted to documented fallback. Second opinion: the former internal coordinator answer (plus Markus
 addenda 1 and 2).
 
+`arm64-build` and `x64-build`, named below for the runs, are private wrappers
+that run a command on a remote arm64 / x86_64 test host.
+
 ## Measured findings (this session)
 
 1. **A new GC tag is unsafe on GC64** (the analysis below assumed one; measurement

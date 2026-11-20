@@ -4,6 +4,8 @@ Measurement only; no source changes and no benchmark "fixes". Median of 3 wall
 times per arm, one box job at a time, same moment per arm. Arms: stock LuaJIT
 2.1 `-jon`, this fork `-jon`, PUC Lua 5.4.9. Harness: `tests/bench/classic/`
 (pinned sources in `manifest.txt`, fetched into `.dlcache/bench`; boxes offline).
+`arm64-build` and `x64-build` below are private wrappers that run a command on
+a remote arm64 / x86_64 test host.
 Workloads: nbody 10000, spectral-norm 200, fannkuch-redux 9, binary-trees 14,
 fasta 10000, deltablue locals (10000 iterations), scimark -small,
 k-nucleotide + regex-dna on a pinned 100 KB `input.fasta`.

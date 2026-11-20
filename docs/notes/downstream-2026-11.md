@@ -273,6 +273,14 @@ the count unless the close is followed by `RETM`. Test:
 
 ### 2. Fennel `test-getinfo` — `debug.getinfo(1,"t").istailcall` (known PENDING)
 
+**Superseded after this round was written (2026-11-19): it is fixed.** The
+frame of a Lua function entered by a tail call now carries a mark, in the
+interpreter, in both VMs and in the recorder (`83e0121d`), with the docs and
+gate counts in `8a50a0f9`, merged as `35854613`. The item left
+`docs/DIFFERENCES.md` for `docs/CHANGELOG-VM.md` ("`debug.getinfo(level, "t").istailcall`
+is true for every Lua function entered by a tail call"), and the mechanism is
+in `docs/notes/istailcall.md`. The text below is kept as this round's record.
+
 JITLua adds one failure on every arm: Fennel's `test-getinfo` expects
 `istailcall = true` for a tail call; JITLua reports `false` without a call
 hook. Already recorded in `docs/DIFFERENCES.md` as PENDING (db.lua line 619).
@@ -300,4 +308,5 @@ print(g())   -- PUC: true | JITLua: false
    identical on PUC, but the exact cause was not traced).
 3. LuaRocks suite: needs a hererocks-style `LUA`/`LUA_DIR` test environment;
    not run here.
-4. `debug.getinfo(...).istailcall` remains PENDING (known, unchanged).
+4. ~~`debug.getinfo(...).istailcall` remains PENDING (known, unchanged).~~
+   Superseded: fixed after this round by `83e0121d` (item 2 above).

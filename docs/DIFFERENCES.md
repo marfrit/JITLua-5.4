@@ -87,7 +87,32 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   returns. PUC limits the scan to the live registers of the instruction that
   started the collection. `db.lua` line 913 waits in a loop for the finalizer
   of such an object and does not end here (the runner bounds the file at
-  10 s; `tests/known-different.tsv`).
+  10 s; `tests/known-different.tsv`). `gc.lua` has the same loops at lines
+  63/82/87/92 (`repeat u = {} until finish`, GC1/GC2): PUC finalizes after 39
+  iterations, here the loop does not end, so the file is bounded at 10 s too
+  and everything after line 339 is not exercised in the corpus run;
+  `tests/lib/gc-finloop-repro.lua`.
+- `IMPL-DEFINED` When a weak *value* disappears relative to its finalizer. PUC
+  5.4 clears weak values in the atomic phase, before finalizers run, so a
+  finalizer of a weakly referenced object already sees the entry gone
+  (`gc.lua:323`: inside `__gc`, `C.key == nil`). LuaJIT clears weak values
+  during sweep, after the finalizers, so the finalizer sees the object still
+  present in the weak table; after the next full collection both sides agree.
+  The manual does not order these two steps; measured the same on x86_64 and
+  aarch64, `tests/lib/gc-weak-finalizer-repro.lua`.
+- `IMPL-DEFINED` Ephemeron convergence. PUC 5.4 uses the converged ephemeron
+  marking (`luaC_ephemeron`), so an ephemeron table whose keys point to values
+  that die loses those entries in the same cycle; here the weak-key algorithm
+  is the pre-5.4 one, so after a full collection the dead entries remain until
+  a later cycle (`gc.lua:347`: `next(a) == nil` fails, the reachable chain is
+  the same 100 entries in both arms). `tests/lib/gc-ephemeron-repro.lua`.
+- `FORK` `collectgarbage("count")` after clearing a weak kv table
+  (`gc.lua:475/487`): the 2^22-byte key is a long string, which LuaJIT interns
+  (the `FORK` string interning row above) and therefore still counts after the
+  table is cleared, while PUC frees it; independently, `count` reports
+  LuaJIT's allocation grain, so the absolute figure differs before the weak
+  table is involved too (measured `after fill` 12288 vs 8192 KB, `final` 2045
+  vs 0.24 KB on x86_64 and aarch64). `tests/lib/gc-count-weak-repro.lua`.
 - `FORK` A stripped dump keeps no `linedefined`/`lastlinedefined` (both are 0
   after loading it); PUC's stripped dumps keep them (`db.lua` line 1002).
 - `IMPL-DEFINED` Inside a `__close` handler on an error path, debug level 2 is

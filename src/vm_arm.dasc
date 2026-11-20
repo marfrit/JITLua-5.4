@@ -2904,18 +2904,12 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     }
     |  // Different tables or userdatas. Need to check __eq metamethod.
     |  // Field metatable must be at same offset for GCtab and GCudata!
-    |  ldr TAB:RA, TAB:CARG1->metatable
-    |  cmp TAB:RA, #0
-    if (vk) {
-      |  beq <2			// No metatable?
-    } else {
-      |  beq >2			// No metatable?
-    }
-    |  ldrb RA, TAB:RA->nomm
+    |  // 5.4 lobject.c luaV_equalobj: the first operand's __eq is used, and
+    |  // only if it has none, the second one's. The C helper applies that rule;
+    |  // this backend has no inline negative-cache shortcut any more.
     |   mov CARG4, #1-vk		// ne = 0 or 1.
     |   mov CARG2, CARG1
-    |  tst RA, #1<<MM_eq
-    |  beq ->vmeta_equal		// 'no __eq' flag not set?
+    |  b ->vmeta_equal		// Handle __eq metamethod.
     if (vk) {
       |  b <2
     } else {

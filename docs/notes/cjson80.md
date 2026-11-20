@@ -81,9 +81,12 @@ round's runner.
 
 - Test-environment artifact: the suite needs a generated fixture that its own
   release archive omits; no interpreter and no cjson difference is involved.
-- Remedy inside the benchmark (not applied here, by instruction): run
-  `perl genutf8.pl` in `tests/<top>/tests/` before the suite, as
-  `tests/corpus-ext/run.sh` already does.
+- Remedy in the benchmark: `gc_measure.py` now runs `prepare_corpus`, which
+  executes `perl genutf8.pl` in `tests/<top>/tests/` before the suite (the same
+  way `tests/corpus-ext/run.sh` does), and exits with a clear `ERROR lua-cjson:
+  need 'perl' ...` instead of silently skipping when perl is not on `PATH`.
+  Verified through the gc_measure path on x86_64 and arm64: JITLua `-joff` and
+  `-jon` both report 105 PASS, "all tests succeeded".
 - No `tests/d54` or `tests/capi` red test: there is nothing for the
   interpreter to fix. `docs/DIFFERENCES.md` and `tests/known-bad.tsv` are
   untouched.

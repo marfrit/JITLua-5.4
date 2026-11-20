@@ -12,6 +12,7 @@ import io
 import json
 import os
 import re
+import shutil
 import signal
 import statistics
 import subprocess
@@ -72,6 +73,9 @@ CORPUS_SPEC = {
     "lua-cjson": {
         "archive": "lua-cjson-2.1.0.14.tar.gz", "top": "lua-cjson-2.1.0.14",
         "cmod": ("cjson", "lua_cjson.c strbuf.c fpconv.c", "-DNDEBUG"),
+        # test 80 reads tests/utf8.dat, which the release archive does not ship;
+        # genutf8.pl generates it (see docs/notes/cjson80.md).
+        "prepare": ("tests", ["perl", "genutf8.pl"], "utf8.dat"),
         "scripts": ["test.lua"], "cwd": "tests",
         "lua_path": "../lua/?.lua;;",
     },
@@ -214,6 +218,35 @@ def ensure_corpus(workloads):
         else:
             with tarfile.open(arc) as t:
                 t.extractall(dst, filter="data")
+
+
+def prepare_corpus(workloads):
+    """Run each workload's fixture generator (e.g. lua-cjson's tests/utf8.dat).
+
+    A missing generator or a failed run is a hard error: without the fixture the
+    suite fails a test on every arm, which would be misread as an interpreter
+    difference (lua-cjson test 80, docs/notes/cjson80.md).
+    """
+    for name, spec in workloads.items():
+        prep = spec.get("prepare")
+        if not prep:
+            continue
+        cwd, argv, output = prep
+        base = CORPUS / name / spec["top"]
+        out = base / cwd / output
+        if out.is_file():
+            continue
+        exe = argv[0]
+        if not shutil.which(exe):
+            sys.exit("ERROR %s: need '%s' to generate %s, but it is not on PATH. "
+                     "Install perl or generate the fixture beforehand "
+                     "(docs/notes/cjson80.md)." % (name, exe, out))
+        r = subprocess.run(argv, cwd=str(base / cwd), stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE)
+        err = r.stderr.decode("utf-8", "replace").strip()
+        if r.returncode or not out.is_file():
+            sys.exit("ERROR %s: '%s' failed in %s (rc=%s): %s" %
+                     (name, " ".join(argv), base / cwd, r.returncode, err[-500:]))
 
 
 def build_cmods(workloads):
@@ -442,6 +475,7 @@ def main():
         selected = {k: v for k, v in CORPUS_SPEC.items()
                     if not ONLY or k in ONLY.split(",")}
         ensure_corpus(selected)
+        prepare_corpus(selected)
         mods = build_cmods(selected)
         for wl in corpus_workloads(selected):
             if ONLY and wl["name"] not in ONLY.split(","):

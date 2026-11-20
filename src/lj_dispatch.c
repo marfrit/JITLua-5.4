@@ -500,7 +500,8 @@ void LJ_FASTCALL lj_dispatch_ins(lua_State *L, const BCIns *pc)
 ** already in place at base-2 (over the function and link slots). The frame
 ** is reconstituted for the hook (the results move up two slots) and the
 ** results are moved back afterwards. The function comes from the call hook
-** (L->hookff); fast functions that reach fff_res run no Lua code in between.
+** (L->hookff); fast functions that reach fff_res run no Lua code in between,
+** except tostring, which calls a __tostring method and keeps the note.
 */
 int LJ_FASTCALL lj_dispatch_ffret(lua_State *L, int n, const BCIns *pc)
 {

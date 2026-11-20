@@ -390,9 +390,13 @@ LJLIB_ASM(tostring)		LJLIB_REC(.)
     ** call cannot check the result, so the method is called as a normal
     ** call and the result slot below the frame is filled from it. */
     GCstr *str;
+    /* The call hook of the method clears the note that the return hook of
+    ** this fast function is fired from (lj_dispatch_ffret). Keep it. */
+    GCfunc *hookff = mref(L->hookff, GCfunc);
     copyTV(L, L->top++, mo);
     copyTV(L, L->top++, o);
     lua_call(L, 1, 1);
+    setmref(L->hookff, hookff);
     str = lj_strfmt_tolstrres(L);
     setstrV(L, L->base-1-LJ_FR2, str);
     L->top = L->base + 1;

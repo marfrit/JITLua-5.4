@@ -1970,12 +1970,14 @@ LUA_API int lua_gc(lua_State *L, int what, int data)
   switch (what) {
   case LUA_GCSTOP:
     g->gc.threshold = LJ_MAX_MEM;
+    g->gc.stopped = 1;
     break;
   case LUA_GCRESTART:
+    g->gc.stopped = 0;
     g->gc.threshold = data == -1 ? (g->gc.total/100)*g->gc.pause : g->gc.total;
     break;
   case LUA_GCCOLLECT:
-    lj_gc_fullgc(L);
+    lj_gc_fullgc(L);  /* like PUC's luaC_fullgc: the user stop flag stays */
     break;
   case LUA_GCCOUNT:
     res = (int)(g->gc.total >> 10);
@@ -1985,12 +1987,21 @@ LUA_API int lua_gc(lua_State *L, int what, int data)
     break;
   case LUA_GCSTEP: {
     GCSize a = (GCSize)data << 10;
+    uint8_t stopped = g->gc.stopped;
+    GCSize oldthr = g->gc.threshold;
+    /* 5.4 lapi.c: the user stop flag is cleared for the duration of the step
+    ** and restored after it, so "isrunning" does not change. */
+    g->gc.stopped = 0;
     g->gc.threshold = (a <= g->gc.total) ? (g->gc.total - a) : 0;
     while (g->gc.total >= g->gc.threshold)
       if (lj_gc_step(L) > 0) {
 	res = 1;
 	break;
       }
+    if (stopped) {
+      g->gc.stopped = 1;
+      g->gc.threshold = oldthr;  /* no implicit steps while stopped */
+    }
     break;
   }
   case LUA_GCSETPAUSE:
@@ -2002,7 +2013,7 @@ LUA_API int lua_gc(lua_State *L, int what, int data)
     g->gc.stepmul = (MSize)data;
     break;
   case LUA_GCISRUNNING:
-    res = (g->gc.threshold != LJ_MAX_MEM);
+    res = !g->gc.stopped;
     break;
   case LUA_GCGEN: case LUA_GCINC: {
     /* 5.4 returns the previous mode; LuaJIT keeps a single collector but

@@ -150,7 +150,11 @@ which PUC skips. Expected; no failure.
 
 - **lua-cjson** 104/105 on every arm: test 80 "Decode all UTF-16 escapes"
   needs the generated `utf8.dat` fixture ("Failed to load utf8.dat - please run
-  genutf8.pl"). Fixture not shipped; fails on PUC too.
+  genutf8.pl"). The release archive does not ship it and this round's runner did
+  not generate it; the suite is 105/105 on PUC and on JITLua once `genutf8.pl`
+  has been run (verified 2026-11-20 on x86_64 and arm64, all three arms: see
+  `docs/notes/cjson80.md`). Test-environment artifact, no interpreter
+  difference and no cjson difference.
 - **middleclass** 128/130 on every arm: two `__ipairs` tests. `__ipairs` was
   removed in Lua 5.4; the suite still expects the 5.2 metamethod.
 - **luaunit** `testWithRepeat`: a luaunit self-test that fails on PUC too.

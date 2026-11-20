@@ -39,7 +39,10 @@ GC a meaningful share of time *or* memory, per workload and per arch?
   "single" in every table. Corpus runs whose suite exits non-zero
   (lua-cjson, penlight on this host, luaunit for stock) are still timed: exit
   status is recorded but does not drop the sample. The harness, not this
-  runner, owns correctness.
+  runner, owns correctness. The lua-cjson non-zero exit is test 80's missing
+  `utf8.dat` fixture, not an interpreter difference: this runner never runs
+  `genutf8.pl`, and the same test fails on PUC 5.4.9 with the same module and
+  passes on every arm once the fixture exists (`docs/notes/cjson80.md`).
 - GC time and pauses come from the instrumentation builds: one optional block
   in `lj_gc.c` and the equivalent scratch patch for PUC, both dumping a
   `GCSTATS` line at exit. "GC ms" is the sum of collector-step durations as a

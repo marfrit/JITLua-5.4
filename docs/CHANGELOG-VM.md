@@ -7,6 +7,17 @@ target x86_64 (GC64) and arm64.
 
 ## Language and VM
 
+- `table.concat` range arguments (Lua 5.4): start and end were read as int32,
+  so `table.concat(t, "", math.maxinteger, math.maxinteger)` clamped and the
+  "invalid value (%s) at index %d" message named 2147483647 instead of the
+  5.4 integer, and a table keyed outside int32 was not found. Both bounds are
+  exact 5.4 integers now (`luaL_optinteger`; a non-integral float raises
+  "number has no integer representation"), the int32 fast path stays for the
+  common case, and the general path walks int64 keys via `lj_i64_tvstore`.
+  The index in the error message is a `lua_Integer` (`%s` placeholder).
+  PUC's suite checks the message in `strings.lua:15` via 392/394;
+  `tests/d54/str_04_concat_int64.lua` covers both extremes, an int32-crossing
+  lexicographic range, fractional bounds and element formatting.
 - `string.format` conversion rules (Lua 5.4): the format parser accepted
   specifications PUC rejects and printed others differently. Fixed after
   lstrlib.c's `getformat`/`checkformat`: the allowed flags per conversion, a

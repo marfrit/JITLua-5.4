@@ -24,11 +24,18 @@ REPS = int(os.environ.get("BENCH_REPS", "7"))
 def run_one(binpath, cwd, argv, stdin_file):
     stdin = open(stdin_file, "rb") if stdin_file else subprocess.DEVNULL
     try:
+        # No timeout: with one, subprocess.run() waits for the child by
+        # polling with sleeps that double up to 50 ms, so the end of a run is
+        # seen 15.5, 31.5, 63.5, 113.5, ... ms after its start. A 15.4 ms run
+        # then reads as 16 ms and a 16.0 ms run as 32 ms (the "0.499" that
+        # spectral-norm once had here). The job's own time limit bounds a hang.
         t0 = time.monotonic()
-        subprocess.run([binpath] + argv, cwd=cwd, stdin=stdin,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                       timeout=600)
-        return (time.monotonic() - t0) * 1000.0
+        p = subprocess.run([binpath] + argv, cwd=cwd, stdin=stdin,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        ms = (time.monotonic() - t0) * 1000.0
+        if p.returncode != 0:
+            sys.exit("%s %s: exit status %d" % (binpath, " ".join(argv), p.returncode))
+        return ms
     finally:
         if stdin_file:
             stdin.close()

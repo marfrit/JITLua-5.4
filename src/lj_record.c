@@ -56,7 +56,8 @@
 ** from the type alone:
 ** - values leave a trace through the C encoder, which picks the canonical
 **   encoding by value (lj_snap.c, lj_i64_tvstore, the store helpers);
-** - a table key is guarded to be outside int32 (rec_idx_i64key);
+** - a table key is guarded to be outside int32 (rec_idx_i64key), and so is
+**   a control value of a numeric for loop (rec_for);
 ** - equality against an int32 ref compares the values (lj_record_objcmp);
 ** - a side trace inherits the IR types of its parent's snapshot, but the
 **   stack it is recorded on holds what the exit handler restored. An
@@ -386,6 +387,18 @@ static TRef rec_i64_narrow(jit_State *J, TRef tr, int64_t v)
   if ((int64_t)(int32_t)v == v)
     return emitir(IRTGI(IR_CONV), tr, IRCONV_INT_I64|IRCONV_CHECK);
   return tr;
+}
+
+/* Guard that an int64 ref holds a value outside the int32 range, i.e. one
+** that the interpreter keeps in an int64 representation as well. An int64
+** constant in a slot always is one. */
+static void rec_i64_guardwide(jit_State *J, TRef tr)
+{
+  if (!tref_isk(tr)) {
+    TRef lo = emitir(IRTI(IR_CONV), tr, IRCONV_INT_I64);  /* Truncate. */
+    lo = emitir(IRT(IR_CONV, IRT_I64), lo, IRCONV_I64_INT|IRCONV_SEXT);
+    emitir(IRTG(IR_NE, IRT_I64), tr, lo);
+  }
 }
 
 /* Exact 64-bit value of an integer operand (int32, widened or box). */
@@ -906,11 +919,24 @@ static LoopEvent rec_for(jit_State *J, const BCIns *fori, int isforl)
     }
   } else {  /* Handle FORI/JFORI opcodes. */
     BCReg i;
+    /* 5.4 integers outside int32 as control values: lj_meta_for turns them
+    ** into floats (ADR-001b), here and when the interpreter runs the FORI.
+    ** Load such a slot before that, as the int64 the trace will find. */
+    for (i = FORL_IDX; i <= FORL_STEP; i++)
+      if (!tr[i] && tvisi64any(&tv[i])) sload(J, ra+i);
     lj_meta_for(J->L, tv);
     t = (LJ_DUALNUM || tref_isint(tr[FORL_IDX])) ? lj_opt_narrow_forl(J, tv) :
 						   IRT_NUM;
     for (i = FORL_IDX; i <= FORL_STEP; i++) {
       if (!tr[i]) sload(J, ra+i);
+      if (tref_isi64(tr[i])) {
+	/* The same conversion as lj_meta_for. It applies to a value outside
+	** int32 only: an int32 stays an integer there and can make the loop
+	** an integer loop, and an int64 ref can hold one (see the
+	** representation rule at the top). */
+	rec_i64_guardwide(J, tr[i]);
+	tr[i] = emitir(IRTN(IR_CONV), tr[i], IRCONV_NUM_I64);
+      }
       lj_assertJ(tref_isnumber_str(tr[i]), "bad FORI argument type");
       if (tref_isstr(tr[i]))
 	tr[i] = emitir(IRTG(IR_STRTO, IRT_NUM), tr[i], 0);

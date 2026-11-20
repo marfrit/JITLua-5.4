@@ -7,6 +7,24 @@ target x86_64 (GC64) and arm64.
 
 ## Language and VM
 
+- String arithmetic subtypes (Lua 5.4): a numeric string that denotes an
+  integer (`"2"`, `"0x10"`) is an *integer* operand in 5.4 (`luaV_tonumber_`),
+  so `5 + "2"` is the integer 7, `- "2"` the integer -2, `5 % "2"` the integer
+  1 -- above 2^53 the value itself changes, not only the subtype. The
+  interpreter already did this (`lj_meta_arith`), but the recorder emitted
+  `IR_STRTO` (float-only) for every string, so JIT-compiled `+ - * %` and
+  unary `-` gave a float where PUC gives an integer. A traced float path
+  cannot be guarded: the slot may hold `"2.0"` at record time and `"2"` at
+  run time (or vice versa), flipping the subtype -- and the value above
+  2^53 -- under a committed trace, and `IR_STRTO` leaves no string form to
+  guard on. So a string operand now leaves those five operations to the
+  interpreter (`lj_trace_err` `BADTYPE`, the same escape as the existing
+  i47w/i64 punts); `/` and `^` keep the traced `IR_STRTO` path because 5.4
+  gives a float there for every string form and the STRTO double is the same
+  conversion the interpreter uses. `tests/d54/numeric_05_strarith.lua` (both
+  operand orders, hex/oct/whitespace strings, values above 2^53, non-numeric
+  strings, and the reverse `"2.0"`-then-`"2"` case) passes modes A, B@0..3
+  and R on x86_64; the pure-numeric arithmetic path is untouched.
 - Arbitrary `_ENV` values: LuaJIT stored only a table as a function
   environment, so `load("return _ENV", nil, nil, 123)()` returned the global
   table and a non-table env was silently ignored. The function now carries the

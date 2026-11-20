@@ -1,12 +1,20 @@
 # k-nucleotide — per-cycle phase-alignment census and the policy question
 
-Measurement only, branch `knuc`. No default was changed. The instrument is the
+Measurement only, branch `knuc`. No default was changed **here, at the time**
+(see the superseded note below). The instrument is the
 `LUAJIT_GC_STATS` build's per-cycle counter, extended here with a `clock()` /
 `CLOCKS_PER_SEC` timestamp and the per-cycle mark / sweepstring / sweep /
 atomic split; a copy of k-nucleotide prints stage boundaries on stderr with
 `os.clock()`, which reads the same clock, so each completed cycle can be
 attributed to the workload stage it landed in. Everything stays behind the
 existing stats define (`LUAJIT_GC_CENSUS` adds the full live-object census).
+
+> **Superseded 2026-11-19, after this census was written:** the default pause
+> **was** raised, 200 → 300, by `7a85607e`. `LUAI_GCPAUSE` in `src/luaconf.h`
+> is 300; the decision is recorded as the DECIDED line of
+> `docs/gc-newgen-plan.md` ("the default pause is 300, and memory is the
+> opt-in mode") and in README.md. The table rows labelled "200 (default then)"
+> are the 200 % default as measured at the time; 300 is the default now.
 
 Companion to `docs/notes/knuc-perf-2026-11.md`, which established that the gap is a
 collector-policy effect (the `setpause` sweep flips its sign) and not a slow
@@ -36,7 +44,7 @@ collector's own work.
 | `setpause` | cycles | collector total | k12 dur (gc/mut) | k18 dur (gc/mut) | k18 live strings | k18 heap |
 |---:|---:|---:|---:|---:|---:|---:|
 | 150 | 13 | 20 714 | 21 000 (5 924 / 15 071) | 31 130 (13 972 / 17 160) | 16 850 → 34 746 | 2.1 → 3.6 MB |
-| 200 (default) | 8 | 7 593 | 21 440 (3 027 / 18 409) | 30 500 (3 955 / 26 543) | 24 532 → 50 997 | 2.1 → 4.2 MB |
+| 200 (default then) | 8 | 7 593 | 21 440 (3 027 / 18 409) | 30 500 (3 955 / 26 543) | 24 532 → 50 997 | 2.1 → 4.2 MB |
 | 300 | 6 | 12 987 | 22 160 (3 231 / 18 926) | 28 820 (9 477 / 19 339) | 26 347 → 29 867 | 2.2 → 2.7 MB |
 
 Per-cycle detail (x64, `setpause=200`) — the cycle number, the stage it landed
@@ -55,14 +63,14 @@ in, and its phase split in microseconds:
 
 Every cycle is dominated by the string sweep (57–80 % of its time) and the
 cycles grow with the heap: cycle 8 costs 3.7 ms against cycle 5's 0.6 ms. The
-last cycle is the one that lands in `k18` at the default.
+last cycle is the one that lands in `k18` at the default of that run (200 %).
 
 ### Census, arm64 test host (same instrument)
 
 | `setpause` | cycles | collector total | k12 dur (gc/mut) | k18 dur (gc/mut) |
 |---:|---:|---:|---:|---:|
 | 150 | 13 | 8 706 | 10 280 (2 744 / 7 538) | 13 070 (5 574 / 7 501) |
-| 200 (default) | 8 | 2 108 | 9 150 (860 / 8 294) | 11 580 (1 092 / 10 489) |
+| 200 (default then) | 8 | 2 108 | 9 150 (860 / 8 294) | 11 580 (1 092 / 10 489) |
 | 300 | 6 | 5 305 | 8 670 (1 327 / 7 343) | 11 760 (3 848 / 7 912) |
 
 The same shape: the collector does least at 200 (2.1 ms) and the `k18` mutator
@@ -118,8 +126,9 @@ A pause change **would** remove the k-nucleotide gap without hurting lpeg or
 lua-cjson, and it would help binary-trees; `setpause=200 → 300` is the setting
 that does it, on both arches. It is not free: it trades peak RSS for time, most
 visibly on binary-trees (+31 %), and it moves every workload that allocates, so
-it is an operator decision and is not applied here. Two things would still be
-needed before such a change is made:
+it is an operator decision and is not applied here. (Superseded: that decision
+was taken on 2026-11-19 by `7a85607e`, see the note at the top.) Two things
+would still be needed before such a change is made:
 
 1. **The corpus and the rest of the classic set at 300**, on a quiet box with
    enough repetitions — the arm box's variance at the default repetition count

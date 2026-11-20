@@ -263,7 +263,7 @@ target x86_64 (GC64) and arm64.
 ## Known JIT/performance rows (not semantic divergences)
 
 - arm64 `bit.lshift/rshift/arshift/rol/ror` returned 0 for native and
-  cdata; regression `cb2f6da`, fix `6e4d7bb9` (TMP0 clobber in checkint).
+  cdata; regression `ea371c60`, fix `9cc89969` (TMP0 clobber in checkint).
   See `docs/bug-bit-shift-arm64.md`; `tests/lib/bit-checkint.lua` is the
   regression test.
 - `math.lua` mode B on x64: intermittent SIGSEGV/hang in the

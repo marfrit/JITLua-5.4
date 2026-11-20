@@ -72,7 +72,8 @@ is ~650 ms x64. No stage below reaches these ceilings; they are upper bounds.
 ## 2. The staged plan
 
 Each stage is separately shippable and measured against the same
-`tests/bench/gc-measure.sh` (`x64-box`/`arm-box`, one command per arch, the
+`tests/bench/gc-measure.sh` (`x64-box`/`arm-box`, private wrappers that run a
+command on a remote x86_64/arm64 test host; one command per arch, the
 make line takes `CFLAGS`, never `XCFLAGS=`), on the same pinned boxes.
 
 ### Stage 0 — policy and allocator wins, no new collector

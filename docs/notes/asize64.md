@@ -156,7 +156,8 @@ No regression.
 
 ## Gates
 
-- `x64-box sh tests/ci-box.sh`: all stages passed (x86_64).
+- `x64-box sh tests/ci-box.sh` (x64-box is a private wrapper that runs a
+  command on a remote x86_64 test host): all stages passed (x86_64).
 - `arm-box sh tests/ci-box.sh`: all stages passed (aarch64).
 - `ci-local.sh --sanitizers-only` on both arches: `ci-local: OK` (ASan+UBSan;
   the new test's ~1 GiB preallocations run under the same cap/no cap as the

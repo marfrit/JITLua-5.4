@@ -9,7 +9,8 @@ multi-argument bit ops, boxed/widened inputs, hot loops, `-joff` and `-jon`).
 ## Repro and fail rate
 
 `tests/lib/bit-shift-repro.lua` (stock LuaJIT 2.1 API; INT32_MIN computed as
-`-2147483647-1`). On arm64-build it exits 1 with:
+`-2147483647-1`). On `arm64-build` (a private wrapper that runs a command on a
+remote arm64 test host) it exits 1 with:
 
 ```
 shift-ok false 0 0 0 0 0 0 0 0LL false

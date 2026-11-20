@@ -3,6 +3,8 @@
 #
 #   cd ~/src/LuaJIT-5.4-perfdiag
 #   X64_BOX_HOST=<host> x64-box -t 3600 sh tests/bench/perfdiag-run.sh [phase ...]
+# (x64-box is a private wrapper that runs a command on a remote x86_64 test
+# host.)
 #
 # Measurement only: no source or benchmark changes. perfdiag.py builds stock
 # LuaJIT 2.1 from the pinned tarball and extracts the pinned benchmark sources

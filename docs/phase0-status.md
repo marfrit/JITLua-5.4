@@ -3,13 +3,13 @@
 Updated: 2026-11-15 (session 1). Read this first when resuming.
 
 ## Repo layout / git decision
-- Working tree: `/home/mfritsche/src/LuaJIT-5.4` (branch `main`).
-- **Bare origin (canonical, "for the time being")**: `/home/mfritsche/src/git/LuaJIT-5.4.git`
+- Working tree: the development working tree (branch `main`).
+- **Bare origin (canonical, "for the time being")**: a local bare repository
   (`git remote origin`). No GitHub remote yet. Push with `git push -u origin main`.
 - `upstream` remote = https://github.com/LuaJIT/LuaJIT, branch `v2.1` imported with full history.
 - **Base commit: `63c8f1a9b479ba5518cf6a170ff7729178bc3cfd`** ("DynASM: Escape paths in #line directive").
   MISSION says "tag v2.1" — **LuaJIT has NO tags at all**; v2.1 is a branch. Deviation recorded.
-- Host: ampere, aarch64 Arch, 8 cores. LuaJIT 2.1 builds natively (`make -j8` → `src/luajit`,
+- Host: the development host, aarch64 Arch, 8 cores. LuaJIT 2.1 builds natively (`make -j8` → `src/luajit`,
   version `LuaJIT 2.1.1794386141`). ARM64 backend is native here; x64 CI must run elsewhere.
 
 ## Reference (oracle)

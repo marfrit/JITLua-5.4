@@ -3,6 +3,8 @@
 #
 #   x64-build -t 3600 tests/ci-box.sh              # x64 build box
 #   sh tests/ci-box.sh                             # here (aarch64)
+# (x64-build is a private wrapper that runs a command on a remote x86_64 test
+# host.)
 #
 # Builds our LuaJIT, builds the PUC-Lua 5.4.9 reference from the vendored
 # tarball (tests/ref/dist, no network needed), then runs the differential

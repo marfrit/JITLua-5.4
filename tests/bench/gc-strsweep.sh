@@ -8,6 +8,8 @@
 # Use one box for both arms, ideally in one job:
 #   X64_BOX_HOST=<box> x64-box -t 7200 sh tests/bench/gc-strsweep.sh
 #   arm-box -t 7200 sh tests/bench/gc-strsweep.sh
+# (x64-box/arm-box are private wrappers that run a command on a remote
+# x86_64/arm64 test host.)
 #
 # Knobs: GC_AB_ONLY=name[,name], GC_REPS_FORCE, GC_AB_PAIRS, GC_AB_PAIR_WORK,
 # CC, CFLAGS.

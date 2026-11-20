@@ -218,7 +218,12 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   `tests/lib/compat51build-d54.sh` (a `tests/ci-box.sh` stage on both
   arches); the two d54 files that build userdata with `newproxy`
   (`env_07_udenv`, `udfin_01_close`) report a skip in the default build and
-  run in that stage.
+  run in that stage. The one downstream cost measured: Penlight 1.14 decides
+  "this is LuaJIT" from `tostring(assert)` containing `builtin` and then
+  probes with `loadstring(...)`, so its app/class scripts stop with rc=1 in
+  the default build (a `tests/corpus-ext/known-diff.tsv` row) and are
+  byte-identical to PUC again with the switch on — that library is part of
+  the compat stage.
 
 ### Kept LuaJIT extensions
 - `EXTENSION` `jit.*`, `bit.*`, `ffi`/cdata, `bcsave`, `-j`/`-O`/`-b` options.

@@ -54,6 +54,6 @@ local function rec(d, a, b)
 end
 for pad = 0, 9 do
   local co = coroutine.wrap(function(...) return rec(3000, 1, 2) end)
-  assert(co(unpack({1, 2, 3, 4, 5, 6, 7, 8, 9}, 1, pad)) == 3000)
+  assert(co(table.unpack({1, 2, 3, 4, 5, 6, 7, 8, 9}, 1, pad)) == 3000)
 end
 print("align ok")

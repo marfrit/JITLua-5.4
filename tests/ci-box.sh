@@ -81,6 +81,9 @@ say "assert build (LUA_USE_ASSERT + APICHECK): d54 corpus with -Ohotexit=1"
 # recorder narrowed an inherited int64 slot that came back as an int32:
 # d54/numeric_07*, i64_02*).
 stage 'tail -16' sh tests/lib/assertbuild-d54.sh
+
+say "5.1-compat build (CFLAGS=-DLUAJIT_ENABLE_51COMPAT) and its checks"
+stage 'tail -20' sh tests/lib/compat51build-d54.sh
 echo "=== lib checks ==="
 for j in -joff -jon; do timeout 120 ./src/luajit $j tests/lib/bit-checkint.lua || exit 1; done
 for j in -joff -jon; do timeout 120 ./src/luajit $j tests/lib/ffrec-54.lua || exit 1; done

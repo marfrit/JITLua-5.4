@@ -3,8 +3,14 @@
 --! environment (load()'s env may be any value). The hot global loop must
 --! compile with the metamethod call recorded (mode B: JIT on vs off; mode R:
 --! dump/reload of the test itself). LuaJIT-only because it needs newproxy,
---! hence modes B,R (no PUC reference arm).
+--! hence modes B,R (no PUC reference arm). newproxy is a 5.1 leftover behind
+--! -DLUAJIT_ENABLE_51COMPAT, so the default build prints a skip line here and
+--! the compat ci-box stage runs this file again against the switched build.
 local store = {}
+if newproxy == nil then  -- needs -DLUAJIT_ENABLE_51COMPAT; the compat ci-box
+  print("skip: needs newproxy")  -- stage runs this file again with the switch
+  return
+end
 local ud = newproxy(true)
 local mt = getmetatable(ud)
 mt.__index = function(_, k)

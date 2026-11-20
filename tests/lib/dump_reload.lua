@@ -51,4 +51,4 @@ if not g then
 end
 -- Unprotected on purpose: errors must reach the interpreter's top-level handler
 -- exactly as they would in a direct run (same message, same exit status).
-return g(unpack(args, 1, n))
+return g(table.unpack(args, 1, n))

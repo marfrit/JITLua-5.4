@@ -5,9 +5,7 @@ when the generated `utf8.dat` fixture is missing, and it fails identically
 under PUC Lua 5.4.9 and under JITLua `-joff` / `-jon`, on x86_64 and arm64.
 No interpreter change and no VM change.
 
-Box wrappers used (both exist):
-`~/.local/bin/x64-box -t <s> <cmd>` (x86_64 pool) and
-`~/.local/bin/arm-box -t <s> <cmd>` (arm64); no build or test on pica itself.
+Measured on an x86_64 test host and the arm64 test host.
 
 ## Where lua-cjson comes from
 
@@ -42,7 +40,7 @@ compares against the decoded string and fails.
 `gc_measure.py` unpacks the archive and builds the module, but never runs
 `genutf8.pl`; `tests/corpus-ext/run.sh` does (and ignores a missing perl). The
 benchmark therefore runs the suite without the fixture on every arm. x86_64
-(pve2) and arm64 (escher):
+and arm64:
 
 | arm | rc | test 80 | suite |
 |---|---|---|---|

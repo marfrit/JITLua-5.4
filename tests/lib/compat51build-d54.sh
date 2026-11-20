@@ -35,4 +35,10 @@ done
 # names are absent, which is the default build.
 LUAJIT="$CB/src/luajit" tests/harness.sh --strict --mode B --corpus tests/d54 \
   --filter 'env_07' --filter 'udfin_' --filter 'jit_05' --timeout 120
+# Penlight reaches the 5.1 branch: its pl/compat.lua decides from
+# tostring(assert) containing "builtin" that this is LuaJIT, then probes with
+# loadstring("local goto = 1"). It is an expected difference in the default
+# build (tests/corpus-ext/known-diff.tsv) and must be byte-identical to PUC
+# again with the switch on.
+LUAJIT="$CB/src/luajit" sh tests/corpus-ext/run.sh penlight
 echo "compat51 build: ok"

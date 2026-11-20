@@ -7,6 +7,14 @@ target x86_64 (GC64) and arm64.
 
 ## Language and VM
 
+- `collectgarbage` inside a `__gc` metamethod: 5.4 stops the collector
+  internally while a finalizer runs (`lapi.c`, `GCSTPGC`) and returns -1 for
+  every option; `luaB_collectgarbage` turns that into fail, i.e. nil. Here
+  every option answered normally (a full collection, memory figures, the mode
+  name). The finalizer call now sets `gc.finalizing` for the duration, and
+  `lua_gc` returns -1 while it is set; the base library pushes nil for count
+  and for the -1 result. PUC's suite checks it in `gc.lua:699`;
+  `tests/d54/gc_07_finalizer_collectgarbage.lua` covers all eight options.
 - `__eq` selection (Lua 5.4): equality used the 5.1 rule, i.e. both operands
   had to carry the same `__eq` handler, so comparing a plain table or userdata
   against one with a handler never called the metamethod and

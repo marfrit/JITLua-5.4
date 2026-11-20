@@ -299,6 +299,16 @@ target x86_64 (GC64) and arm64.
   `tests/bench/b6_tostring.lua` (no-metamethod hot paths flat, the
   `__tostring` case +23 % interpreted and no longer traced); design and path
   table: `docs/notes/tostring54.md`.
+- A stack overflow raised while the message handler itself is overflowing
+  the stack was reported as the handler's own "stack overflow". PUC reports
+  exactly this situation (luaD_growstack failing at ERRORSTACKSIZE) as
+  "error in error handling" (ldo.c luaD_errerr). The first overflow grows the
+  stack to LJ_STACK_MAX+LJ_STACK_ERREX for the handler; a second overflow in
+  the handler then hit `lj_state_growstack`'s abort branch, which threw
+  LJ_ERR_STKOV. It throws LJ_ERR_ERRERR now. `xpcall(loop, loop)` returned
+  `false, "stack overflow"`; PUC returns `false, "error in error handling"`
+  (`tests/d54/err_11_errerr_msg.lua`; the PUC suite file cstack.lua checks
+  this on line 29).
 
 ## Known JIT/performance rows (not semantic divergences)
 

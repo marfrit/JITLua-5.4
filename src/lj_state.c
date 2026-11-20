@@ -145,9 +145,11 @@ void LJ_FASTCALL lj_state_growstack(lua_State *L, MSize need)
     } else {
       /* If we're here, then the stack overflow error handler is requesting
       ** to grow the stack even further. We have no choice but to abort the
-      ** error handler.
+      ** error handler. PUC reports exactly this situation (luaD_growstack
+      ** failing at ERRORSTACKSIZE) as "error in error handling" (ldo.c
+      ** luaD_errerr), not the handler's own stack overflow message.
       */
-      GCstr *em = lj_err_str(L, LJ_ERR_STKOV);  /* Might OOM. */
+      GCstr *em = lj_err_str(L, LJ_ERR_ERRERR);  /* Might OOM. */
       setstrV(L, L->top++, em);  /* There is always space to push an error. */
       lj_err_throw(L, LUA_ERRERR);  /* Does not invoke an error handler. */
     }

@@ -133,6 +133,17 @@ A+B 212 PASS / 0 FAIL / 4 XFAIL, opt levels 0-3 468, R 114, ASan/UBSan A+B+R
   yield stops at the C-call boundary like PUC. The old tail call handed the
   metamethod the fast function's frame; whether a yield could cross it there
   was not covered by a test.
+- The cost of the recorder exit is measured: `b6_tostring.lua`, `obj` case,
+  2.4 ms traced before and 182 ms after. Re-recording the call was attempted on
+  branch `tostringrec` and did not work: the recorder cannot describe a
+  continuation frame the interpreter never created (the pre-5.4 speed came from
+  the interpreter's tail call, which the 5.4 result check forbids). The attempt,
+  the probe evidence and the steps a fix needs are in
+  [tostring-jit-2026-11-20.md](tostring-jit-2026-11-20.md), together with the
+  `tests/d54/tostring_07_hot_bad.lua` semantics tests (hot `__tostring` turning
+  bad after the trace compiled) and the two `__tostring` loops in
+  `tests/lib/ffrec-54.lua` whose values are checked but which are not yet
+  registered as required root loop traces.
 - An FFI cdata value has `__tostring` in its per-type base metatable
   (`ffi_meta`), so `tostring(cdata)` now leaves the trace to the interpreter
   like every other value with a metamethod. Output is unchanged (a ctype

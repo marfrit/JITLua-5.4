@@ -13,6 +13,7 @@
 #include "lj_str.h"
 #include "lj_tab.h"
 #include "lj_strfmt.h"
+#include "lj_i64.h"
 
 /* -- Buffer management --------------------------------------------------- */
 
@@ -238,6 +239,29 @@ SBuf *lj_buf_putstr_rep(SBuf *sb, GCstr *s, int32_t rep)
   return sb;
 }
 
+/* Append one table.concat element in 5.4 lstrlib.c's conversion rules
+** (strings as they are, integers and floats formatted). Returns 0 for a
+** value that cannot be concatenated; *pw is the new write pointer. */
+static int lj_buf_puttab_elem(SBuf *sb, cTValue *o, MSize seplen, char **pw)
+{
+  char *w;
+  if (tvisstr(o)) {
+    MSize len = strV(o)->len;
+    w = lj_buf_wmem(lj_buf_more(sb, len + seplen), strVdata(o), len);
+  } else if (tvisint(o) && !tvisi47w(o)) {
+    w = lj_strfmt_wint(lj_buf_more(sb, STRFMT_MAXBUF_INT+seplen), intV(o));
+  } else if (tvisint(o) || tvisi64(o)) {  /* 5.4 integer outside int32. */
+    uint64_t v = tvisi64(o) ? (uint64_t)i64V(o) : (uint64_t)intV47(o);
+    w = lj_buf_more(lj_strfmt_putfxint(sb, STRFMT_D, v), seplen);
+  } else if (tvisnum(o)) {
+    w = lj_buf_more(lj_strfmt_putfnumstr(sb, numV(o)), seplen);
+  } else {
+    return 0;
+  }
+  *pw = w;
+  return 1;
+}
+
 SBuf *lj_buf_puttab(SBuf *sb, GCtab *t, GCstr *sep, int32_t i, int32_t e)
 {
   MSize seplen = sep ? sep->len : 0;
@@ -245,27 +269,44 @@ SBuf *lj_buf_puttab(SBuf *sb, GCtab *t, GCstr *sep, int32_t i, int32_t e)
     for (;;) {
       cTValue *o = lj_tab_getint(t, i);
       char *w;
-      if (!o) {
-      badtype:  /* Error: bad element type. */
+      if (!o || !lj_buf_puttab_elem(sb, o, seplen, &w)) {
 	sb->w = (char *)(intptr_t)i;  /* Store failing index. */
 	return NULL;
-      } else if (tvisstr(o)) {
-	MSize len = strV(o)->len;
-	w = lj_buf_wmem(lj_buf_more(sb, len + seplen), strVdata(o), len);
-      } else if (tvisint(o) && !tvisi47w(o)) {
-	w = lj_strfmt_wint(lj_buf_more(sb, STRFMT_MAXBUF_INT+seplen), intV(o));
-      } else if (tvisint(o) || tvisi64(o)) {  /* 5.4 integer outside int32. */
-	uint64_t v = tvisi64(o) ? (uint64_t)i64V(o) : (uint64_t)intV47(o);
-	w = lj_buf_more(lj_strfmt_putfxint(sb, STRFMT_D, v), seplen);
-      } else if (tvisnum(o)) {
-	w = lj_buf_more(lj_strfmt_putfnumstr(sb, numV(o)), seplen);
-      } else {
-	goto badtype;
       }
       if (i++ == e) {
 	sb->w = w;
 	break;
       }
+      if (seplen) w = lj_buf_wmem(w, strdata(sep), seplen);
+      sb->w = w;
+    }
+  }
+  return sb;
+}
+
+/* table.concat over a range outside int32: the bounds are 5.4 integers and
+** the lookup goes through the general table getter (int64 keys are boxed).
+** *failp gets the index of the first value that cannot be concatenated. */
+SBuf *lj_buf_puttab64(lua_State *L, SBuf *sb, GCtab *t, GCstr *sep,
+		      int64_t i, int64_t e, int64_t *failp)
+{
+  MSize seplen = sep ? sep->len : 0;
+  if (i <= e) {
+    for (;;) {
+      TValue k;
+      cTValue *o;
+      char *w;
+      lj_i64_tvstore(L, &k, i);
+      o = lj_tab_get(L, t, &k);
+      if (!o || !lj_buf_puttab_elem(sb, o, seplen, &w)) {
+	*failp = i;
+	return NULL;
+      }
+      if (i == e) {
+	sb->w = w;
+	break;
+      }
+      i++;
       if (seplen) w = lj_buf_wmem(w, strdata(sep), seplen);
       sb->w = w;
     }

@@ -22,6 +22,9 @@
 #include "lj_tab.h"
 #include "lj_ff.h"
 #include "lj_lib.h"
+#include "lj_strfmt.h"
+#include "lj_strscan.h"
+#include "lj_i64.h"
 
 /* ------------------------------------------------------------------------ */
 
@@ -159,20 +162,45 @@ LJLIB_LUA(table_move) /*
   end
 */
 
+/* A 5.4 integer argument (PUC luaL_optinteger): exact, so a bound outside
+** int32 stays what it is; a non-integral float is an error like in PUC. */
+static int64_t tab_concat_int64(lua_State *L, int narg, int64_t def)
+{
+  TValue *o = L->base + narg-1;
+  int64_t v;
+  if (!(o < L->top) || tvisnil(o)) return def;
+  if (!lj_strscan_numberobj64(L, o)) lj_err_argt(L, narg, LUA_TNUMBER);
+  if (lj_i64_getint(o, &v)) return v;  /* int32, widened or boxed */
+  if (lj_i64_numtoint(numV(o), &v)) return v;
+  lj_err_arg(L, narg, LJ_ERR_NUMNOINT);
+  return def;  /* unreachable */
+}
+
 LJLIB_CF(table_concat)		LJLIB_REC(.)
 {
   GCtab *t = lj_lib_checktab(L, 1);
   GCstr *sep = lj_lib_optstr(L, 2);
-  int32_t i = lj_lib_optint(L, 3, 1);
-  int32_t e = (L->base+3 < L->top && !tvisnil(L->base+3)) ?
-	      lj_lib_checkint(L, 4) : (int32_t)lj_tab_len(t);
+  int64_t i = tab_concat_int64(L, 3, 1);
+  int64_t e = (L->base+3 < L->top && !tvisnil(L->base+3)) ?
+	      tab_concat_int64(L, 4, 0) : (int64_t)lj_tab_len(t);
   SBuf *sb = lj_buf_tmp_(L);
-  SBuf *sbx = lj_buf_puttab(sb, t, sep, i, e);
-  if (LJ_UNLIKELY(!sbx)) {  /* Error: bad element type. */
-    int32_t idx = (int32_t)(intptr_t)sb->w;
-    cTValue *o = lj_tab_getint(t, idx);
+  SBuf *sbx;
+  int64_t fail = 0;
+  if (i >= -0x7fffffff-1 && i <= 0x7fffffff &&
+      e >= -0x7fffffff-1 && e <= 0x7fffffff) {
+    sbx = lj_buf_puttab(sb, t, sep, (int32_t)i, (int32_t)e);
+    if (LJ_UNLIKELY(!sbx)) fail = (int32_t)(intptr_t)sb->w;
+  } else {
+    sbx = lj_buf_puttab64(L, sb, t, sep, i, e, &fail);
+  }
+  if (LJ_UNLIKELY(!sbx)) {  /* Error: bad element type at index 'fail'. */
+    TValue k;
+    cTValue *o;
+    GCstr *sidx = lj_strfmt_i64(L, fail);  /* 5.4 lua_Integer, not int32 */
+    lj_i64_tvstore(L, &k, fail);
+    o = lj_tab_get(L, t, &k);
     lj_err_callerv(L, LJ_ERR_TABCAT,
-		   lj_obj_itypename[o ? itypemap(o) : ~LJ_TNIL], idx);
+		   lj_obj_itypename[o ? itypemap(o) : ~LJ_TNIL], strdata(sidx));
   }
   setstrV(L, L->top-1, lj_buf_str(L, sbx));
   lj_gc_check(L);

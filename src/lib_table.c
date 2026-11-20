@@ -25,6 +25,9 @@
 
 /* ------------------------------------------------------------------------ */
 
+typedef size_t lj_tab_Unsigned;  /* Unsigned counterpart of lua_Integer. */
+#define LJ_TAB_MAXINT ((lua_Integer)(~(lj_tab_Unsigned)0 >> 1))
+
 #define LJLIB_MODULE_table
 
 LJLIB_LUA(table_foreachi) /*
@@ -115,29 +118,45 @@ LJLIB_CF(table_insert)		LJLIB_REC(.)
   return 0;
 }
 
-LJLIB_LUA(table_remove) /*
-  function(t, pos)
-    CHECK_tab(t)
-    local len = #t
-    if pos == nil then
-      if len ~= 0 then
-	local old = t[len]
-	t[len] = nil
-	return old
-      end
-    else
-      CHECK_int(pos)
-      if pos >= 1 and pos <= len then
-	local old = t[pos]
-	for i=pos+1,len do
-	  t[i-1] = t[i]
-	end
-	t[len] = nil
-	return old
-      end
-    end
-  end
-*/
+LJLIB_CF(table_remove)
+{
+  GCtab *t = lj_lib_checktab(L, 1);
+  lua_Integer len = luaL_len(L, 1);
+  lua_Integer pos = (L->top > L->base + 1) ? luaL_checkinteger(L, 2) : len;
+  /* 5.4 tremove: a given pos is validated as (unsigned)pos - 1 <= (unsigned)
+  ** size, so pos = size + 1 is allowed (nothing to shift, t[pos] is nil) and
+  ** pos 0 or a negative pos with a non-empty table is "position out of
+  ** bounds". pos == size skips the check, which also lets an empty table
+  ** remove t[0]: pos = size = 0. */
+  if (pos != len && ((lj_tab_Unsigned)pos - 1u > (lj_tab_Unsigned)len))
+    lj_err_arg(L, 2, LJ_ERR_TABINSPOS);
+  {
+    TValue old;
+    int haveold = 0;
+    /* The index accesses are raw, as in the previous Lua emulation (CHECK_tab
+    ** made its t[...] accesses raw); __len is still honoured through
+    ** luaL_len, as before. */
+    if ((int64_t)(int32_t)pos == pos) {
+      cTValue *src = lj_tab_getint(t, (int32_t)pos);
+      if (src) { copyTV(L, &old, src); haveold = 1; }
+    }
+    if ((int64_t)(int32_t)len == len && (int64_t)(int32_t)pos == pos) {
+      int32_t p = (int32_t)pos, n = (int32_t)len;
+      int32_t i;
+      for (i = p; i < n; i++) {
+	TValue *dst = lj_tab_setint(L, t, i);
+	cTValue *src = lj_tab_getint(t, i + 1);
+	if (src) copyTV(L, dst, src); else setnilV(dst);
+      }
+      /* PUC clears t[pos] with pos at its value after the shift loop: for
+      ** pos <= size that is t[size], for pos = size + 1 it is t[size + 1]. */
+      setnilV(lj_tab_setint(L, t, p > n ? p : n));
+    }
+    if (haveold) { copyTV(L, L->top, &old); L->top++; }
+    else setnilV(L->top++);
+    return 1;
+  }
+}
 
 LJLIB_LUA(table_move) /*
   function(a1, f, e, t, a2)
@@ -305,8 +324,7 @@ LJLIB_CF(table_pack)
 /* -- Lua 5.4 additions (MISSION P5.3) ------------------------------------ */
 
 /* Unsigned counterpart of lua_Integer (ptrdiff_t) for overflow-safe math. */
-typedef size_t lj_tab_Unsigned;
-#define LJ_TAB_MAXINT ((lua_Integer)(~(lj_tab_Unsigned)0 >> 1))
+
 
 LJLIB_CF(table_move)
 {

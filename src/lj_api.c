@@ -1079,6 +1079,10 @@ LUALIB_API int luaL_newmetatable(lua_State *L, const char *tname)
   TValue *tv = lj_tab_setstr(L, regt, lj_str_newz(L, tname));
   if (tvisnil(tv)) {
     GCtab *mt = lj_tab_new(L, 0, 1);
+    /* 5.4 luaL_newmetatable: the metatable carries its name in __name, which
+    ** luaL_checkudata error messages (and type errors) print. */
+    setstrV(L, lj_tab_setstr(L, mt, lj_str_newlit(L, "__name")),
+	    lj_str_newz(L, tname));
     settabV(L, tv, mt);
     settabV(L, L->top++, mt);
     lj_gc_anybarriert(L, regt);

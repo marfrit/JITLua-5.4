@@ -128,12 +128,23 @@ LJLIB_ASM(pairs)		LJLIB_REC(xpairs 0)
 LJLIB_NOREGUV LJLIB_ASM(ipairs_aux)	LJLIB_REC(.)
 {
   GCtab *t = lj_lib_checktab(L, 1);
-  int32_t i = lj_lib_checkint(L, 2) + 1;
-  if (!tabref(t->metatable)) return FFH_RETRY;  /* Fast path (int key now). */
+  lua_Integer i = luaL_checkinteger(L, 2);
+  /* 5.4 wraps the index (lua_intop(+, i, 1)): past math.maxinteger the
+  ** iterator continues at math.mininteger. */
+  lua_Integer n = (lua_Integer)((uint64_t)i + 1u);
+  /* The fast path increments the key itself, so retry it only when the
+  ** original key is already an int32 and the 5.4 successor still fits: an
+  ** int32 overflow at math.maxinteger must take the integer path below. */
+  if (!tabref(t->metatable) && i == (lua_Integer)(int32_t)i &&
+      n == (lua_Integer)(int32_t)n) {
+    setintV(L->base+1, (int32_t)i);  /* Keep the int key the ASM expects. */
+    return FFH_RETRY;  /* Fast path (int key now). */
+  }
+  i = n;
   L->top = L->base + 2;
-  lua_pushinteger(L, (lua_Integer)i);
+  lua_pushinteger(L, i);
   lua_gettable(L, 1);  /* Runs __index. */
-  setintV(L->base-1-LJ_FR2, i);
+  lj_i64_toTValue(L, L->base-1-LJ_FR2, i);
   if (tvisnil(L->top-1)) {
     setnilV(L->base-1-LJ_FR2);
     return FFH_RES(1);
@@ -734,7 +745,17 @@ LJLIB_CF(coroutine_running)
 
 LJLIB_CF(coroutine_isyieldable)
 {
-  setboolV(L->top++, cframe_canyield(L->cframe));
+  lua_State *co = L;
+  if (L->top > L->base) {  /* 5.4: an optional thread argument. */
+    if (!tvisthread(L->base)) lj_err_argtype(L, 1, "thread");
+    co = threadV(L->base);
+  }
+  /* PUC's yieldable() tests the C-call nesting, not a resume frame: a
+  ** coroutine between resumes (created, suspended, dead) has no C frame and
+  ** can yield, the main thread and a thread busy in a C call cannot. LuaJIT
+  ** zeroes cframe on yield and on a coroutine's return, so NULL means that. */
+  setboolV(L->top++, cframe_canyield(co->cframe) ||
+	   (co != mainthread(G(L)) && co->cframe == NULL));
   return 1;
 }
 

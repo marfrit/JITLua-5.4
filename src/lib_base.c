@@ -695,8 +695,8 @@ LJLIB_CF(coroutine_close)
     co->status = LUA_OK;
     /* 5.4: the __close handlers of a closed thread run with the closer's
     ** C-call nesting plus one (PUC lua_closethread, then the C call into the
-    ** handler that LuaJIT does not count). */
-    co->ccallnest = co->ccallbase = L->ccallnest + 1;
+    ** handler, which lj_meta_tbccloseall counts). */
+    co->ccallnest = co->ccallbase = L->ccallnest;
     st = lj_meta_tbccloseall(co, tvref(co->stack), eslot);
     eslot = co->top-1;  /* The stack may have been reallocated. */
     if (st != LUA_OK || !tvisnil(eslot)) {
@@ -812,7 +812,7 @@ void LJ_FASTCALL lj_ffh_coroutine_wrap_err(lua_State *L, lua_State *co)
   if (co->tbcn > 0) {  /* 5.4: an error in a wrapped coroutine closes it. */
     co->status = LUA_OK;
     /* Closer's nesting, as in close(). */
-    co->ccallnest = co->ccallbase = L->ccallnest + 1;
+    co->ccallnest = co->ccallbase = L->ccallnest;
     lj_meta_tbccloseall(co, tvref(co->stack), co->top-1);
     co->status = LUA_ERRRUN;
   }

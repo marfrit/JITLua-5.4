@@ -31,6 +31,15 @@ LJ_FUNCA_NORET void LJ_FASTCALL lj_err_trace(lua_State *L, int errcode);
 #endif
 LJ_FUNC_NORET void lj_err_msg(lua_State *L, ErrMsg em);
 LJ_FUNC_NORET void lj_err_cstack(lua_State *L);
+LJ_FUNC_NORET void lj_err_ccall(lua_State *L);
+
+/* 5.4 C-call bound (PUC luaE_checkcstack): is a call from C into the VM
+** refused at the current nesting? It is at the bound itself; the levels
+** right above it stay usable for handling that error, up to a second bound. */
+#define lj_err_ccallover_n(n) \
+  (LJ_UNLIKELY((n) >= LJ_MAX_CCALLS) && \
+   ((n) == LJ_MAX_CCALLS || (n) >= LJ_MAX_CCALLSERR))
+#define lj_err_ccallover(L)	lj_err_ccallover_n((L)->ccallnest)
 LJ_FUNC_NORET void lj_err_lex(lua_State *L, GCstr *src, const char *tok,
 			      BCLine line, ErrMsg em, va_list argp);
 LJ_FUNC_NORET void lj_err_optype(lua_State *L, cTValue *o, ErrMsg opm);

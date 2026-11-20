@@ -44,7 +44,12 @@ void lj_vmevent_call(lua_State *L, ptrdiff_t argbase)
   int status;
   g->vmevmask = 0;  /* Disable all events. */
   hook_vmevent(g);
-  status = lj_vm_pcall(L, restorestack(L, argbase), 0+1, 0);
+  {  /* A call from C: counted, see api_vm_call in lj_api.c. */
+    MSize nest = L->ccallnest;
+    L->ccallnest = nest + 1;
+    status = lj_vm_pcall(L, restorestack(L, argbase), 0+1, 0);
+    L->ccallnest = nest;
+  }
   if (LJ_UNLIKELY(status)) {
     /* Really shouldn't use stderr here, but where else to complain? */
     L->top--;

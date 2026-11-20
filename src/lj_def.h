@@ -77,7 +77,9 @@ typedef unsigned int uintptr_t;
 
 #define LJ_MAX_LINE	LJ_MAX_MEM32	/* Max. source code line number. */
 #define LJ_MAX_XLEVEL	200		/* Max. syntactic nesting level. */
-#define LJ_CCALLNEST_BASE 3		/* Main thread C-call baseline (PUC parity). */
+#define LJ_MAX_CCALLS	LJ_MAX_XLEVEL	/* C-call nesting bound (LUAI_MAXCCALLS). */
+#define LJ_MAX_CCALLSERR (LJ_MAX_CCALLS/10*11)  /* Bound while handling it. */
+#define LJ_CCALLNEST_BASE 1		/* Main thread C-call baseline (PUC parity). */
 #define LJ_MAX_BCINS	(1<<26)		/* Max. # of bytecode instructions. */
 #define LJ_MAX_SLOTS	250		/* Max. # of slots in a Lua func. */
 #define LJ_MAX_LOCVAR	200		/* Max. # of local variables. */

@@ -115,25 +115,34 @@ LJ_NOINLINE static void unwindstack(lua_State *L, TValue *top)
 /* 5.4 to-be-closed variables: does an error starting at frame/cf reach a
 ** catching frame in this thread (pcall(), lua_pcall, lua_cpcall)? A dying
 ** coroutine keeps its pending variables for coroutine.close. Mirrors the
-** frame walk of err_unwind() without side effects. */
-static int tbc_hascatcher(lua_State *L, TValue *frame, void *cf)
+** frame walk of err_unwind() without side effects. Returns the C-call
+** nesting (L->ccallnest) the catching frame leaves when it catches, or -1
+** without a catcher: the frames entered from C on the way count out. */
+static int64_t tbc_catchlevel(lua_State *L, TValue *frame, void *cf)
 {
+  MSize nest = L->ccallnest;
   while (cf) {
     int32_t nres = cframe_nres(cframe_raw(cf));
-    if (nres < 0 && frame < restorestack(L, -nres)) return 1;
+    if (nres < 0 && frame < restorestack(L, -nres)) return (int64_t)nest;
     if (frame <= tvref(L->stack)+LJ_FR2) break;
     switch (frame_typep(frame)) {
     case FRAME_LUA: case FRAME_LUAP: frame = frame_prevl(frame); break;
-    case FRAME_C: cf = cframe_prev(cf); frame = frame_prevd(frame); break;
-    case FRAME_CP: return !cframe_canyield(cf);
+    case FRAME_C:
+      if (nest > 0) nest--;
+      cf = cframe_prev(cf); frame = frame_prevd(frame);
+      break;
+    case FRAME_CP:
+      if (cframe_canyield(cf)) return -1;
+      return (int64_t)(nest > 0 ? nest-1 : 0);
     case FRAME_CONT:
       if (frame_iscont_fficb(frame)) { cf = cframe_prev(cf); frame = frame_prevd(frame); break; }
       /* fallthrough */
     case FRAME_VARG: frame = frame_prevd(frame); break;
-    case FRAME_PCALL: case FRAME_PCALLH: return 1;
+    case FRAME_PCALL: case FRAME_PCALLH:
+      return (int64_t)(L->ccallbase < nest ? nest-1 : nest);
     }
   }
-  return 0;
+  return -1;
 }
 
 /* Run the __close handlers of the pending to-be-closed variables at or above
@@ -143,15 +152,52 @@ static int tbc_hascatcher(lua_State *L, TValue *frame, void *cf)
 ** discarded slot, so the calls cannot overwrite the values yet to be closed.
 ** An error inside a handler replaces the error object. */
 static void tbc_closeunwound(lua_State *L, TValue *level, void *cf,
-			     TValue *base)
+			     TValue *base, MSize nest)
 {
   if (L->tbcn > 0 &&
       restorestack(L, mref(L->tbclist, int32_t)[L->tbcn-1]) >= level) {
+    /* 5.4 C-call bound: the handlers are called from nest, the nesting of
+    ** the catching frame (PUC has unwound the C stack by now), but here the
+    ** C frames of the throw are all still in place below them. slack is
+    ** the number of levels the C stack is deeper than the count says; a
+    ** handler that fails and unwinds in turn adds to it (g->ccallslack is
+    ** set while a handler runs). lj_meta_tbccloseall_at refuses the
+    ** handlers once that sum is out of bounds, which keeps the C stack
+    ** within about twice the C-call bound. L->ccallnest itself stays as it
+    ** is: this function can raise an error (no stack left for a handler). */
+    MSize slack = G(L)->ccallslack, thrown = L->ccallthrow;
+    /* Everything above the highest pending slot belongs to frames that are
+    ** discarded: call the handlers from there, not from above the place of
+    ** the error. After a Lua stack overflow there is no room left up there,
+    ** the check below would raise "error in error handling" from inside the
+    ** unwinding, and the next unwinding would end up here again. Upvalues
+    ** into the dead part are closed first, as unwindstack() would do. */
+    TValue *hi = restorestack(L, mref(L->tbclist, int32_t)[L->tbcn-1]) + 1;
+    if (hi < L->top-1) {
+      lj_func_closeuv(L, hi);
+      copyTV(L, hi, L->top-1);
+      L->top = hi+1;
+    }
     L->base = base;
     L->cframe = cf;
-    lj_state_checkstack(L, LUA_MINSTACK * 2);
-    lj_meta_tbccloseall(L, level, L->top-1);
+    {  /* The check can move the stack, and level points into it. */
+      ptrdiff_t lofs = savestack(L, level);
+      lj_state_checkstack(L, LUA_MINSTACK * 2);
+      level = restorestack(L, lofs);
+    }
+    if (thrown > nest) slack += thrown - nest;
+    lj_meta_tbccloseall_at(L, level, L->top-1, nest, slack);
   }
+}
+
+/* 5.4 C-call bound: an unwound frame that was entered from C (lj_vm_call,
+** lj_vm_pcall) takes its level off L->ccallnest. Every C caller of these
+** counts the call (see api_vm_call in lj_api.c); the pcall/xpcall frames
+** are counted out by lj_vm_unwind_ff. */
+static LJ_AINLINE void err_ccallout(lua_State *L)
+{
+  lj_assertL(L->ccallnest > 0, "C-call nesting underflow");
+  L->ccallnest--;
 }
 
 /* Unwind until stop frame. Optionally cleanup frames. */
@@ -166,7 +212,7 @@ static void *err_unwind(lua_State *L, void *stopcf, int errcode)
       if (frame < top) {  /* Frame reached? */
 	if (errcode) {
 	  ptrdiff_t fofs = savestack(L, frame);
-	  tbc_closeunwound(L, top, cframe_prev(cf), frame+1);
+	  tbc_closeunwound(L, top, cframe_prev(cf), frame+1, L->ccallnest);
 	  frame = restorestack(L, fofs);  /* Handlers may grow the stack. */
 	  top = restorestack(L, -nres);
 	  L->base = frame+1;
@@ -184,12 +230,18 @@ static void *err_unwind(lua_State *L, void *stopcf, int errcode)
       frame = frame_prevl(frame);
       break;
     case FRAME_C:  /* C frame. */
+      /* 5.4: a call from C into the VM (lj_vm_call) counts out. */
+      if (errcode) err_ccallout(L);
     unwind_c:
 #if LJ_UNWIND_EXT
       if (errcode) {
-	if (tbc_hascatcher(L, frame_prevd(frame), cframe_prev(cf))) {
+	int64_t level = tbc_catchlevel(L, frame_prevd(frame), cframe_prev(cf));
+	if (level >= 0) {
 	  ptrdiff_t fofs = savestack(L, frame);
-	  tbc_closeunwound(L, frame - LJ_FR2, cf, frame_prevd(frame) + 1);
+	  /* 5.4: the __close handlers run at the level of the catching
+	  ** frame, although the C frames below it are still to be unwound. */
+	  tbc_closeunwound(L, frame - LJ_FR2, cf, frame_prevd(frame) + 1,
+			   (MSize)level);
 	  frame = restorestack(L, fofs);  /* Handlers may grow the stack. */
 	}
 	L->base = frame_prevd(frame) + 1;
@@ -218,7 +270,11 @@ static void *err_unwind(lua_State *L, void *stopcf, int errcode)
       }
       if (errcode) {
 	ptrdiff_t fofs = savestack(L, frame);
-	tbc_closeunwound(L, frame + 1, cf, frame + 1);
+	/* 5.4: the __close handlers run at the catching level, then the
+	** protected call from C (lj_vm_pcall) counts out. */
+	tbc_closeunwound(L, frame + 1, cf, frame + 1,
+			 L->ccallnest > 0 ? L->ccallnest - 1 : 0);
+	err_ccallout(L);
 	frame = restorestack(L, fofs);  /* Handlers may grow the stack. */
 	L->base = frame_prevd(frame) + 1;
 	L->cframe = cframe_prev(cf);
@@ -246,7 +302,11 @@ static void *err_unwind(lua_State *L, void *stopcf, int errcode)
 	  hook_leave(g);
 	{
 	  ptrdiff_t fofs = savestack(L, frame);
-	  tbc_closeunwound(L, frame + 1, cf, frame + 1);
+	  /* 5.4: the __close handlers run at the catching level. The pcall
+	  ** frame itself is counted out by lj_vm_unwind_ff, after this. */
+	  MSize nest = L->ccallnest;
+	  if (L->ccallbase < nest) nest--;
+	  tbc_closeunwound(L, frame + 1, cf, frame + 1, nest);
 	  frame = restorestack(L, fofs);  /* Handlers may grow the stack. */
 	}
 	L->base = frame_prevd(frame) + 1;
@@ -836,6 +896,7 @@ LJ_NOINLINE void LJ_FASTCALL lj_err_throw(lua_State *L, int errcode)
   global_State *g = G(L);
   lj_trace_abort(g);
   g->ffretry = 0;
+  L->ccallthrow = L->ccallnest;  /* See tbc_closeunwound. */
   if (errcode == LUA_ERRERR) {  /* A handler episode is over. */
     L->errnest = 0;
     L->errnestofs = 0;
@@ -1000,7 +1061,12 @@ LJ_NOINLINE void LJ_FASTCALL lj_err_run(lua_State *L)
     copyTV(L, top-1, errfunc);
     if (LJ_FR2) setnilV(top++);
     L->top = top+1;
-    lj_vm_call(L, top, 1+1);  /* Stack: |errfunc|msg| -> |msg| */
+    {  /* The handler call counts as a C call, but is never refused. */
+      MSize nest = L->ccallnest;
+      L->ccallnest = nest + 1;
+      lj_vm_call(L, top, 1+1);  /* Stack: |errfunc|msg| -> |msg| */
+      L->ccallnest = nest;
+    }
     if (L->errnest > 0) {
       L->errnest--;
       if (L->errnest == 0) L->errnestofs = 0;
@@ -1075,6 +1141,16 @@ LJ_NOINLINE void lj_err_msg(lua_State *L, ErrMsg em)
 /* 5.4: C-call nesting limit for pcall/xpcall. */
 LJ_NOINLINE void lj_err_cstack(lua_State *L)
 {
+  err_msgv(L, LJ_ERR_CSTKOV);
+}
+
+/* 5.4: a call from C into the VM that lj_err_ccallover() refuses. PUC
+** luaE_checkcstack: "C stack overflow" at the bound, "error in error
+** handling" when the handling of that error runs out of its extra levels. */
+LJ_NOINLINE void lj_err_ccall(lua_State *L)
+{
+  if (L->ccallnest >= LJ_MAX_CCALLSERR)
+    lj_err_err(L);
   err_msgv(L, LJ_ERR_CSTKOV);
 }
 

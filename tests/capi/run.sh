@@ -56,6 +56,27 @@ else
   echo "== udfinal (PUC side skipped: reference source missing, run tests/ref/fetch-ref.sh) =="
 fi
 
+# C-call bound: every call from C into the VM counts (PUC nCcalls /
+# LUAI_MAXCCALLS). Same source against both libraries; the PUC output is the
+# oracle and the two must be identical. An unbounded recursion dies by signal
+# (or runs into the Lua stack limit instead), which fails the stage.
+$CC $CFLAGS -I"$SRC" "$ROOT/tests/capi/ccallbound.c" -o "$OUT/ccallbound" \
+  "$LIB" $LDFLAGS -lm -ldl
+echo "== ccallbound (JITLua-5.4) =="
+timeout 60 "$OUT/ccallbound" >"$OUT/ccallbound.out"
+cat "$OUT/ccallbound.out"
+grep -q '^depth: 199$' "$OUT/ccallbound.out"
+if [ -f "$PUC_SRC/liblua.a" ] && [ -f "$PUC_SRC/lua.h" ]; then
+  $CC $CFLAGS -I"$PUC_SRC" "$ROOT/tests/capi/ccallbound.c" \
+    -o "$OUT/ccallbound_puc" "$PUC_SRC/liblua.a" \
+    $LDFLAGS -lm -ldl -lpthread
+  timeout 60 "$OUT/ccallbound_puc" >"$OUT/ccallbound_puc.out"
+  diff "$OUT/ccallbound_puc.out" "$OUT/ccallbound.out"
+  echo "== ccallbound: identical to the PUC 5.4.9 reference =="
+else
+  echo "== ccallbound (PUC side skipped: reference source missing, run tests/ref/fetch-ref.sh) =="
+fi
+
 # Public-header probe for the module-facing macros (no <limits.h> include in
 # the probe itself) and the real third-party module that exposed the gap.
 # MODLUAJIT is the host interpreter used to load the modules; it defaults to

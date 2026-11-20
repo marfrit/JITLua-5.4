@@ -295,11 +295,11 @@ LUA_API lua_State *lua_newstate(lua_Alloc allocf, void *allocd)
   setmref(L->hookff, NULL);
   L->errnest = 0;
   L->errnestofs = 0;
-  /* PUC's nCcalls includes the C frames that entered the main chunk
-  ** (lua_cpcall/lua_pcall etc.); ccallnest only counts the pcall/xpcall
-  ** fast paths, so a fixed baseline stands in for the standalone embedding
-  ** and makes the absolute depth match PUC. Deltas are unaffected. */
+  /* PUC raises "C stack overflow" when the count reaches the bound after
+  ** the increment, the checks here compare before it: starting at one keeps
+  ** the same number of usable levels. */
   L->ccallnest = L->ccallbase = LJ_CCALLNEST_BASE;
+  L->ccallthrow = 0;
   setmref(L->glref, g);
   g->gc.currentwhite = LJ_GC_WHITE0 | LJ_GC_FIXED;
   g->strempty.marked = LJ_GC_WHITE0;
@@ -403,6 +403,7 @@ lua_State *lj_state_new(lua_State *L)
   L1->errnest = 0;
   L1->errnestofs = 0;
   L1->ccallnest = L1->ccallbase = 0;
+  L1->ccallthrow = 0;
   setmrefr(L1->glref, L->glref);
   setgcrefr(L1->env, L->env);
   /* PUC lua_newthread: the area starts as a copy of the MAIN thread's. */

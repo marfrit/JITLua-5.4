@@ -103,6 +103,16 @@ is unchanged. `tostring54`'s risk 1 (a `__tostring` added later to the
 string/number base metatable) is already closed on this base by
 `recff_has_tostring()` recording the lookup with guards.
 
+The per-call cost, same box, 200k iterations, printed as microseconds per call:
+the current tree ≈0.1 us/call at `-jon` (the trace exit) and ≈0.1 at `-joff`,
+`f8c70a23` ≈0.0 us/call at `-jon`. That is the 182 ms vs 2.4 ms of the brief's
+bench, per call.
+
 ## Gate on this branch (tests and docs only, src unchanged from `945075d2`)
 
-`sh tests/ci-box.sh`: see the DONE report for both boxes.
+`sh tests/ci-box.sh`: x86_64 `ci-box: all stages passed`, arm64 `ci-box: all
+stages passed`. `sh tests/ci-local.sh --sanitizers-only`: `ci-local: OK` on
+both. `tests/harness.sh --mode all --strict` (x86_64): 395 PASS / 0 FAIL /
+8 XFAIL / 12 SKIP, 155 tests, modes A,B,R. `tests/harness.sh --strict --mode
+both --corpus tests/d54 --timeout 120` is a stage of `ci-box.sh` and passes on
+both arches, as do the opt-level and GC-stress stages.

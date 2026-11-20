@@ -37,6 +37,10 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   saturated instead of raising "number has no integer representation":
   `("hello"):sub(1.5)` is `"hello"`, `string.char(65.5)` is `"A"`, and a
   numeric string beyond the int64 range is converted the same way.
+  `string.rep` is the exception in the interpreter, which rejects a
+  non-integral count; compiled code truncates it there too, so a loop
+  recorded with the count 2 returns `"xx"` for 2.5 where the interpreter
+  raises.
 - `PENDING` `math.max` and `math.min` accept numeric strings; PUC compares the
   arguments as they are and raises "attempt to compare string with number".
 - `PENDING` A numeric string as a `for` bound is converted with the

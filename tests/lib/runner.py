@@ -19,6 +19,9 @@ tests/known-different.tsv (deliberate or implementation-defined differences),
 both as test <TAB> modes <TAB> reason.
 They are reported as XFAIL.  An entry that starts passing is reported as XPASS
 so progress is visible; use --strict to make XPASS fatal.
+Vendored puc54 files that mention the internal test library T are listed in
+tests/t-guarded.tsv (test <TAB> run|skip <TAB> reason): "run" keeps the file in
+the corpus with its T-guarded blocks dead in both arms, "skip" leaves it out.
 """
 
 import argparse
@@ -45,14 +48,26 @@ KNOWN_BAD = ROOT / "tests" / "known-bad.tsv"
 # Same format and the same XFAIL handling as known-bad.tsv; kept apart so that
 # known-bad.tsv lists only real defects.
 KNOWN_DIFFERENT = ROOT / "tests" / "known-different.tsv"
+# Vendored puc54 files that mention the internal test library T.  Neither arm
+# has the PUC ltests hooks, so such a file used to be skipped whole.  Nine of
+# the twelve guard every T use (`assert(not T or ...)`, `if T then ... end`,
+# `if T == nil then ... return end`): with T undefined in both arms those blocks
+# are dead code on both sides and the rest of the file is comparable.  Which
+# files are of that kind is per-file knowledge, so it lives in a table:
+# tests/t-guarded.tsv, `test<TAB>run|skip<TAB>reason`.  A file is only enabled
+# once its own failures are classified (known-bad, known-different or an
+# explicit skip row here), so the strict CI command never hides a file it has
+# not classified.
+T_GUARDED = ROOT / "tests" / "t-guarded.tsv"
 REPORT_DIR = ROOT / "tests" / "report"
 DUMP_RELOAD = ROOT / "tests" / "lib" / "dump_reload.lua"
 
 ADDR_RE = re.compile(r"0x[0-9a-fA-F]{5,}")
 PROG_RE = re.compile(r"(?m)^[^\n]*?/?(?:lua54ref|luajit|lua)(?:\.exe)?: ")
 PATH_RE = re.compile(r"(?m)(?<![\w])/[^\s:]*/(?=[\w.\-]+\.lua:)")
-# PUC internal test hooks (ltests.c / -DLUA_USER_H='"ltests.h"').  Our binary
-# cannot provide them, so such tests are skipped rather than counted as failures.
+# PUC internal test hooks (ltests.c / -DLUA_USER_H='"ltests.h"').  Neither arm
+# can provide them; tests/t-guarded.tsv decides per file whether the file still
+# runs with those blocks dead in both arms, or is skipped.
 T_HOOK_RE = re.compile(r"\bT\s*[.\[]")
 
 
@@ -239,6 +254,22 @@ def load_known_bad(path):
         reason = parts[2] if len(parts) > 2 else ""
         kb.setdefault(test, {})[modes] = reason
     return kb
+
+
+def load_decisions(path):
+    """test -> (decision, reason) from a `test<TAB>decision<TAB>reason` table."""
+    d = {}
+    if not path.exists():
+        return d
+    for ln in path.read_text().split("\n"):
+        ln = ln.strip()
+        if not ln or ln.startswith("#"):
+            continue
+        parts = ln.split("\t")
+        if len(parts) < 2:
+            continue
+        d[parts[0]] = (parts[1].strip(), parts[2].strip() if len(parts) > 2 else "")
+    return d
 
 
 def known_reason(ctx, rel, mode):
@@ -440,9 +471,14 @@ def plan(tests, modes, ctx, opts):
         if "skip" in d:
             skipped.append((rel, "directive: " + d["skip"]))
             continue
-        if rel.startswith("tests/corpus/puc54/") and T_HOOK_RE.search(text):
-            skipped.append((rel, "needs PUC internal ltests hooks (T.*), unavailable in LuaJIT"))
-            continue
+        if "/corpus/puc54/" in rel and T_HOOK_RE.search(text):
+            # Only the T-guarded blocks need the internal test library: the
+            # table decides per file whether the rest of it still runs.
+            decision, why = ctx["t_guarded"].get(rel, ("skip", "not triaged yet"))
+            if decision != "run":
+                skipped.append((rel, "needs PUC internal ltests hooks (T.*), "
+                                     "unavailable in LuaJIT -- " + (why or "no reason given")))
+                continue
         # Pre-flight: the corpus must be valid Lua 5.4.  A file that does not
         # parse on the reference proves nothing (both sides would fail alike).
         if ctx["luac"] and "no-parse-check" not in d:
@@ -482,6 +518,9 @@ def main():
                     help="reference luac, used to validate that corpus files are valid 5.4")
     ap.add_argument("--known-bad", default=str(KNOWN_BAD))
     ap.add_argument("--known-different", default=str(KNOWN_DIFFERENT))
+    ap.add_argument("--t-guarded", default=str(T_GUARDED),
+                    help="table of vendored puc54 files that may run without the "
+                         "PUC test library T (test<TAB>run|skip<TAB>reason)")
     ap.add_argument("--timeout", type=float, default=20.0)
     ap.add_argument("--jobs", type=int, default=min(8, os.cpu_count() or 1))
     ap.add_argument("--opt-levels", default=None,
@@ -527,11 +566,12 @@ def main():
 
     kb = load_known_bad(Path(opts.known_bad))
     kd = load_known_bad(Path(opts.known_different))
+    t_guarded = load_decisions(Path(opts.t_guarded))
     luac = str(Path(opts.luac)) if Path(opts.luac).exists() else None
     if luac is None:
         print("warning: %s missing -- corpus syntax pre-flight disabled" % opts.luac)
     ctx = {"luajit": str(luajit), "ref": str(ref), "kb": kb, "kd": kd, "luac": luac,
-           "gc_stress": opts.gc_stress}
+           "gc_stress": opts.gc_stress, "t_guarded": t_guarded}
     jobs, skipped, bad = plan(tests, modes, ctx, opts)
 
     results = list(bad)

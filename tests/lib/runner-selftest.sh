@@ -7,7 +7,9 @@
 #   - a failure in a mode the difference entry does not name is a FAIL, and
 #     --update-known-bad writes it to known-bad.tsv, not into nowhere;
 #   - a job listed in both files is reported as the defect;
-#   - --update-known-bad never copies a difference into known-bad.tsv.
+#   - --update-known-bad never copies a difference into known-bad.tsv;
+#   - the t-guarded table decides per vendored puc54 file whether it runs with
+#     the internal test library T undefined in both arms or stays a SKIP.
 # Needs src/luajit and tests/ref/bin/lua54ref (tests/ref/fetch-ref.sh).
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
@@ -73,6 +75,38 @@ check "--update-known-bad does not copy a difference" sh -c \
 rc=0; harness --strict >"$W/out5" 2>&1 || rc=$?
 check "after the update only the stale entry is left to fix" sh -c \
   "[ $rc -eq 1 ] && grep -q '^  FAIL   0\$' '$W/out5' && grep -q '^  XPASS  1\$' '$W/out5'"
+
+# The t-guarded table (tests/t-guarded.tsv): a vendored puc54 file that mentions
+# T runs when its row says "run" and stays a documented SKIP otherwise. The file
+# content is the same in all three cases -- T is undefined in both arms, so the
+# `T and ...` line is dead weight and both arms print the same thing.
+TG="$W/corpus/puc54"
+TGREL=tests/report/runner-selftest/corpus/puc54
+mkdir -p "$TG"
+TFILE='local color = T and T.gccolor
+print("same")'
+printf '%s\n' "$TFILE" >"$TG/tguarded.lua"
+cp "$TG/tguarded.lua" "$TG/tunlisted.lua"
+cp "$TG/tguarded.lua" "$TG/tskip.lua"
+{
+  printf '%s\trun\tT-guarded, runs in both arms\n' "$TGREL/tguarded.lua"
+  printf '%s\tskip\tunguarded T use in this corpus\n' "$TGREL/tskip.lua"
+} >"$W/tg.tsv"
+tgharness() {
+  sh "$ROOT/tests/harness.sh" --mode A --corpus "$TGREL" --t-guarded "$W/tg.tsv" \
+    --report-dir "$W/report-tg" "$@"
+}
+rc=0; tgharness >"$W/out6" 2>&1 || rc=$?
+check "a t-guarded run entry is not skipped and passes" sh -c \
+  "[ $rc -eq 0 ] && grep -q '^  PASS   1\$' '$W/out6' && grep -q '^  SKIP   2\$' '$W/out6' &&
+   grep -q '^  FAIL   0\$' '$W/out6'"
+check "the unlisted file is a documented SKIP with the default reason" sh -c \
+  "grep -q 'tunlisted.lua.*not triaged yet' '$W/report-tg/last.md'"
+check "a skip row keeps the file skipped with its own reason" sh -c \
+  "grep -q 'tskip.lua.*unguarded T use in this corpus' '$W/report-tg/last.md'"
+rc=0; tgharness --t-guarded /dev/null >"$W/out7" 2>&1 || rc=$?
+check "without the table every T file stays skipped" sh -c \
+  "[ $rc -eq 0 ] && grep -q '^  PASS   0\$' '$W/out7' && grep -q '^  SKIP   3\$' '$W/out7'"
 
 if [ "$fails" -ne 0 ]; then
   echo "runner-selftest: FAILED ($fails)"

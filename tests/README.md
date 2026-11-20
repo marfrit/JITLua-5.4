@@ -55,9 +55,10 @@ in `known-bad.tsv`, not a `FAIL`.
 
 ## Statuses
 `PASS` / `FAIL` (unexpected, exit 1) / `XFAIL` (listed in `known-bad.tsv`) /
-`XPASS` (listed but now passing — remove the entry) / `SKIP` (directive, or PUC
-`T.*` internal test hooks) / `BAD` (corpus file is not valid Lua 5.4 — fix the
-test) / `TIMEOUT` (both sides exceeded the limit; counts as a failure of the run unless a
+`XPASS` (listed but now passing — remove the entry) / `SKIP` (directive, or a
+vendored PUC file whose part that needs the internal test library `T` is not
+triaged yet — see `t-guarded.tsv`) / `BAD` (corpus file is not valid Lua 5.4 — fix
+the test) / `TIMEOUT` (both sides exceeded the limit; counts as a failure of the run unless a
 known-bad entry covers the file and mode, then it is reported as `XFAIL`).
 
 Every corpus file is pre-flighted with `luac54ref -p`; a file that fails to parse
@@ -65,11 +66,19 @@ on the reference would otherwise "pass" mode A by failing on both sides.
 
 ## Layout
 - `harness.sh`, `lib/runner.py` — runner; `lib/dump_reload.lua` — mode R wrapper.
+- `lib/suite-triage.py` — stop-point triage of one vendored suite file: runs it
+  against PUC 5.4.9, `-joff` and `-jon`, and comments each failing assert out in
+  a scratch copy to reach the next one (the vendored file is never edited).
 - `d54/` — our 5.4 edge-case corpus (see `docs/54port.md` for the §4 → test map).
 - `corpus/puc54/` — vendored upstream `testes/` (Lua 5.4.9), unmodified.
 - `ref/` — pinned reference fetch/build (`manifest.txt`), binaries are artifacts.
 - `fuzz/` — `gen.py` (seeded valid-5.4 generator), `fuzz.py` (differential driver).
 - `known-bad.tsv` — `test<TAB>modes<TAB>reason`; the M0 baseline of unported 2.1.
+- `known-different.tsv` — same format, deliberate or implementation-defined differences.
+- `t-guarded.tsv` — `test<TAB>run|skip<TAB>reason`; the vendored puc54 files that
+  mention the internal test library `T`. `run` keeps the file in the corpus (its
+  `T` blocks are dead code in both arms, the rest is compared); `skip` keeps the
+  documented `SKIP`. Every file that mentions `T` has a row.
 - `report/last.{json,md}` — generated reports (gitignored).
 - `ci-local.sh` — normal + ASan/UBSan builds, harness, short fuzz.
 
@@ -88,6 +97,15 @@ The vendored `corpus/puc54` files stay unmodified. A directive for one of
 them goes into `VENDORED_DIRECTIVES` in `lib/runner.py` (today: a 10 s bound
 for `db.lua`, which ends in a loop that does not terminate here, see
 `known-different.tsv`).
+
+Twelve vendored files mention the internal test library `T` (the PUC `ltests.c`
+hooks), which no arm here provides. `tests/t-guarded.tsv` decides per file what
+happens: a file whose every `T` use sits in `assert(not T or ...)`, `if T then` or
+an early `if T == nil then ... return end` runs — with `T` undefined those blocks
+are dead code in *both* arms, so only the guarded blocks are skipped, not the
+file — and its unguarded assertions are compared like any other test. A file that
+uses `T` unguarded (`api.lua`, `code.lua`) or whose failures are not yet
+classified keeps the `SKIP` with its reason.
 
 ## Fuzzing
 ```sh

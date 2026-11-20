@@ -84,6 +84,17 @@ frame by describing it to the recorder alone.
    slots in step. `recff_stitch` is the only existing precedent for a frame the
    recorder invents; it also shows the cleanup that is needed if the recording
    then aborts.
+   - **Checked, and it does not work** (see
+     [tostring-contframe-2026-11-20.md](tostring-contframe-2026-11-20.md)): the
+     metamethod frame the interpreter's `lua_call` creates is a `FRAME_C` frame
+     whose `frame_prevd` is always the fast function's own frame-info slot, and
+     that slot is the one `BC_FUNCC` reads back as the resume PC. A cont marker
+     cannot be put there, and shifting the fast function's frame moves the
+     metamethod frame by the same amount. The routes that could carry the trace
+     (a new `lj_cont_tostr` handover, which costs the C-call boundary that the
+     PUC yield behaviour and the error levels depend on, or an IR-only frame with
+     an armed walk, which needs an exit story for a caller C frame that does not
+     exist at trace runtime) are laid out in that note.
 2. Teach `lj_record_ret`'s frame walk to step over that frame: its loop is
    `while (frame_ispcall(frame))`, and a `FRAME_CONT` frame is not a pcall
    frame, so today the walk stops and reports "return to C frame".

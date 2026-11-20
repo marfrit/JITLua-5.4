@@ -143,7 +143,10 @@ A+B 212 PASS / 0 FAIL / 4 XFAIL, opt levels 0-3 468, R 114, ASan/UBSan A+B+R
   `tests/d54/tostring_07_hot_bad.lua` semantics tests (hot `__tostring` turning
   bad after the trace compiled) and the two `__tostring` loops in
   `tests/lib/ffrec-54.lua` whose values are checked but which are not yet
-  registered as required root loop traces.
+  registered as required root loop traces. Building the frame physically, step 1
+  of that ticket, is now also ruled out with the frame arithmetic and the
+  PUC-equal C-call-boundary tests (`tests/d54/tostring_08_cboundary.lua`) in
+  [tostring-contframe-2026-11-20.md](tostring-contframe-2026-11-20.md).
 - An FFI cdata value has `__tostring` in its per-type base metatable
   (`ffi_meta`), so `tostring(cdata)` now leaves the trace to the interpreter
   like every other value with a metamethod. Output is unchanged (a ctype

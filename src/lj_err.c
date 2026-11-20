@@ -145,13 +145,23 @@ static int tbc_hascatcher(lua_State *L, TValue *frame, void *cf)
 static void tbc_closeunwound(lua_State *L, TValue *level, void *cf,
 			     TValue *base)
 {
-  if (L->tbcn > 0 &&
-      restorestack(L, mref(L->tbclist, int32_t)[L->tbcn-1]) >= level) {
-    L->base = base;
-    L->cframe = cf;
-    lj_state_checkstack(L, LUA_MINSTACK * 2);
-    lj_meta_tbccloseall(L, level, L->top-1);
-  }
+  ptrdiff_t lofs, bofs;
+  if (!(L->tbcn > 0 &&
+	restorestack(L, mref(L->tbclist, int32_t)[L->tbcn-1]) >= level))
+    return;
+  /* level and base point into the stack, and lj_state_checkstack() below can
+  ** resize (move) it. Keep them as offsets, or the stale pointers would be
+  ** saved as garbage offsets in lj_meta_tbccloseall() and its "slot at or
+  ** above level" test would truncate the close chain. */
+  lofs = savestack(L, level);
+  bofs = savestack(L, base);
+  L->base = base;
+  L->cframe = cf;
+  lj_state_checkstack(L, LUA_MINSTACK * 2);
+  level = restorestack(L, lofs);
+  base = restorestack(L, bofs);
+  L->base = base;
+  lj_meta_tbccloseall(L, level, L->top-1);
 }
 
 /* Unwind until stop frame. Optionally cleanup frames. */

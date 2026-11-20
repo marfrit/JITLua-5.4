@@ -7,7 +7,9 @@ with PUC parity are not listed.
 
 Status tags: `FORK` (deliberate fork decision), `IMPL-DEFINED` (the 5.4 manual
 allows it / observable is implementation-defined), `PENDING` (known gap, tracked
-in tests/known-bad.tsv when a test shows it), `EXTENSION` (kept LuaJIT feature).
+in tests/known-bad.tsv when a test shows it), `EXTENSION` (kept LuaJIT feature),
+`REMOVED` (stock LuaJIT 2.1 surface that is not in the default build; a
+compile-time switch brings it back).
 
 Platforms: all VM and JIT changes target **x86_64 (GC64) and arm64** on Linux,
 the two tested platforms. The other LuaJIT backends (x86, arm, ppc, mips and
@@ -195,6 +197,28 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   arm loads only its own build.
 - `EXTENSION` `lua_getfenv`/`setfenv` remain present as LuaJIT extensions;
   PUC 5.4 removed them.
+
+### Removed from stock LuaJIT 2.1
+- `REMOVED` The Lua 5.1 leftovers are not in the default build: `gcinfo`,
+  `loadstring`, `module`, `newproxy` and `unpack` in `_G`; `foreach`,
+  `foreachi`, `getn` and `maxn` in `table`; `loaders` (the alias of
+  `searchers`) and `seeall` in `package`. None of them is Lua 5.4 — 5.4 has
+  `load`, `table.unpack`, `collectgarbage("count")`, `pairs`/`#` and
+  `package.searchers` — and none is a deliberate extension of this fork.
+  `make CFLAGS=-DLUAJIT_ENABLE_51COMPAT` builds them back, unchanged: the
+  macro `LJ_51COMPAT` (`src/lj_arch.h`) guards the definitions in
+  `lib_base.c`, `lib_table.c` and `lib_package.c` with `#if LJ_51COMPAT`, and
+  `src/host/buildvm_lib.c` knows that line, so the generated library tables
+  follow the switch. Only `newproxy` has no 5.4 equivalent from Lua; the
+  profiler's at-exit sentinel in `jit/p.lua` uses a table with `__gc`.
+  Kept on purpose: `jit.*`, `bit.*`, `ffi`, `string.buffer`, `table.new`,
+  `table.clear`, `getfenv`, `setfenv`. Tests:
+  `tests/d54/compat51_01_51names_absent.lua` (default build, modes A, B, R)
+  and `tests/lib/compat51-check.lua` with its build script
+  `tests/lib/compat51build-d54.sh` (a `tests/ci-box.sh` stage on both
+  arches); the two d54 files that build userdata with `newproxy`
+  (`env_07_udenv`, `udfin_01_close`) report a skip in the default build and
+  run in that stage.
 
 ### Kept LuaJIT extensions
 - `EXTENSION` `jit.*`, `bit.*`, `ffi`/cdata, `bcsave`, `-j`/`-O`/`-b` options.

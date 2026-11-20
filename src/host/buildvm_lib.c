@@ -388,6 +388,8 @@ void emit_lib(BuildCtx *ctx)
 	}
 	if (!strcmp(buf, "#if LJ_52"))
 	  ok = LJ_52;
+	else if (!strcmp(buf, "#if LJ_51COMPAT"))
+	  ok = LJ_51COMPAT;
 	else if (!strcmp(buf, "#if LJ_HASJIT"))
 	  ok = LJ_HASJIT;
 	else if (!strcmp(buf, "#if LJ_HASFFI"))

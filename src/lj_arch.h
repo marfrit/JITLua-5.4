@@ -764,6 +764,20 @@ extern void *LJ_WIN_LOADLIBA(const char *path);
 #define LJ_52			0
 #endif
 
+/* The Lua 5.1 leftovers are neither Lua 5.4 nor a deliberate extension of
+** this fork, so the default build does not define their names:
+** _G: gcinfo, loadstring, module, newproxy, unpack;
+** table: foreach, foreachi, getn, maxn;
+** package: loaders (alias of searchers), seeall.
+** Build with CFLAGS=-DLUAJIT_ENABLE_51COMPAT to get them back unchanged.
+** The library sources guard them with exactly "#if LJ_51COMPAT", which is
+** also the line src/host/buildvm_lib.c knows how to skip. */
+#ifdef LUAJIT_ENABLE_51COMPAT
+#define LJ_51COMPAT		1
+#else
+#define LJ_51COMPAT		0
+#endif
+
 /* -- VM security --------------------------------------------------------- */
 
 /* Don't make any changes here. Instead build with:

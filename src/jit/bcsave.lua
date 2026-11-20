@@ -56,7 +56,7 @@ end
 
 local function readfile(ctx, input)
   if ctx.string then
-    return check(loadstring(input, nil, ctx.mode))
+    return check(load(input, nil, ctx.mode))
   elseif ctx.filename then
     local data
     if input == "-" then

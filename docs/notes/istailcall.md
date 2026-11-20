@@ -287,6 +287,7 @@ On x64 and on arm64, same counts on both:
   `lj_vm_modi` (7 % between two addresses on the measured CPU). Aligning that
   function would take it out of future comparisons.
 - `tests/bench/classic/run-interleaved.py` and every other driver that times
-  with `subprocess.run(timeout=...)` measures in steps of up to 50 ms.
+  with `subprocess.run(timeout=...)` measures in steps of up to 50 ms. (That
+  runner waits without a timeout since 2026-11-20.)
 - The return hook of a Lua function that ends in a tail call to a C function
   is still missing (`tailname.md`); unrelated to the mark.

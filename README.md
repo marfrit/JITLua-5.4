@@ -20,21 +20,31 @@ Status as measured, not a compatibility claim:
 
 - Differential gates against PUC Lua 5.4.9 pass on the tested platforms.
   Measured on Linux arm64 and x86_64, identical on both, on the `tests/d54`
-  edge-case corpus: A+B **232 PASS / 0 FAIL / 4 XFAIL**, JIT optimization
-  levels 0–3 **512**, R (dump/reload round-trip) **125**; the ASan/UBSan run
-  of A+B+R is **357 PASS / 0 FAIL / 4 XFAIL**; C API checks **258 + 92 + 18**
+  edge-case corpus: A+B **237 PASS / 0 FAIL / 5 XFAIL**, JIT optimization
+  levels 0–3 **524**, R (dump/reload round-trip) **128**; the ASan/UBSan run
+  of A+B+R is **365 PASS / 0 FAIL / 5 XFAIL**; C API checks **258 + 92 + 18**
   plus the `udfinal` probe, which prints the same counters as the PUC binary.
 - The C API is **source-compatible** with PUC Lua 5.4, **not
   binary-compatible**: C modules must be rebuilt against JITLua's headers.
   A module built against PUC's headers that calls `luaL_checkversion` (as
   `luaL_newlib` does) is rejected at load.
 - Full corpus (PUC 5.4.9 test suite plus `tests/d54`) with `--strict`, the
-  exact command of the public CI: **413 PASS / 0 FAIL / 8 XFAIL / 12 SKIP /
+  exact command of the public CI: **421 PASS / 0 FAIL / 9 XFAIL / 12 SKIP /
   0 TIMEOUT**. Every XFAIL has its reason in one of two lists:
   [tests/known-bad.tsv](tests/known-bad.tsv) for real defects, and
   [tests/known-different.tsv](tests/known-different.tsv) for deliberate or
   implementation-defined differences.
-- Known defects (known-bad.tsv): none open.
+- The 12 SKIP are files of the PUC suite that the harness leaves out because
+  they mention the suite's internal test library `T`. `all` is the suite's
+  driver, `api` and `code` do nothing without `T`. The other nine run
+  without it under PUC 5.4.9 and stop at an assertion here: `coroutine`,
+  `cstack`, `errors`, `events`, `gc`, `gengc`, `locals`, `nextvar`,
+  `strings`. They are not gated and not triaged; the differences they would
+  show are not all in the lists below.
+- Known defects (known-bad.tsv): one open. A numeric `for` loop with an
+  integer start, limit or step outside the int32 range runs as a float loop:
+  the loop variable is a float, and from 2^53 on the loop does not count
+  correctly (`docs/DIFFERENCES.md`).
 - Known differences (known-different.tsv, all described in
   [docs/DIFFERENCES.md](docs/DIFFERENCES.md)): a private bytecode dump format
   (including the `calls.lua` binary-chunk section), the border of runtime-built

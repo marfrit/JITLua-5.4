@@ -10,6 +10,15 @@ attempt did and why it failed),
 recorder cannot retrofit the frame; its review addendum is the route taken
 here).
 
+Reviewed before the push (batch 7) and corrected in place: the hand-over
+contract of `FFH_MMCONT` (section 2), the frame word below the continuation,
+which is not always a Lua PC (section 1), where the recorder mirrors the frame
+and how it counts it (sections 2 and 4), the hook statements (section 3,
+item 4 and Q1, now measured) and the expected gain (section 7, which had the
+interpreter's cost as the ceiling of a trace that inlines the call). The frame
+arithmetic of section 1 was checked against `mmcall` and `lua_call` and is
+right.
+
 ## The route, in one paragraph
 
 `lj_ffh_tostring` (the C fallback of the `tostring` fast function) stops using
@@ -73,12 +82,14 @@ is a **C frame** in the C-stack chain (`lj_vm_call`'s `saveregs` frame, `L->cfra
 ```
 tostring fast-function frame            unchanged, slot for slot
   base-2   [tostring]    GCfuncC
-  base-1   [resume PC]   FRAME_LUA by type bits, untouched
+  base-1   [frame word]  untouched: the resume PC for a call from Lua, a
+                         delta with type bits for pcall(tostring, o), for a
+                         call from C and for tostring used as a metamethod
 
   base+0   [o]           the caller's argument slot, untouched
 
   base+1   [LJ_CONT_TOSTR]      frame_contv  (= newbase-4)   src/lj_frame.h:118
-  base+2   [resume PC]          frame_contpc (= newbase-3)   src/lj_frame.h:117
+  base+2   [copy of base-1]     frame_contpc (= newbase-3)   src/lj_frame.h:117
   base+3   [mo]                 frame_gc/func slot           (= newbase-2)
   base+4   [40|FRAME_CONT]      frame_ftsz                   (= newbase-1)
 
@@ -101,9 +112,14 @@ frame *below*, instead of a Lua frame.
 at `src/lj_record.c:1247-1248`). That avoids storing a pointer that would need
 pointer authentication on `arm64` (`br_auth`, `src/vm_arm64.dasc:705`) and
 matches the id compares already in `cont_dispatch`.
-`frame_contpc` gets the resume PC: it is what `->cont_tostr` needs as `PC` for
-the fast-function return, and what `lj_debug`/`lj_trace` report as the position
-of a continuation frame (`src/lj_debug.c:73-74`, `src/lj_trace.c:636-637`).
+`frame_contpc` gets the frame word of the fast function's own frame
+(`base-1`), whatever its type: it is what `cont_dispatch` loads into `PC` and
+what `->fff_res` then tests (`test PCd, FRAME_TYPE`, `src/vm_x64.dasc:1935`) to
+tell a return to Lua from a return through `->vm_return`. Nothing reads it as
+a bytecode position: `debug_framepc` returns early for the C function below
+the continuation (`src/lj_debug.c:62`), and the walk in
+`src/lj_trace.c:630-640` overwrites the value with `frame_pc` of the fast
+function's frame one step later.
 
 ### Why the observable frame facts do not move
 
@@ -144,14 +160,14 @@ yieldability and `cframe_nres` walks (section 3, 5).
 | file:line | change |
 |---|---|
 | `src/lj_frame.h:114` | `enum { LJ_CONT_TAILCALL, LJ_CONT_FFI_CALLBACK, LJ_CONT_TAILRET, LJ_CONT_TOSTR };` and extend the comment (111-113) to say what `LJ_CONT_TOSTR` returns and where its result slot is. |
-| `src/lj_lib.h:28-31` | new handover code `#define FFH_MMCONT (-2)`: the handler built a frame above its own and left the new base in `L->base`, the new top in `L->top`. |
+| `src/lj_lib.h:28-31` | new handover code `#define FFH_MMCONT (-2)`: the handler built a continuation frame with one argument above its own frame and left `L->top` one slot above the new base. `L->base` is **not** changed: `->fff_fallback` reloads `BASE` from it after the handler (`src/vm_x64.dasc:2384`) and an error raised before the hand-over must see the fast function's frame. |
 | `src/lib_base.c:382-399` (`LJLIB_ASM(tostring)`) | the metamethod branch: stop using `lua_call` + `lj_strfmt_tolstrres` + `setstrV`. Instead: keep `lj_meta_lookup` (`src/lj_meta.c:68-85`, keeps setting `MM_TOSTR_ABSENT` on a miss); if `mo` is **not** a function, keep the old `lua_call` route (a non-callable method must raise exactly today's message); else write the six slots of section 1 (`setcont`-style `u64` for `LJ_CONT_TOSTR` — `src/lj_obj.h:978-983`, `setframe_pc` for the contpc slot, `copyTV` for `mo` and the argument, `setframe_ftsz(newbase-1, 5*sizeof(TValue) + FRAME_CONT)`), set `L->top = newbase+1`, `L->base` stays, and `return FFH_MMCONT;`. Headroom: `->fff_fallback` already guarantees `LUA_MINSTACK` above the argument (`src/vm_x64.dasc:2375-2381`, `src/vm_arm64.dasc:1988-1996`), which covers 5 slots + 1 arg + the callee's needs at entry. |
-| `src/vm_x64.dasc:2369-2399` (`->fff_fallback`) | after the handler returns, before the `test RDd, RDd` at 2393: a branch for `RDd == -2` → `mov RA, L:RB->base` (new base), recompute `NARGS:RD` from `L->top - RA`, `mov PC, [RA-8]` (the `delta|FRAME_CONT` the handler wrote), `jmp ->vm_call_dispatch` (697). `ins_call` (in `->vm_call_dispatch_f`, 701) then writes that value back into the frame word and dispatches the callee, exactly as the `pcall` fast path does with `16+FRAME_PCALL` (1656). |
-| `src/vm_arm64.dasc:1984-2012` (`->fff_fallback`) | same: `CRET1w == -2` branch → `RA = L->base`, `NARGS8:RC = L->top - RA`, `PC = [RA, #-8]`, `b ->vm_call_dispatch` (646). |
+| `src/vm_x64.dasc:2369-2399` (`->fff_fallback`) | after the handler returns, before the `test RDd, RDd` at 2393: a branch for `RDd == -2` → `mov RA, L:RB->top; sub RA, 8` (the new base: one argument below the top), `mov NARGS:RDd, 1+1`, `mov PC, [RA-8]` (the `delta|FRAME_CONT` the handler wrote), `jmp ->vm_call_dispatch` (697). The existing `test RDd, RDd; jg ->fff_res` and the `jne ->vm_call_tail` after it treat every negative value as a tail call, so the new branch goes before them. `ins_call` (in `->vm_call_dispatch_f`, 701) then writes that value back into the frame word and dispatches the callee, exactly as the `pcall` fast path does with `16+FRAME_PCALL` (1656). |
+| `src/vm_arm64.dasc:1984-2012` (`->fff_fallback`) | same: `CRET1w == -2` branch → `RA = L->top - 8`, `NARGS8:RC = 8`, `PC = [RA, #-8]`, `b ->vm_call_dispatch` (646). |
 | `src/vm_x64.dasc:740-765` (`->cont_dispatch`) | add `cmp RA, #3 / je ->cont_tostr` **before** the KBASE reload at 757-760, next to the `cmp RA, #2` at 755 (see the KBASE note below). |
 | `src/vm_arm64.dasc:684-705` (`->cont_dispatch`) | the KBASE reload (700-701) sits **before** the id compare (702-703); move the `cmp CARG1, #2/#3` compares above 700, or recompute KBASE in `->cont_tostr` (the recompute already exists as a pattern: `src/vm_arm64.dasc:2323-2334`, "Check frame below fast function"). |
 | `src/vm_x64.dasc` new `->cont_tostr`, `src/vm_arm64.dasc` new `->cont_tostr` | the result check + the fast-function return. On entry (after `cont_dispatch`): `BASE` = the fast function's base, `PC` = the resume PC (from `contpc`), `RC`/`RA` = the result TValue address, `RD`/`MULTRES` = `nresults+1`. If the result is a string (`itype == LJ_TSTR`): store it to `[BASE-16]`, `KBASE` fix-up (below), `jmp ->fff_res1` (`src/vm_x64.dasc:1927`, `src/vm_arm64.dasc:1643`). Otherwise: `L->base = BASE`, `L->top = resultptr+1`, `call extern lj_strfmt_tolstrres` (`src/lj_strfmt.c:711`, unchanged signature: string passes, number/int64 converts with the 5.4 number format, anything else raises `LJ_ERR_TOLSTR`), refetch `BASE` from `L->base` (the helper may GC and move the stack), tag the returned `GCstr *`, store to `[BASE-16]`, `KBASE` fix-up, `jmp ->fff_res1`. The number branch of the helper writes the string into the result slot as well, so one store path suffices. |
-| `src/vm_x64.dasc:2736-2747` ("Check frame below fast function") | reused, not changed: the arithmetic that sets `KBASE` for the Lua frame below a fast function. `->cont_tostr` must do this because `cont_dispatch`'s own KBASE reload reads `[BASE-16]->pc` of a **GCfuncC**: `pc` is in `GCfuncHeader` (`src/lj_obj.h:486-488`), so for a C function it holds the C-function stub `MRef`, not a `GCproto *` — the reload is safe but useless. Today this is only ever exercised for `LJ_CONT_TAILCALL`/`LJ_CONT_FFI_CALLBACK`, whose handlers ignore KBASE. A trace or the interpreter continuing into the caller with a garbage KBASE is a wrong-constants bug, so `->cont_tostr` recomputes it (7 instructions on `x64`). |
+| `src/vm_x64.dasc:2736-2747` ("Check frame below fast function") | reused, not changed: the arithmetic that sets `KBASE` for the Lua frame below a fast function. `->cont_tostr` must do this because `->fff_res` assumes that KBASE belongs to the calling frame (`src/vm_x64.dasc:1940`), and after the metamethod it does not: with the id compare placed before `cont_dispatch`'s reload KBASE is still the metamethod's, and behind the reload it would be read from `[BASE-16]->pc` of a **GCfuncC** (`pc` is in `GCfuncHeader`, `src/lj_obj.h:486-488`; for a C function it is not a `GCproto *`, so the load is harmless and its result meaningless). Continuing into the caller with either value is a wrong-constants bug. The recompute applies only when `PC` is a Lua frame's PC; for any other frame type `->fff_res` leaves through `->vm_return`, which sets KBASE itself. `->cont_tostr` also has to put the function back into `L->hookff` when the return hook is active: the metamethod's call event cleared it, and `lj_dispatch_ffret` fires the fast function's return event from it (`lj_ffh_tostring` does the same around its `lua_call` since batch 7, `tests/d54/debug_07_tostring_hook.lua`). |
 | `src/vm_x64.dasc:1483-1512`, `src/vm_arm64.dasc:1285-1310` (`.ffunc_1 tostring`) | unchanged: the inline string (guarded by `MM_TOSTR_ABSENT`, 1495 / 1296) and number paths stay. |
 | `src/vm_x64.dasc:1645-1670`, `src/vm_arm64.dasc:1408-1450` (`pcall`/`xpcall` ff) | unchanged; they are the precedent for a fast function that stays on the frame chain below the function it calls, and the model for the `->fff_fallback` handover. |
 
@@ -168,8 +184,8 @@ TValue *res)` next to it and have both call one body; the error must stay
 | file:line | change |
 |---|---|
 | `src/lj_ffrecord.c:568-596` (`recff_tostring`) | replace the unconditional `recff_nyiu` at 577-580. Keep `recff_has_tostring` (554-566) — it is what guards the lookup (metatable, absent field). Then: if `ix.mobjv` is **not** a Lua function (`isluafunc`), keep `recff_nyiu(J, rd)` — a C/fast-function `__tostring` (FFI cdata, `src/lib_ffi.c:143` etc.) cannot be inlined; else build the IR mirror of the frame (next row) and `lj_record_call(J, func, 1)`, `rd->nres = -1` (pending call). |
-| new `rec_tostr_prep` in `src/lj_ffrecord.c` (or a `src/lj_record.c:1509-1522` variant of `rec_mm_prep`) | mirror `cont`/`contpc`/`func`/`arg`: `J->base[top] = lj_ir_k64(J, IR_KNUM, (uint64_t)LJ_CONT_TOSTR)`, `J->base[top+1] = TREF_CONT` (the contpc slot has no IR value — that is what `rec_callt` does at `src/lj_record.c:1247-1248`, and `src/lj_snap.c:78-82` materialises such slots from the real stack), then `func = top+3`, clear the gap (as `rec_mm_prep` does at 1519-1520), write `mo` and the argument into both the IR slots and the real slots (`copyTV`) so `rec_call_setup`'s `functv` (`src/lj_record.c:1134`) is right, and `J->framedepth += 2`. Use `curr_proto(J->L)->framesize` as the top, like `rec_mm_prep` (1511) — the metamethod's own frame slots are above the visible maxslot. |
-| `src/lj_record.c:1423-1502` (`lj_record_ret`, continuation branch) | add `else if (frame_contv(frame) == LJ_CONT_TOSTR)`: after the generic pop (1439-1443), look at the type of the result TRef: a string passes through; `num`/`int`/`int64` is converted with the same IR the no-metamethod path uses (`IR_TOSTR` with `IRTOSTR_NUM`/`IRTOSTR_INT`, `IRCALL_lj_strfmt_i64` for int64, cf. `src/lj_ffrecord.c:581-589`); anything else — table, userdata, nil, boolean, function, thread — `lj_trace_err(J, ...)` (a new `LJ_TRERR_TOLSTR` code, or reuse `LJ_TRERR_TYERR`) so the trace exits and the interpreter raises. Then place the converted string in the fast function's result slot (`J->base[-1-LJ_FR2]` after the pop) and continue as a fast-function return. |
+| new `rec_tostr_prep` in `src/lj_ffrecord.c` (or a `src/lj_record.c:1509-1522` variant of `rec_mm_prep`) | mirror `cont`/`contpc`/`func`/`arg` at the slots where the handler will build the real frame, which is slot 1 of the fast function's frame (`lj_ffh_tostring` cuts `L->top` to one argument first): `J->base[1] = lj_ir_k64(J, IR_KNUM, (uint64_t)LJ_CONT_TOSTR)`, `J->base[2] = TREF_CONT` (the contpc slot has no IR value — that is what `rec_callt` does at `src/lj_record.c:1247-1248`, and `src/lj_snap.c:78-82` materialises such slots from the real stack), `func = 3`, the argument at `J->base[5]`; write `mo` and the argument into the real slots as well (`copyTV`) so `rec_call_setup`'s `functv` (`src/lj_record.c:1134`) is right, and set `J->maxslot` so that extra arguments of the `tostring` call are dropped. `rec_mm_prep`'s `curr_proto(J->L)->framesize` (1511) must **not** be used as the top: the current function is the fast function, a C function without a prototype, and a mirror at any other slot than the handler's would fail `rec_check_slots`. Frame depth: the continuation counts twice in total (`rec_callt`, 1251); `lj_record_call` adds one of the two itself (1171), so the prep adds one, as `rec_mm_prep` does (1517). |
+| `src/lj_record.c:1423-1502` (`lj_record_ret`, continuation branch) | add `else if (frame_contv(frame) == LJ_CONT_TOSTR)`: after the generic pop (1439-1443), look at the type of the result TRef: a string passes through; `num`/`int`/`int64` is converted with the same IR the no-metamethod path uses (`IR_TOSTR` with `IRTOSTR_NUM`/`IRTOSTR_INT`, `IRCALL_lj_strfmt_i64` for int64, cf. `src/lj_ffrecord.c:581-589`); anything else — table, userdata, nil, boolean, function, thread — `lj_trace_err(J, ...)` (a new `LJ_TRERR_TOLSTR` code, or reuse `LJ_TRERR_TYERR`) so the trace exits and the interpreter raises. Then place the converted string in slot 0 of the fast function's frame, which is current again after the pop, and return from *that* frame with one result, the way `lj_ffrecord_func` ends every completed fast function (`lj_record_ret(J, 0, 1)`): the frame below can be a Lua frame, a `pcall` frame (`pcall(tostring, o)`, handled by the loop at the top of `lj_record_ret`), a C frame or another continuation, and that dispatch already exists. The interpreter does both returns while it executes the metamethod's `RET`, so both pops belong to the recording of that one instruction. |
 | `src/lj_record.c:1426-1437` | extend the existing rule: a trace *rooted inside* the metamethod (`J->framedepth == 2`) must stop with `LJ_TRLINK_RETURN` for `LJ_CONT_TOSTR` too, not just `LJ_CONT_TAILRET`; past the pop, the snapshot would pair the metamethod's `RET` pc with the base of the fast function's caller. |
 | `src/lj_record.c:117-200` | no change; the assertion now holds because the real stack has the frame (`cont` slot compared at 164-171, "cont slot not followed by frame" at 172-173 satisfied by `base+3`/`base+4`). This is the exact assertion that fired in the earlier attempt. |
 | `src/lj_snap.c:72-83`, `136-158` | no change: `snapshot_stack` walks `frame_iscont` (142) and the frame/cont words become `IR_KNUM` constants taken from the real stack (78-82), so an exit restores the whole cont frame and `L->base` (`src/lj_snap.c:1029`). |
@@ -193,8 +209,10 @@ restored snapshot), and `src/lj_record.c` for the trace-side store.
 
 ## 3. The `tostring_08` properties, one by one
 
-`tests/d54/tostring_08_cboundary.lua` pins six things. Mode A compares them
-with PUC 5.4.9, mode B compares `-joff` with `-jon`.
+`tests/d54/tostring_08_cboundary.lua` pins the frame, error and yield
+properties below (items 1-3, 5, 6); it has no hook case, item 4 is pinned by
+`tests/d54/debug_07_tostring_hook.lua`. Mode A compares them with PUC 5.4.9,
+mode B compares `-joff` with `-jon`.
 
 1. **`frame-whats` (`Lua/C/main`)** — preserved for free, section 1: the
    metamethod frame's `frame_prevd` is the same slot, and the fast function's
@@ -217,19 +235,25 @@ with PUC 5.4.9, mode B compares `-joff` with `-jon`.
    `->vm_unwind_ff` (`src/vm_x64.dasc:548-560`) which counts `ccallnest` out
    as before. Today's path additionally unwinds a real C frame; nothing in the
    message depends on it.
-4. **Hooks.** The metamethod call fires **no** call hook in either route:
-   `lj_dispatch_call` is only reached from the bytecode call sites
-   (`src/vm_x64.dasc:2540`, `src/vm_arm64.dasc:2146`), and both the old
-   `lj_vm_call` route and the new `->vm_call_dispatch` route bypass it. The
-   fast function's return hook still fires because the continuation returns
-   through `->fff_res`, whose hook branch calls `lj_dispatch_ffret`
+4. **Hooks.** The metamethod's call event fires in both routes, and PUC
+   fires it too. A call hook replaces the dispatch of every function header
+   (`lj_dispatch_update`, `DISPMODE_CALL`, `src/lj_dispatch.c:198-205`), so the
+   event comes from entering the function, whoever made the call: `lj_vm_call`
+   today, `->vm_call_dispatch` in the new route. Measured on the reviewed
+   tree, `debug.sethook(f, "cr")` around `tostring(t)`: PUC 5.4.9 reports
+   `call:tostring call:(metamethod) return:(metamethod) return:tostring`; this
+   tree reported the first three and lost the fourth, because the
+   metamethod's call event clears `L->hookff`, the note
+   `lj_dispatch_ffret` fires the fast function's return event from
+   (`src/lj_dispatch.c:505-529`). That is fixed for today's route
+   (`lj_ffh_tostring` keeps the note across `lua_call`) and pinned by
+   `tests/d54/debug_07_tostring_hook.lua`. The new route returns through
+   `->fff_res`, whose hook branch calls `lj_dispatch_ffret`
    (`src/vm_x64.dasc:1955-1965`, `src/vm_arm64.dasc:1648-1649`) with `L->base`
-   = the fast function's base and `PC` = the resume PC — the same values as the
-   direct fast-function return, and the same level for a hook that calls
-   `debug.getinfo`. `ffretry` (`src/vm_x64.dasc:2396`) is untouched: `FFH_MMCONT`
-   is a third return code, not a retry. Open question Q1: whether PUC fires a
-   call hook for the `__tostring` call at all, and whether mode A already
-   tolerates the difference.
+   = the fast function's base and `PC` = its frame word, so the level a hook
+   sees is the same, but `->cont_tostr` has to restore `L->hookff` first or
+   the event is lost again. `ffretry` (`src/vm_x64.dasc:2396`) is untouched:
+   `FFH_MMCONT` is a third return code, not a retry.
 5. **`yield-direct` / `yield-deep` (`attempt to yield across a C-call
    boundary`)** — **this is the property the route breaks.** The message comes
    from the `coroutine_yield` fast path falling back to
@@ -273,8 +297,8 @@ with PUC 5.4.9, mode B compares `-joff` with `-jon`.
 ## 4. The recorder side
 
 **Snapshot and continuation shape.** The IR slot block for the mirrored frame
-(with `LJ_FR2`, slots relative to the fast function's frame, `top` = the
-metamethod proto's `framesize` as in `rec_mm_prep`):
+(with `LJ_FR2`, slots relative to the fast function's frame; `top` is 1, the
+slot above the one argument `lj_ffh_tostring` keeps, see section 2):
 
 | slot | IR slot | real slot |
 |---|---|---|
@@ -284,8 +308,8 @@ metamethod proto's `framesize` as in `rec_mm_prep`):
 | `top+3` | `TREF_FRAME`, no ref | `40|FRAME_CONT` |
 | `top+4` | the object TRef | `o` |
 
-`J->framedepth += 2` (a continuation counts twice, as in
-`src/lj_record.c:1251`). Because the real stack has the frame, `rec_check_slots`
+The frame depth grows by two (a continuation counts twice, as in
+`src/lj_record.c:1251`; one of the two is `lj_record_call`'s own). Because the real stack has the frame, `rec_check_slots`
 passes and `lj_snap.c:78-82` can materialise `top+1`/`top+3` as constants from
 it — this is what makes an exit inside the metamethod restorable.
 
@@ -425,48 +449,55 @@ review's estimate ("one focused session plus a review") is realistic only for
 steps 1, 2 and 4 with option A; the yield bookkeeping and the tests are what
 the days go into.
 
-## 7. Expected gain, checked against the reading
+## 7. Expected gain
 
-The review's figure: about 90 ns per call saved on the measured box, from
-"182 ms for 2M calls". The arithmetic is right (182 ms / 2M = 91 ns/call), and
-my reading of the published numbers agrees that this is the *cost of the trace
-exit today*, but it overstates what the route recovers:
+Nothing here is measured; the numbers are `tostring54.md`'s bench table
+(`b6_tostring.lua`, `obj` case, N = 2M, x86_64): 122 ms `-joff` and 2.4 ms
+`-jon` before the result check, 149 ms `-joff` and 182 ms `-jon` since. The
+route has two parts with two different expectations.
 
-- `b6_tostring.lua` `obj` case, N = 2M: 2.4 ms traced *before* `tostring54`
-  (1.2 ns/call), 182 ms after (91 ns/call), and **149 ms with `-joff`**
-  (74.5 ns/call) — see `tostring54.md`'s bench table. So the traced cost today
-  is *worse* than the interpreter, and the ceiling for a real (non-hoisted)
-  conversion is the interpreter's own cost of the metamethod call, not 1.2 ns.
-  Best case for the `obj` case: 182 ms → roughly the `-joff` figure, i.e. a
-  saving of ~30 ns/call, not 90.
-- The 2.4 ms of the pre-`tostring54` trace is a metamethod that returns a
-  constant, which the old trace hoisted entirely (the review says the same
-  thing: that case measured hoisting, not conversion). That number is **not**
-  reachable again with a guarded call, because the guard and the conversion of
-  the string result are real work per call.
-- What is really removed per call: the C fallback entry (`->fff_fallback` + the
-  C handler + `api_call_base` + `lj_vm_call`'s `saveregs`/`L->cframe`
-  bookkeeping), the C frame's unwind setup, and the trace exit + re-entry. That
-  is the ~90 ns of the review, and it is the *cost of today's exit*, which is
-  why removing it can only get back to about the interpreter's cost.
+- **The interpreter part** (steps 1-2) replaces `lua_call` by a continuation
+  frame: no `api_call_base`, no `lj_vm_call` C frame, no unwind setup. That
+  moves `-joff` from 149 ms towards the 122 ms of the old tail call (which
+  built no frame at all), and it does nothing for `-jon`, where the trace
+  still leaves at every call.
+- **The recorder part** (step 4) inlines the metamethod into the trace. Then
+  the interpreter's cost of a call is not the ceiling, because the trace does
+  not make a call: the continuation frame exists in snapshots only, the
+  lookup guards are the ones `recff_has_tostring` emits today, and the result
+  check is a look at the type of the result reference while recording, with
+  no code behind it for a string. For `b6_tostring.lua`'s `obj` case, whose
+  metamethod returns a constant string, that is the IR of the trace that ran
+  in 2.4 ms before the result check: guards on a loop-invariant object and a
+  constant, all of it hoisted. The expectation is that figure again (about
+  1 ns per call, from 91), not 149 ms and not 60-90 ms.
+- That benchmark shows hoisting, as the batch-6 review said, and says little
+  about a `__tostring` that builds its string: such a loop pays the compiled
+  body of the metamethod (`string.format`, concatenation, an allocation per
+  call) and saves what the exit costs today, the stitch, the C fallback and
+  the nested `lj_vm_call`: about 90 ns per call on the measured box
+  (182 ms / 2M), minus nothing that the trace has to do instead.
+- The trace does not get there when the metamethod cannot be recorded (a C
+  function, an NYI construct, the slot budget). Then the loop is in the state
+  of section 4, "a metamethod body that cannot be traced at all", and 149 ms
+  minus the interpreter part is the figure to expect.
 - The older "0.1 µs at `-jon` and 0.1 at `-joff`, 0.0 µs on `f8c70a23`" (from
   `tostring-jit-2026-11-20.md`) is the same number rounded until it distinguishes
   nothing; use the bench medians.
 
-Expectation, to be measured, not asserted: `obj` at `-jon` lands between
-149 ms (`-joff`, the floor if the trace only ever exits again) and about
-60-90 ms (if the whole loop stays one trace and the metamethod inlines). If the
-measurement lands near 149 ms, the route buys nothing over `-joff` for this
-shape and the plain conclusion is "the trace no longer hurts"; the case where
-it clearly wins is a conversion inside a bigger loop that today exits at every
-conversion. Measurement command in Q3.
+So the prize for the benchmark is the whole 180 ms, and for real conversions
+the 90 ns per call of the review; whether the 3 days are worth that is a
+question of how often a hot loop converts objects, which no workload in the
+bench set does. Measurement command in Q3.
 
 ## 8. Open questions, with the command that settles each
 
 All of these need a build; none was run for this document.
 
 1. **Does PUC 5.4.9 fire a `call`/`ret` hook for the `__tostring` call, and
-   does LuaJIT today?** (Section 3.4 argues "no" for LuaJIT in both layouts.)
+   does LuaJIT today?** Settled by the batch-7 review, see section 3 item 4:
+   both do, and the events are equal since the `L->hookff` fix. The command,
+   for the patched tree:
    `cat > /tmp/h.lua <<'EOF'
    local ev={}
    local t=setmetatable({},{__tostring=function() ev[#ev+1]="mm"; return "s" end})
@@ -476,7 +507,10 @@ All of these need a build; none was run for this document.
    EOF` then `./src/luajit -joff /tmp/h.lua; ./src/luajit -jon /tmp/h.lua` on
    base `a6d94a6e` and on the patched tree, and the same script under PUC 5.4.9.
 2. **Is `coroutine.isyieldable()` false inside `__tostring` today, and does
-   mode A already pin it?** `./src/luajit tests/d54/tostring_08_cboundary.lua`
+   mode A already pin it?** Measured by the batch-7 review: it is `false`
+   inside `__tostring` in PUC 5.4.9 and in this tree (`-joff` and `-jon`), and
+   `true` inside `__add` in both. No test pins it yet, so option A costs the
+   two yield cases and this one. To repeat: `./src/luajit tests/d54/tostring_08_cboundary.lua`
    with one added line printing `coroutine.isyieldable()` in the metamethod,
    `-joff` and `-jon`, compared with PUC 5.4.9 — this decides whether option A
    costs one more difference row or several.

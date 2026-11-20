@@ -236,6 +236,46 @@ target x86_64 (GC64) and arm64.
   Not a difference: a loop that allocates nothing never runs the collector, so
   a weak entry it only reads (`while x[1] do A = A+1 end`) stays. PUC 5.4 and
   `-joff` behave the same (`weak_noalloc_boundary.lua`).
+- Integer equality in compiled code when a 64-bit result is inside the int32
+  range. A trace carries the result of 64-bit integer arithmetic as an int64
+  value, and only a result that fit int32 *while the trace was recorded* is
+  narrowed under a guard; the other direction has no guard, so the same
+  instruction can later produce a value inside int32 (an accumulator that
+  passes through 0, `a[i] + b[i]` recorded on an iteration where the sum
+  overflowed int32). `==`, `~=` and `rawequal` between such a value and an
+  int32 value were decided from the two IR types, as "never equal":
+  `local x = a[i] + b[i]; if x == 0 then` missed every zero once the loop was
+  compiled, in all JIT arms on x86_64 and arm64. `lj_record_objcmp` now
+  compares the 64-bit values (and `rawequal(int64, float)` compares exactly,
+  as the equality bytecodes already did). The same state at the start of a
+  side trace: the slot types come from the parent's snapshot, the stack from
+  the exit handler, which writes an int64 inside int32 as an int32; the code
+  after a loop that was left with such a value compared it wrongly and used
+  it as a hash key under a guard that always failed. `rec_setup_side_i64`
+  narrows such a slot under a guard before the first instruction is recorded.
+  `rec_check_slots` in the assert build is strict again (it had been relaxed
+  for exactly this state), and the assert build runs the d54 corpus with
+  `-Ohotexit=1` in `tests/ci-box.sh` and `tests/ci-local.sh`. The
+  representation rule as it really holds is at the top of `src/lj_record.c`.
+  Test `tests/d54/i64_08_int32_reentry.lua` (red before in every JIT arm of
+  the plain build); `tests/d54/i64_07_wrap_reentry.lua` for the wrap shapes.
+- A numeric `for` loop with an integer control value outside int32, entered
+  in compiled code. The interpreter runs such a loop as a float loop
+  (`lj_meta_for` converts the value; see `docs/DIFFERENCES.md`). The recorder
+  did the conversion on the stack and then used the slot's existing int64
+  reference as if it were an int32: `for j = 2147483646, 2147483649` inside
+  a hot loop ran 240 times in 200 rounds instead of 800, and the assert
+  build stopped at "bad FORI argument type". `rec_for` now loads such a
+  slot before the conversion and converts the reference the way
+  `lj_meta_for` converts the value, under a guard that the value is outside
+  int32 (a value inside stays an integer there). Test
+  `tests/d54/for_01_int64_control.lua`, red before in every JIT arm; its
+  comparison with PUC is the known-bad row for the float loop itself.
+- The return hook of `tostring` after a `__tostring` call. The fast function's
+  return event is fired from a note its call event leaves; the call event of
+  the metamethod cleared it, so `tostring(obj)` had a call event and no return
+  event. `lj_ffh_tostring` keeps the note across the call
+  (`tests/d54/debug_07_tostring_hook.lua`).
 - `__tostring` must return a string (5.4 `luaL_tolstring`). The
   conversion paths `tostring()`, `print()`, `string.format("%s")`, the C API
   `luaL_tolstring` and the standalone message handler now enforce it: a string
@@ -262,6 +302,55 @@ target x86_64 (GC64) and arm64.
 
 ## Known JIT/performance rows (not semantic divergences)
 
+- Classic benchmarks against stock LuaJIT 2.1: none is more than 10 % slower.
+  This closes the `PENDING` row `docs/DIFFERENCES.md` had for deltablue,
+  k-nucleotide and spectral-norm. Measured 2026-11-20 with
+  `tests/bench/classic/run-interleaved.py`, arms interleaved, median of 9, one
+  host per architecture; stock/ours, above 1 is faster than stock:
+
+  | benchmark | x86_64 stock ms | x86_64 | arm64 stock ms | arm64 |
+  |---|---:|---:|---:|---:|
+  | nbody | 6.8 | 0.971 | 2.1 | 0.731 (see below) |
+  | spectral-norm | 15.3 | 0.962 | 3.9 | 0.990 |
+  | fannkuch-redux | 67.6 | 1.081 | 13.4 | 0.987 |
+  | binary-trees | 929.4 | 1.102 | 232.5 | 0.942 |
+  | fasta | 9.6 | 1.039 | 3.3 | 1.013 |
+  | deltablue | 18854.1 | 0.991 | 3628.4 | 1.086 |
+  | scimark | 31277.7 | 1.058 | 25840.6 | 0.984 |
+  | k-nucleotide | 63.1 | 0.988 | 17.1 | 0.948 |
+  | regex-dna | 59.4 | 0.951 | 12.3 | 0.917 |
+
+  The arm64 host is shared and its short rows are runs of a few milliseconds.
+  nbody alone on that host, median of 11: 0.982 at the set's size (1.3 ms),
+  0.993 and 0.997 at 10 and 100 times the iterations; an empty script starts in
+  0.36 ms (stock) and 0.38 ms. The 0.731 of the set is not the benchmark.
+  - **deltablue**: the missing-metamethod trace aborts came from a
+    miscompilation in the alias analysis (`src/lj_opt_mem.c`), fixed by
+    `60cc7371`; what was left was the weak-table guard, fixed by `ccd4dc0d`
+    (merge `8d4b3740`). History and the earlier measurements (0.964, 1.018,
+    1.025 with the JIT on, 0.989 with it off): `docs/notes/deltablue.md`. The
+    causes named in `docs/perf-regression-2026-11-17.md` were retracted by
+    that note itself.
+  - **k-nucleotide**: not the `__index`/string-key path. Parity came from the
+    default pause 200 → 300 (`7a85607e`, the GC policy `EXTENSION` row of
+    `docs/DIFFERENCES.md`; `docs/notes/knuc-phase-align-2026-11.md`).
+  - **spectral-norm x86_64**: about 4 % slower, below the threshold, and
+    nothing was changed for it: 0.962 in the set above, and with
+    `tests/bench/spectral-measure.py` on the same day 0.958, 0.977 and 0.961
+    (medians of 9), as in `docs/notes/spectral.md` (median of 7: 15.4 against
+    16.0 ms). The **0.499** that a classic-set run once reported for it
+    (`docs/notes/deltablue.md`) was the runner, not the tree: it timed with
+    `subprocess.run(timeout=...)`, which waits for the child by polling with
+    sleeps that double up to 50 ms, so the end of a run was seen 15.5, 31.5,
+    63.5, 113.5, ... ms after its start. Stock (15.4 ms) was seen at 16 ms and
+    this tree (16.0 ms) at 32 ms; repeated in one job with the old runner:
+    16.1 against 32.1 ms. The runner waits without a timeout now and checks the
+    exit status. The extra SLOAD flags and side traces of this benchmark are
+    the 5.4 integer/float loop model and are not redundant
+    (`docs/notes/for-intfloat.md`).
+  - The 2026-11-17 tables in `docs/bench-classic-2026-11-17.md` are kept as
+    dated snapshots (their runner reads the child's output through pipes,
+    which ends the wait when the child exits).
 - arm64 `bit.lshift/rshift/arshift/rol/ror` returned 0 for native and
   cdata; regression `ea371c60`, fix `9cc89969` (TMP0 clobber in checkint).
   See `docs/bug-bit-shift-arm64.md`; `tests/lib/bit-checkint.lua` is the

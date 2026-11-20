@@ -43,6 +43,18 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   raises.
 - `PENDING` `math.max` and `math.min` accept numeric strings; PUC compares the
   arguments as they are and raises "attempt to compare string with number".
+- `PENDING` A numeric `for` loop with an integer start, limit or step outside
+  the int32 range runs as a float loop (the VM's loop instructions count in
+  int32 or in doubles, and `lj_meta_for` converts such a value). The loop
+  variable is then a float: `for i = 2147483646, 2147483649 do print(i) end`
+  prints `2147483646.0` and so on, and `for i = 1, math.maxinteger` has a
+  float `i` from the first iteration. From 2^53 on the values are rounded
+  and the loop does not count correctly:
+  `for i = math.maxinteger - 2, math.maxinteger do ... end` does not end
+  (PUC: three iterations). Compiled code and the interpreter agree
+  (`tests/d54/for_01_int64_control.lua`, a `tests/known-bad.tsv` row for the
+  comparison with PUC). The PUC suite checks this in `nextvar.lua`, one of
+  the files the harness skips.
 - `PENDING` A numeric string as a `for` bound is converted with the
   int32-or-double rule: a decimal integer string outside int32 makes the loop
   a float loop (PUC: integer loop), and a hexadecimal one does not wrap
@@ -58,6 +70,12 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
 - `IMPL-DEFINED` Sparse-table border for runtime-built tables may differ: 5.4
   allows any border; LuaJIT's array-growth policy differs from PUC's alimit hint
   (`tbl_03_border_divergence`).
+- `PENDING` A return hook without a call hook (`debug.sethook(f, "r")`) gets
+  no return event for some of the fast functions implemented in assembler
+  (measured: `tostring`, `string.sub`; `type` and `math.abs` do report):
+  their return event is fired from a note the call event leaves, and no call
+  event is dispatched without the call mask. With `"cr"` the events equal
+  PUC's (`tests/d54/debug_07_tostring_hook.lua`).
 - `PENDING` Return hook of a function that ends in a tail call to a C
   function: PUC calls the return hook for the Lua caller after the C function
   returns; here the caller returns through the continuation without a hook
@@ -114,38 +132,6 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   past the old 2^27+1 limit under GC64 (up to 2^31-1 slots, PUC MAXABITS=31);
   the remaining difference is only the stop size and the per-MiB counters.
   Excluded from the default corpus; see `tests/known-different.tsv`.
-- `PENDING` Classic benchmarks slower than stock 2.1 (>10%): deltablue and
-  k-nucleotide are **no longer** above the threshold, and the causes named for
-  them in `docs/perf-regression-2026-11-17.md` were retracted by that note
-  itself. Only spectral-norm x86_64 is still open, and its number is not
-  settled. The 2026-11-17 tables in `docs/bench-classic-2026-11-17.md` are
-  kept as dated snapshots.
-  - **deltablue**: the missing-metamethod trace aborts came from a
-    miscompilation in the folder's alias analysis, fixed by `60cc7371`; what
-    was left was the weak-table guard, fixed by `ccd4dc0d` (merge `8d4b3740`).
-    On the merged tree (main at `f51a7608`, measured on the `deltablue` branch
-    and merged back as `f05b7283`), one pinned x86_64 host with the arms
-    interleaved: **0.964** (median of 9, the acceptance job), **1.018** and
-    **1.025** (median of 7) with the JIT on, **0.989** with it off
-    (`docs/notes/deltablue.md`).
-  - **k-nucleotide**: not the `__index`/string-key path. Parity came from the
-    default pause 200 → 300 (`7a85607e`, the GC policy `EXTENSION` row below),
-    and the merged classic set measures **1.002** (`docs/notes/deltablue.md`,
-    `docs/notes/knuc-phase-align-2026-11.md`).
-  - **spectral-norm x86_64**: the measurement made for this benchmark, `python3
-    tests/bench/spectral-measure.py` (it alone, interleaved against stock 2.1,
-    x86_64), is a **median of 7**: stock 15.4 ms, this tree 16.0 ms, about
-    **4 %** slower -- below the threshold, and nothing was changed for it
-    (`docs/notes/spectral.md`). The classic-set run on the merged tree reports
-    **0.499** for it (`docs/notes/deltablue.md`, merged `f05b7283`): the
-    spectral branch forked at `9073ddc8`, so between the two trees the
-    guardperf fix (`ccd4dc0d`, merged `8d4b3740`) and `d9e447fc` landed, and
-    the runner differs too. The two are not reconciled and neither has been
-    repeated: **needs re-measuring**. arm64 was
-    at parity in the 2026-11-17 set (**1.00**, where x86_64 was 0.71 then) and
-    has no measurement of its own. The extra SLOAD flags and side traces are
-    the 5.4 integer/float loop model and are not redundant
-    (`docs/notes/for-intfloat.md`).
 
 ## Against stock LuaJIT 2.1
 

@@ -27,6 +27,15 @@ Classic set on the merged tree: nbody 0.998, spectral-norm 0.499 (separate
 regression, see below), fannkuch 1.000, binary-trees 1.000, fasta 0.999,
 deltablue 1.018, scimark 1.061, k-nucleotide 1.002, regex-dna 1.001.
 
+Correction, 2026-11-20: of this line only deltablue and scimark are
+measurements. The runner of that job waited for each run by polling with
+sleeps of up to 50 ms (`subprocess.run(timeout=...)`), so every run shorter
+than a few hundred milliseconds was reported on a step (15.5, 31.5, 63.5,
+113.5 ms, then every 50 ms): two arms on the same step read as 1.000, and
+spectral-norm, 15.4 against 16.0 ms, as 16 against 32 ms. The runner is fixed
+and the set was measured again; the table is in `docs/CHANGELOG-VM.md` under
+"Known JIT/performance rows" (spectral-norm 0.962, k-nucleotide 0.988).
+
 ## What the investigation showed
 
 **The bytecode is identical.** `luajit -bl deltablue-locals.lua` for stock 2.1
@@ -79,8 +88,9 @@ the loop over many receivers of one class hoists the rest. Merging that
 
 ## Left open
 
-- **spectral-norm 0.499** in the classic set is a separate regression, not a
-  deltablue one; it has its own branch and `docs/notes/spectral.md`.
+- ~~**spectral-norm 0.499** in the classic set is a separate regression, not a
+  deltablue one; it has its own branch and `docs/notes/spectral.md`.~~ Not a
+  regression: an artifact of the runner, see the correction above.
 - **`src/jit/bc.lua` jump-target display** prints sign-extended targets
   (`=> 281474976645127`). Cosmetic, but it makes `-bl` diffs useless; mask
   `d` to 16 bits.

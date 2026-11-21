@@ -601,6 +601,24 @@ target x86_64 (GC64) and arm64.
   is the C function that made the protected call, PUC `luaD_pcall`) and
   `coroutine.close` for a dead thread (`tests/d54/close_11_errpath_cfunc.lua`).
   A yield through a C frame keeps its old path.
+- Local variable limits as PUC's parser has them (lparser.c). A function
+  declares at most 32767 locals in all (registerlocalvar, `SHRT_MAX`; the
+  hidden control variables of the loops and the parameters count, labels
+  and gotos do not): past that, `load` fails with "too many local variables
+  (limit is 32767)", a runtime error without a position that also goes
+  through an enclosing message handler. The count is taken when the
+  variables become active (`var_add`), like PUC's adjustlocalvars. The
+  200-active limit and the other `errorlimit` messages end in "near
+  <token>" now, and a limit error in a parameter list names the function's
+  line (it read an uninitialized `minline`). The variable stack shared by
+  the functions being parsed (locals, labels and gotos, which stay there
+  until the function ends) used 16-bit indices and failed at 65281 entries
+  ("chunk has more than 65281 local variables"), a limit PUC does not have;
+  `VarIndex` is 32 bit now. A child prototype's upvalue keeps the parent's
+  local as its declaration number (`VarInfo.ord`, mapped back through
+  `LexState.vlocal`) between the two upvalue fixups, since the 16-bit slot
+  of the prototype cannot hold the stack index
+  (`tests/d54/parse_04_local_limits.lua`).
 
 ## Known JIT/performance rows (not semantic divergences)
 

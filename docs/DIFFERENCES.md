@@ -198,13 +198,6 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   32767 `break`s in one loop body, or 40000 backward `goto`s to one label).
   PUC's signed jump operand has 25 bits. Same reason as the constants: the
   16-bit jump operand of the bytecode format.
-- `PENDING` Local variable declarations: PUC allows 32767 declarations per
-  function ("too many local variables (limit is 32767)", `lparser.c`
-  registerlocalvar, `SHRT_MAX`; 200 of them active at a time). This parser
-  keeps every declared local, label and goto of the functions being parsed on
-  one variable stack of 65281 entries ("chunk has more than 65281 local
-  variables"): 70000 locals in closed blocks fail with a different message
-  here, and many labels or backward gotos count against the same stack.
 
 - `IMPL-DEFINED` The default pause/stepmul are LuaJIT's measured speed policy
   300/200, not PUC's 200/100 (a deliberate tuning decision taken 2026-11-19;

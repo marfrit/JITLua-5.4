@@ -2162,7 +2162,6 @@ static void asm_gc_check(ASMState *as, int loophead)
 	   (int32_t)offsetof(global_State, gc.total));
   ra_allockreg(as, i32ptr(J2G(as->J)), tmp1);
   as->gcsteps = 0;
-  as->gcvdebt = 0;  /* Not charged on this target. */
   checkmclim(as);
 }
 

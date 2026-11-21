@@ -2149,7 +2149,6 @@ static void asm_gc_check(ASMState *as, int loophead)
   emit_getgl(as, tmp, gc.threshold);
   emit_getgl(as, RID_TMP, gc.total);
   as->gcsteps = 0;
-  as->gcvdebt = 0;  /* Not charged on this target. */
   checkmclim(as);
 }
 

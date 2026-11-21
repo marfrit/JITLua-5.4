@@ -208,6 +208,19 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   `errors.lua`, which the harness skips as a whole because the file needs the
   PUC `T.*` test hooks, so there is no `tests/known-different.tsv` row.
 
+- `IMPL-DEFINED` How deep syntactic nesting may go. PUC has no fixed nesting
+  limit: its parser recurses and the C-call bound (`LUAI_MAXCCALLS`, 200) stops
+  it, so `load("return " .. string.rep("(", 500) .. "2" .. …)` fails with
+  "C stack overflow", and 500 nested `do … end` blocks fail the same way. This
+  tree counts nesting with a counter (`synlevel_begin`, `LJ_MAX_XLEVEL`) and
+  rejects the expression shapes with its own register/constant limits
+  ("chunk has too many syntax levels", "function or expression too complex
+  near …"). The message *wording* of the shared limits now follows PUC
+  ("too many X (limit is N) in main function", `err_limit` in `src/lj_parse.c`
+  with `LJ_ERR_XLIMM/XLIMF`), and `tests/d54/parse_02_limit_msgs.lua` prints
+  the whole set; the depth at which a nesting shape is refused is the part that
+  cannot match, because PUC measures it in C frames. `errors.lua:646` reads it.
+
 - `FORK` `IMPL-DEFINED` GC mode and the size of a basic step.
   `collectgarbage("generational")` / `collectgarbage("incremental")` are accepted
   and report the previous mode as a 5.4 string, but only the mode flag is stored

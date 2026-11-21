@@ -1419,7 +1419,12 @@ static void recff_format(jit_State *J, RecordFFData *rd, TRef hdr, int sbufx)
 	tr = lj_ir_call(J, IRCALL_lj_strfmt_putfstr, tr, trsf, tra);
       break;
     case STRFMT_CHAR:
-      tra = lj_opt_narrow_toint(J, tra);
+      /* 5.4: %c takes an exact integer and cuts it to int (PUC lstrlib.c);
+      ** the float conversion would neither check nor cut. Interpreter. */
+      if (!tref_isinteger(tra)) {
+	recff_nyiu(J, rd);
+	return;
+      }
       if (sf == STRFMT_CHAR)  /* Shortcut for plain %c. */
 	tr = emitir(IRTG(IR_BUFPUT, IRT_PGC), tr,
 		    emitir(IRT(IR_TOSTR, IRT_STR), tra, IRTOSTR_CHAR));

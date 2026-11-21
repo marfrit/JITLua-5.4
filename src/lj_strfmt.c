@@ -23,6 +23,7 @@
 #endif
 #include "lj_lib.h"
 #include "lj_strscan.h"
+#include "lj_i64.h"
 
 /* -- Format parser ------------------------------------------------------- */
 
@@ -101,9 +102,11 @@ SFormat LJ_FASTCALL lj_strfmt_parse(FormatState *fs)
 	  return STRFMT_ERR_LONG;
 	}
 	if (q >= e) {  /* the format ends before its conversion character */
+	  /* PUC getformat() copies the terminating '\0' as the conversion and
+	  ** str_format() rejects it: "invalid conversion '%5' to 'format'". */
 	  fs->len = (MSize)(e - (const uint8_t *)fs->str);
 	  fs->p = fs->e;
-	  return STRFMT_ERR_INVAL;
+	  return STRFMT_ERR_CONV;
 	}
 	/* The conversion must be one of PUC's ('%F' and '%I' are rejected). */
 	if (!strfmt_convchar((uint32_t)*q)) {
@@ -554,6 +557,46 @@ static void strfmt_checkformat54(lua_State *L, const uint8_t *spec, MSize len)
     lj_err_callerv(L, LJ_ERR_STRFMTS, strdata(lj_str_new(L, (const char *)spec, len)));
 }
 
+/* luaL_checkinteger for %c: exact, as a 64 bit integer. */
+static int64_t strfmt_checki64(lua_State *L, int arg)
+{
+  TValue *o = L->base + arg-1;
+  int64_t v;
+  if (!(o < L->top && lj_strscan_numberobj64(L, o)))
+    lj_err_argt(L, arg, LUA_TNUMBER);
+  if (lj_i64_getint(o, &v)) return v;  /* int32, widened or boxed */
+  if (lj_i64_numtoint(numV(o), &v)) return v;
+  lj_err_arg(L, arg, LJ_ERR_NUMNOINT);
+  return 0;  /* unreachable */
+}
+
+/* lstrlib.c str_format checks the argument of d i u o x X (luaL_checkinteger)
+** and of e E f g G (luaL_checknumber) before checkformat() looks at the
+** specification; c a A p check the specification first. Called with the
+** conversion of a rejected specification, raises the argument error that
+** PUC raises first, if any. */
+static void strfmt_argfirst54(lua_State *L, int arg, uint32_t conv)
+{
+  TValue *o = L->base + arg-1;
+  switch ((char)conv) {
+  case 'd': case 'i': case 'u': case 'o': case 'x': case 'X':
+    if (tvisstr(o)) (void)lj_strscan_number64(L, strV(o), o);
+    if (tvisint(o) || tvisi47w(o) || tvisi64(o)) return;
+#if LJ_HASFFI
+    if (tviscdata(o) && (cdataV(o)->ctypeid == CTID_INT64 ||
+			 cdataV(o)->ctypeid == CTID_UINT64))
+      return;
+#endif
+    strfmt_checkint(L, arg, lj_lib_checknum(L, arg));
+    break;
+  case 'e': case 'E': case 'f': case 'g': case 'G':
+    (void)lj_lib_checknum(L, arg);
+    break;
+  default:
+    break;
+  }
+}
+
 /* Format stack arguments to buffer. */
 /* True unless the string metatable is known to have no __tostring. */
 static LJ_AINLINE int strfmt_strmm(lua_State *L)
@@ -573,6 +616,12 @@ int lj_strfmt_putarg(lua_State *L, SBuf *sb, int arg, int retry)
     if (sf == STRFMT_LIT) {
       lj_buf_putmem(sb, fs.str, fs.len);
     } else if (STRFMT_TYPE(sf) == STRFMT_ERR) {
+      /* lstrlib.c str_format: "no value" comes before the conversion is
+      ** parsed, then the argument check of some conversions. */
+      if (arg+1 > narg)
+	lj_err_arg(L, arg+1, LJ_ERR_NOVALF);
+      if (STRFMT_EKIND(sf) == STRFMT_EK_INVAL)
+	strfmt_argfirst54(L, arg+1, (uint32_t)(uint8_t)fs.str[fs.len-1]);
       strfmt_err54(L, sf, &fs);
     } else {
       TValue *o = &L->base[arg++];
@@ -735,7 +784,10 @@ int lj_strfmt_putarg(lua_State *L, SBuf *sb, int arg, int retry)
 	break;
 	}
       case STRFMT_CHAR:
-	lj_strfmt_putfchar(sb, sf, lj_lib_checkint(L, arg));
+	/* PUC: (int)luaL_checkinteger, so the value is cut to its low 32 bits
+	** (2^32+65 is 'A'), not clamped. */
+	lj_strfmt_putfchar(sb, sf,
+			   (int32_t)(uint32_t)(uint64_t)strfmt_checki64(L, arg));
 	break;
       case STRFMT_PTR: {
 	/* 5.4 lstrlib.c: a value without a pointer is formatted as the string

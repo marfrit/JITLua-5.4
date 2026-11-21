@@ -37,6 +37,14 @@ target x86_64 (GC64) and arm64.
   the slot and read the low word of the boxed limit. The value is now stored
   in the float form a wide loop keeps an int32 index in
   (`lj_meta_forsetidx`). `tests/d54/for_11_setlocal_index.lua`.
+- FFI: a file handle made by a C module (a `luaL_Stream` block with the
+  `LUA_FILEHANDLE` metatable, which the io library accepts as a file)
+  converts to its `FILE *` like the library's own handles, and to NULL once
+  it is closed. It converted to the address of the `luaL_Stream` block, so
+  `ffi.C.fputs(s, handle)` wrote through a wrong pointer. Compiled FFI calls
+  leave such a handle to the interpreter and guard any other userdata
+  against the file metatable (`lj_cconv.c`, `lj_crecord.c`).
+  `tests/capi/ffistream.c`.
 - Integer `for` loops with an int32 initial value and step and a limit
   beyond int32 (`for i = 1, math.huge`, `1, 1e10`, `1, math.maxinteger`,
   the descending mirrors) run on the int32 path while the index fits and are

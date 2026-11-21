@@ -827,11 +827,22 @@ LUA_API lua_Integer lua_tointegerx(lua_State *L, int idx, int *ok)
   }
 }
 
+/* PUC lauxlib.c interror(): a convertible number (including a numeral string)
+** that has no exact integer representation gets its own message; anything
+** else is the ordinary type error. */
+static void luaL_interror(lua_State *L, int idx)
+{
+  if (lua_isnumber(L, idx))
+    lj_err_arg(L, idx, LJ_ERR_NUMNOINT);
+  else
+    lj_err_argt(L, idx, LUA_TNUMBER);
+}
+
 LUALIB_API lua_Integer luaL_checkinteger(lua_State *L, int idx)
 {
   int ok;
   lua_Integer n = lua_tointegerx(L, idx, &ok);
-  if (!ok) lj_err_argt(L, idx, LUA_TNUMBER);
+  if (!ok) luaL_interror(L, idx);
   return n;
 }
 
@@ -841,7 +852,7 @@ LUALIB_API lua_Integer luaL_optinteger(lua_State *L, int idx, lua_Integer def)
   lua_Integer n = lua_tointegerx(L, idx, &ok);
   if (!ok) {
     if (tvisnil(index2adr(L, idx))) return def;
-    lj_err_argt(L, idx, LUA_TNUMBER);
+    luaL_interror(L, idx);
   }
   return n;
 }
@@ -2032,24 +2043,35 @@ LUA_API int lua_resetthread(lua_State *L)
 
 /* -- GC and memory management -------------------------------------------- */
 
-LUA_API int lua_gc(lua_State *L, int what, int data)
+LUA_API int lua_gc(lua_State *L, int what, ...)
 {
   global_State *g = G(L);
   int res = 0;
+  va_list argp;
   /* 5.4 lapi.c: every option is invalid while a __gc metamethod runs (the
   ** collector is internally stopped); luaB_collectgarbage turns the -1 into
   ** fail (nil). */
   if (g->gc.finalizing)
     return -1;
+  va_start(argp, what);
   switch (what) {
   case LUA_GCSTOP:
     g->gc.threshold = LJ_MAX_MEM;
     g->gc.stopped = 1;
     break;
-  case LUA_GCRESTART:
+  case LUA_GCRESTART: {
+    int data = va_arg(argp, int);
     g->gc.stopped = 0;
-    g->gc.threshold = data == -1 ? (g->gc.total/100)*g->gc.pause : g->gc.total;
+    /* 5.4 lapi.c resets the debt to 0. LuaJIT paces with a threshold rather
+    ** than PUC's debt engine: -1 (the CLI's stop/openlibs/restart bracket)
+    ** restores the pause-derived threshold, 0 uses total, as before. Keeping
+    ** only the debt reset avoids an eager first collection at startup, which
+    ** exposed a pre-existing boxed-int64 lifetime bug on arm64. */
+    g->gc.debt = 0;
+    g->gc.threshold = data == -1 ?
+      (g->gc.total/100)*(g->gc.pause * 4) : g->gc.total;
     break;
+    }
   case LUA_GCCOLLECT:
     lj_gc_fullgc(L);  /* like PUC's luaC_fullgc: the user stop flag stays */
     break;
@@ -2060,46 +2082,71 @@ LUA_API int lua_gc(lua_State *L, int what, int data)
     res = (int)(g->gc.total & 0x3ff);
     break;
   case LUA_GCSTEP: {
-    GCSize a = (GCSize)data << 10;
+    int data = va_arg(argp, int);
     uint8_t stopped = g->gc.stopped;
-    GCSize oldthr = g->gc.threshold;
+    int64_t debt = 1;  /* =1 to signal that it did an actual step */
     /* 5.4 lapi.c: the user stop flag is cleared for the duration of the step
     ** and restored after it, so "isrunning" does not change. */
     g->gc.stopped = 0;
-    g->gc.threshold = (a <= g->gc.total) ? (g->gc.total - a) : 0;
-    while (g->gc.total >= g->gc.threshold)
-      if (lj_gc_step(L) > 0) {
-	res = 1;
-	break;
-      }
-    if (stopped) {
-      g->gc.stopped = 1;
-      g->gc.threshold = oldthr;  /* no implicit steps while stopped */
+    if (data == 0) {
+      g->gc.debt = 0;  /* do a basic step */
+      res = lj_gc_step(L) > 0;
+    } else {  /* add 'data' to the total debt */
+      debt = (int64_t)data * 1024 + (int64_t)g->gc.debt;
+      g->gc.debt = debt > 0 ? (GCSize)debt : 0;
+      /* A negative step only lowers the debt: PUC's luaC_checkGC then runs no
+      ** collector work when the debt stays non-positive, and the result is
+      ** false because no cycle ended. */
+      if (debt > 0) res = lj_gc_step(L) > 0;
     }
+    g->gc.stopped = stopped;
     break;
   }
-  case LUA_GCSETPAUSE:
-    res = (int)(g->gc.pause);
-    g->gc.pause = (MSize)data;
+  case LUA_GCSETPAUSE: {
+    int data = va_arg(argp, int);
+    /* 5.4 lgc.h getgcparam/setgcparam: stored divided by 4 in one byte, read
+    ** multiplied by 4. Exact PUC return and truncation for large values. */
+    res = g->gc.pause * 4;
+    g->gc.pause = (uint8_t)(data / 4);
     break;
-  case LUA_GCSETSTEPMUL:
-    res = (int)(g->gc.stepmul);
-    g->gc.stepmul = (MSize)data;
+    }
+  case LUA_GCSETSTEPMUL: {
+    int data = va_arg(argp, int);
+    res = g->gc.stepmul * 4;
+    g->gc.stepmul = (uint8_t)(data / 4);
     break;
+    }
   case LUA_GCISRUNNING:
     res = !g->gc.stopped;
     break;
-  case LUA_GCGEN: case LUA_GCINC: {
-    /* 5.4 returns the previous mode; LuaJIT keeps a single collector but
-    ** reports the mode switch faithfully. */
-    int prev = g->gc.gcmode ? LUA_GCGEN : LUA_GCINC;
-    g->gc.gcmode = what == LUA_GCGEN;
-    res = prev;
+  case LUA_GCGEN: {
+    int minormul = va_arg(argp, int);
+    int majormul = va_arg(argp, int);
+    /* 5.4 returns the previous mode; LuaJIT keeps a single incremental
+    ** collector, so the generational tuning knobs are not applied (documented
+    ** FORK in docs/DIFFERENCES.md). minormul/majormul are still accepted. */
+    (void)minormul; (void)majormul;
+    res = g->gc.gcmode ? LUA_GCGEN : LUA_GCINC;
+    g->gc.gcmode = 1;
+    break;
+    }
+  case LUA_GCINC: {
+    int pause = va_arg(argp, int);
+    int stepmul = va_arg(argp, int);
+    int stepsize = va_arg(argp, int);
+    /* 5.4 lapi.c LUA_GCINC: non-zero pause and stepmul are applied; stepsize
+    ** has no equivalent knob in the LuaJIT collector (documented FORK). */
+    res = g->gc.gcmode ? LUA_GCGEN : LUA_GCINC;
+    if (pause != 0) g->gc.pause = (uint8_t)(pause / 4);
+    if (stepmul != 0) g->gc.stepmul = (uint8_t)(stepmul / 4);
+    (void)stepsize;
+    g->gc.gcmode = 0;
     break;
     }
   default:
     res = -1;  /* Invalid option. */
   }
+  va_end(argp);
   return res;
 }
 

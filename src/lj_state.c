@@ -347,8 +347,13 @@ LUA_API lua_State *lua_newstate(lua_Alloc allocf, void *allocd)
   setgcref(g->gc.root, obj2gco(L));
   setmref(g->gc.sweep, &g->gc.root);
   g->gc.total = sizeof(GG_State);
-  g->gc.pause = LUAI_GCPAUSE;
-  g->gc.stepmul = LUAI_GCMUL;
+  /* 5.4 lgc.h stores these divided by 4 to fit a byte; getgcparam multiplies
+  ** by 4. The default is the measured LuaJIT speed policy, pause 300 and
+  ** stepmul 200 (LUAI_GCPAUSE / LUAI_GCMUL), not PUC's 200/100: the defaults
+  ** are a tuning value, and only the first deprecated setpause/setstepmul
+  ** return differs (documented IMPL-DEFINED in docs/DIFFERENCES.md). */
+  g->gc.pause = (uint8_t)(LUAI_GCPAUSE/4);
+  g->gc.stepmul = (uint8_t)(LUAI_GCMUL/4);
   lj_dispatch_init((GG_State *)L);
   L->status = LUA_ERRERR+1;  /* Avoid touching the stack upon memory error. */
   if (lj_vm_cpcall(L, NULL, NULL, cpluaopen) != 0) {

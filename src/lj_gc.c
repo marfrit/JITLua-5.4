@@ -1239,15 +1239,15 @@ int LJ_FASTCALL lj_gc_step(lua_State *L)
   uint64_t gcstats_t0 = gcstats_now();
 #endif
   setvmstate(g, GC);
-  lim = (GCSTEPSIZE/100) * g->gc.stepmul;
+  lim = (GCSTEPSIZE/100) * (g->gc.stepmul * 4);
   if (lim == 0)
-    lim = LJ_MAX_MEM;
+    lim = GCSTEPSIZE/100;  /* PUC incstep: stepmul 0 still does one step */
   if (g->gc.total > g->gc.threshold)
     g->gc.debt += g->gc.total - g->gc.threshold;
   do {
     lim -= (GCSize)gc_onestep(L);
     if (g->gc.state == GCSpause) {
-      g->gc.threshold = (g->gc.estimate/100) * g->gc.pause;
+      g->gc.threshold = (g->gc.estimate/100) * (g->gc.pause * 4);
       g->vmstate = ostate;
       GCSTATS_STEP_RET(1);  /* Finished a GC cycle. */
     }
@@ -1371,7 +1371,7 @@ void lj_gc_fullgc(lua_State *L)
   /* Now perform a full GC. */
   g->gc.state = GCSpause;
   do { gc_onestep(L); } while (g->gc.state != GCSpause);
-  g->gc.threshold = (g->gc.estimate/100) * g->gc.pause;
+  g->gc.threshold = (g->gc.estimate/100) * (g->gc.pause * 4);
   g->vmstate = ostate;
 #ifdef LUAJIT_GC_STATS
   gcstats_pause();

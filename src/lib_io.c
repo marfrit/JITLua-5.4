@@ -105,11 +105,19 @@ static int64_t io_toint64(lua_State *L, int narg, int64_t def)
 
 static IOFileUD *io_file_new(lua_State *L)
 {
-  IOFileUD *iof = (IOFileUD *)lua_newuserdatauv(L, sizeof(IOFileUD), 0);  /* PUC: no user values. */
-  GCudata *ud = udataV(L->top-1);
+  IOFileUD *iof;
+  GCudata *ud;
+  GCtab *mt;
+  /* 5.4: the metatable is the registered LUA_FILEHANDLE one, with the
+  ** methods under __index only, so rawget(mt, "write") is nil. */
+  lua_getfield(L, LUA_REGISTRYINDEX, LUA_FILEHANDLE);
+  mt = tabV(L->top-1);
+  L->top--;
+  iof = (IOFileUD *)lua_newuserdatauv(L, sizeof(IOFileUD), 0);  /* PUC: no user values. */
+  ud = udataV(L->top-1);
   ud->udtype = UDTYPE_IO_FILE;
   /* NOBARRIER: The GCudata is new (marked white). */
-  setgcrefr(ud->metatable, curr_func(L)->c.env);
+  setgcref(ud->metatable, obj2gco(mt));
   iof->fp = NULL;
   iof->closef = NULL;
   iof->type = IOFILE_TYPE_FILE;
@@ -357,7 +365,16 @@ static int io_file_write(lua_State *L, IOFileUD *iof, int start)
   int status = 1;
   for (tv = L->base+start; tv < L->top; tv++) {
     MSize len;
-    const char *p = lj_strfmt_wstrnum(L, tv, &len);
+    const char *p;
+    if (tvisnum(tv)) {
+      /* PUC liolib g_write: a float is rendered with LUA_NUMBER_FMT "%.14g",
+      ** NOT with tostring's ".0" suffix (3.0 -> "3", -0.0 -> "-0"). */
+      SBuf *sb = lj_strfmt_putfnum(lj_buf_tmp_(L), STRFMT_G14, numV(tv));
+      len = sbuflen(sb);
+      p = sb->b;
+    } else {
+      p = lj_strfmt_wstrnum(L, tv, &len);
+    }
     if (!p)
       lj_err_argt(L, (int)(tv - L->base) + 1, LUA_TSTRING);
     status = status && (fwrite(p, 1, len, fp) == len);
@@ -709,9 +726,29 @@ static GCobj *io_std_new(lua_State *L, FILE *fp, const char *name)
   return obj2gco(ud);
 }
 
+/* Move a metamethod from the methods table to the file metatable and drop it
+** from the methods table: 5.4 keeps only ordinary methods in the __index
+** table and only __index/__gc/__close/__tostring/__name in the metatable.
+** Stack on entry: methods, metatable. */
+static void io_move_mm(lua_State *L, const char *name)
+{
+  lua_getfield(L, -2, name);  /* methods */
+  lua_setfield(L, -2, name);  /* metatable (now at -2 after the push) */
+  lua_pushnil(L);
+  lua_setfield(L, -3, name);  /* remove from methods */
+}
+
 LUALIB_API int luaopen_io(lua_State *L)
 {
-  LJ_LIB_REG(L, NULL, io_method);
+  LJ_LIB_REG(L, NULL, io_method);  /* Methods table on the stack. */
+  /* 5.4 liolib: a separate metatable with __index pointing at the methods
+  ** table; the methods themselves are not direct keys of the metatable. */
+  lua_createtable(L, 0, 5);
+  lua_pushvalue(L, -2);
+  lua_setfield(L, -2, "__index");
+  io_move_mm(L, "__gc");
+  io_move_mm(L, "__close");
+  io_move_mm(L, "__tostring");
   /* 5.4: __name gives the type name used in error messages. */
   lua_pushstring(L, LUA_FILEHANDLE);
   lua_setfield(L, -2, "__name");

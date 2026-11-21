@@ -10,6 +10,9 @@
 # memory = pause 100 / stepmul 200.  -G overrides the environment, -E ignores
 # it, unknown values are ignored silently, the default stays unchanged, and a
 # runtime collectgarbage("setpause"/"setstepmul") still overrides either.
+# The standalone interpreter starts in generational mode (like lua.c), so the
+# first "incremental" reports "generational"; PUC's /4 byte storage makes
+# setpause 137 report 136 and setstepmul 321 report 320 on the next read.
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 LUAJIT=${LUAJIT:-$ROOT/src/luajit}
@@ -34,12 +37,12 @@ case_run() { # case_run <label> <want_pause> <command...>
   ovr=$(sed -n 's/^override_pause=//p' "$out")
   ovrs=$(sed -n 's/^override_stepmul=//p' "$out")
   if [ "$pause" = "$want" ] && [ "$stepmul" = 200 ] && \
-     [ "$minc" = incremental ] && [ "$mgen" = incremental ] && \
-     [ "$ovr" = 137 ] && [ "$ovrs" = 321 ]; then
+     [ "$minc" = generational ] && [ "$mgen" = incremental ] && \
+     [ "$ovr" = 136 ] && [ "$ovrs" = 320 ]; then
     echo "ok   $label: pause=$pause stepmul=$stepmul mode=$minc/$mgen override=$ovr/$ovrs"
   else
     echo "FAIL $label: pause=$pause stepmul=$stepmul mode=$minc/$mgen override=$ovr/$ovrs" \
-         "(want pause=$want stepmul=200 mode=incremental/incremental override=137/321)"
+         "(want pause=$want stepmul=200 mode=generational/incremental override=136/320)"
     fails=1
   fi
   if [ -s "$err" ]; then

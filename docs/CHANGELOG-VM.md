@@ -793,6 +793,19 @@ target x86_64 (GC64) and arm64.
   as in PUC; the other `luaL_len` callers (the table library) already
   refused a userdata without the table-like metamethods
   (`tests/d54/tbl_12_len_userdata.lua`).
+- The io library recognises a file handle by its metatable, as PUC does
+  (liolib.c `tolstream`/`tofile` with `luaL_checkudata`, `io_type` with
+  `luaL_testudata`): the metatable must be the current
+  `registry["FILE*"]`. Every method, `__gc`/`__close`/`__tostring`,
+  `io.close`, `io.input`/`io.output` with a handle and `io.type` check it
+  (`io_isfile` in `src/lib_io.c`); `io.close()` and `io.lines()` check the
+  default file as PUC's `tofile` does, while `io.read`/`io.write` use it
+  unchecked (`getiofile`). A handle made while the entry was nil, one whose
+  metatable was replaced, or one left behind when the entry was replaced is
+  no longer a file: "FILE* expected, got userdata" and `io.type` nil instead
+  of reading, writing and closing it. The recorder of `f:write`/`f:flush`
+  guards the handle's metatable and the registry entry, so a compiled loop
+  leaves the trace when either changes (`tests/d54/io_06_handle_identity.lua`).
 
 ## Known JIT/performance rows (not semantic divergences)
 

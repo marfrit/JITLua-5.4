@@ -232,20 +232,6 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   asserts the interpreter. Charging such loops a virtual allocation per pass
   would end them, but costs a vector-add loop with a sunk table 50 vs 156 ms
   (x86_64, `-jon`); that was not taken.
-- `PENDING` What counts as a file handle. PUC's io library accepts a
-  userdata as a file when its metatable is the current `registry["FILE*"]`
-  (liolib.c `tofile`/`io_type`, `luaL_checkudata`/`luaL_testudata`); this
-  tree accepts every io handle by its userdata kind (`UDTYPE_IO_FILE`,
-  `io_tofilep` and `io_type` in `src/lib_io.c`, and the recorder's guard in
-  `recff_io_fp`). Only a program that changes `registry["FILE*"]` or a
-  handle's metatable sees it: a handle made while the entry was nil, or
-  whose metatable was replaced through `debug.setmetatable`, is still "file"
-  for `io.type` and is closed by `io.close` here, where PUC answers nil and
-  "FILE* expected, got userdata" (evidence: puc-code liolib.c,
-  measured-here on arm64 with the probe of
-  `tests/d54/io_05_filehandle_registry.lua`'s shapes). Matching it needs the
-  metatable comparison in every io entry point and a guard on the registry
-  entry in the traces of the recorded io functions; not attempted yet.
 
 ### Known JIT/performance rows (not semantic divergences)
 

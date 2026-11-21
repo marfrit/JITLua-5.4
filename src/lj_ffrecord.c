@@ -960,9 +960,13 @@ static void LJ_FASTCALL recff_math_minmax(jit_State *J, RecordFFData *rd)
     ** the second operand, in the constant folder (lj_vm_foldarith) and in
     ** both backends (x86 MINSD/MAXSD, arm64 FCMP+FCSEL). So the new argument
     ** goes first and the best second: NaN and signed zeros then follow PUC.
+    ** Equal integers are the same value, so integer lists keep the best
+    ** first, which lets the backends keep a running best in its register.
     ** Uniform types only (above), so the winning subtype survives. */
-    tr = emitir(IRT(op, tref_isinteger(tr) ? IRT_INT : IRT_NUM),
-		J->base[i], tr);
+    if (tref_isinteger(tr))
+      tr = emitir(IRTI(op), tr, J->base[i]);
+    else
+      tr = emitir(IRTN(op), J->base[i], tr);
   }
   J->base[0] = tr;
 }

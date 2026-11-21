@@ -1102,3 +1102,29 @@ target x86_64 (GC64) and arm64.
   1.24 and 1.31 times the time before the rule; an assembler path for mixed
   lists in both backends would be needed to close that.
   `tests/d54/math_05_minmax_mixed_jit.lua` (the marked loops must compile).
+- `table.insert(t, v)` on a table with a metatable, `table.remove(t)` and
+  `table.concat`. The 5.4 table library goes through `__index`,
+  `__newindex` and `__len`; the first version took the metamethod path for
+  any of the three and left such calls to the interpreter in compiled code,
+  and `table.remove` became a C function without a recorder. A push reads no
+  element (PUC `tinsert`: `luaL_len`, then one `lua_seti` of a new key), so
+  only `__newindex` and `__len` matter; a pop of a non-empty table reads and
+  clears the border element, which exists, so `lua_geti`/`lua_seti` are raw
+  and only `__len` matters. Both now take the raw path in those cases, in
+  the C functions and in the recorder (`recff_table_insert`, new
+  `recff_table_remove`; the guards on the metatable and on the metamethod
+  fields are the ones `lj_record_mm_lookup` emits). An insert or remove at a
+  position, a pop of an empty table (it reads `t[0]`) and tables with the
+  metamethods named above run in the C function, stitched. `table.concat`
+  was slower because the per-element writer had become a call out of the
+  loop of `lj_buf_puttab`; it is inlined again. Measured (median of 7,
+  interleaved, seconds: 933cfe09, before this change, now), `-jon`:
+  `table.insert` on an instance with an `__index` metatable x86_64 0.225 /
+  2.029 / 0.226, aarch64 0.055 / 0.605 / 0.054; pop of such an instance
+  1.063 / 3.487 / 1.067 and 0.204 / 0.616 / 0.238; push/pop on a plain table
+  1.878 / 6.460 / 1.754 and 0.391 / 1.112 / 0.419; `table.concat` of 100
+  strings 0.633 / 0.795 / 0.633 and 0.097 / 0.140 / 0.098. `-joff`: pop of
+  an instance 0.372 / 0.699 / 0.313 and 0.099 / 0.142 / 0.067, `table.concat`
+  0.623 / 0.829 / 0.666 and 0.108 / 0.152 / 0.110.
+  `tests/d54/tbl_13_push_pop_jit.lua` (the marked loops must compile; red
+  before: stitched traces).

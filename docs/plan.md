@@ -69,8 +69,13 @@ Release documents: `docs/LUA54.md` (overview), `docs/DIFFERENCES.md`,
 3. **Huge numeric-for limits (done for 1.0.0).** `for i = 1, math.huge`,
    `for i = 1, 1e10` and `for i = 1, math.maxinteger` run on the int32 path
    while the index fits and are compiled (`docs/notes/for-loop-54.md`, step
-   4c). Open: a loop whose index really crosses 2^31 continues in the
-   interpreter, and short nested inner loops measured 2-8 % slower on x86_64.
+   4c): as a loop trace of their own, and as an inner loop that a trace
+   around an enclosing loop enters (the recorded FORI calls a helper once per
+   loop start). Not compiled: a loop whose index really crosses 2^31
+   continues in the interpreter; a FORI whose limit is a numeric string, or
+   whose start lies beyond the clip value, ends the trace. Open: short nested
+   inner loops with an int32 limit measured 2-8 % slower on x86_64 after step
+   4c.
 4. **Latent 16-bit shift in `src/jit/bcsave.lua`.** `f16(x)` is
    `bswap(x) >> 16` (two copies, lines 254 and 386 at this commit), a 16-bit
    shift of a byte-swapped value that was written for LuaJIT's 32-bit bit

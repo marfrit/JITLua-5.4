@@ -236,9 +236,9 @@ that entry:
   guard `stop <= INT32_MAX - step` into `stop < INT32_MAX - step` (an `NE`
   on the `ADDOV` sum for a variable step; for a constant stop the range
   check of the step is tightened the same way), so the trace exits to the
-  FORI for that limit, and a clipped FORI is not recorded
-  (`lj_meta_forkind`: NYI, as wide loops were before; a FORI that meets the
-  value `C` while recording aborts too);
+  FORI for that limit; a FORI that starts a clipped loop pushes the entry
+  through a helper call (below, "A recorded FORI of a clipped loop"), and a
+  FORI that meets the value `C` as a real limit while recording aborts;
 - `debug.setlocal` on one of the three slots drops the entry for `s` (after
   turning a clipped loop into its wide form, see below);
 - nothing else writes those slots while the loop runs.
@@ -285,6 +285,56 @@ slots), so `rec_for_isrecordable` accepts it, and the loop-start check
   `C` while recording aborts, and so does a loop trace whose hot FORL is
   about to take the clip edge (`LLEAVE`: the loop would come back as a wide
   loop, the body was entered from `lj_meta_forclip`).
+
+### A recorded FORI of a clipped loop
+
+A trace that comes around an enclosing loop meets the FORI of an inner
+`for j = 1, math.huge do ... break end`. Until the review of 2026-11-21 that
+FORI ended the trace (`NYI: bytecode FORI`), so the inner loop had its own
+trace but everything around it fell back to the interpreter on each pass.
+Now `lj_meta_forkind` reports such a start as `LJ_FOR_CLIP` and `rec_for`
+records it:
+
+- start and step are guarded to be int32 (`fori_conv`), the direction of a
+  variable step is guarded, and the limit stays what it is, a float or an
+  `IRT_I64` value;
+- a call of `lj_meta_forclipn` (float limit) or `lj_meta_forclipi` (int64
+  limit) with the base slot of the loop does what `lj_meta_for` does for a
+  clipped loop: it converts the limit like `forlimit`, checks that the loop
+  starts clipped (limit beyond int32 on the side the step runs to, start not
+  past the clip value) and pushes the entry, keyed by the stack offset taken
+  from the base the trace runs on (`jit_base`). It returns 0 without any
+  effect for every other loop (a small one, a skipped one, NaN, a wide one),
+  and the guard on the result exits to the interpreter's FORI, which starts
+  that loop itself. The call may raise (out of memory for the list) and is
+  marked so;
+- the trace holds `C(step)` as the limit (a constant, or `bound - step` for
+  a variable step), so every exit inside the loop writes the clipped form
+  that the list entry belongs to, and the FORL of the loop behaves as
+  described above.
+
+The argument for the list holds unchanged: this start pushes like
+`lj_meta_for` (dropping the entries at and above the slot first), and a loop
+that is left by a `break` on the trace leaves the same stale entry the
+interpreter leaves. Not recorded, as before: a limit that is a numeric
+string, and a start beyond the clip value (a wide loop from its first
+iteration). `tests/d54/for_10_clip_fori.lua` checks that the trace around
+the loop links to compiled code instead of falling back, and the iterations
+of the same FORI meeting small, clipped, skipped, NaN and clip-valued limits,
+a start that crosses the int32 bound, stale entries, nested clipped loops,
+errors and coroutines.
+
+Measured with one interleaved job per architecture, the tree before against
+after, median of 7, seconds: 3e6 passes of an inner `for j = 1, math.huge`
+that breaks after 2 to 6 iterations, x86_64 `-jon` 0.5581 -> 0.1349, arm64
+0.1046 -> 0.0227 (the same loops with the limit 1000000: 0.0640 and 0.0124,
+the difference is the call per loop start); 1e6 passes of one that breaks
+after 100 iterations, x86_64 0.2332 -> 0.1463, arm64 0.0523 -> 0.0312.
+Unchanged within noise in the same job: a single `1, math.huge` loop of 1e7
+(x86_64 0.0094 / 0.0093, arm64 0.0039 / 0.0040), an int32 loop of 1e8
+(x86_64 0.0709 / 0.0707, arm64 0.0258 / 0.0258), a nested 1e6 x 100 int32
+loop (x86_64 0.0849 / 0.0848, arm64 0.0279 / 0.0279), and all shapes under
+`-joff`. The arm64 host served other work during the run.
 
 `find_kinit` no longer turns a widened 47-bit constant into an int32 constant
 (it took the low word): such a limit is the clipped one, and the trace must

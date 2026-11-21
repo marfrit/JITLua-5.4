@@ -20,6 +20,16 @@ target x86_64 (GC64) and arm64.
   read reference 0 for the step. `lj_snap_replay` now loads a step that is
   not in the snapshot from the stack, where `lj_snap_restore` reads it too.
   `tests/d54/for_09_stitched_header.lua`.
+- JIT: the FORI of a loop with a limit beyond int32 is recorded. A trace
+  around an enclosing loop ended there (`NYI: bytecode FORI`), so a short
+  `for j = 1, math.huge do ... break end` inside a hot loop left everything
+  around it to the interpreter (x86_64 `-jon`, 3e6 passes: 0.5581 s, now
+  0.1349 s; arm64 0.1046 s, now 0.0227 s). The trace calls
+  `lj_meta_forclipn`/`lj_meta_forclipi`, which push the entry for a loop
+  that starts clipped and return 0 for any other, guarded; it holds the clip
+  value as the limit. Not recorded: a numeric string as the limit, a start
+  beyond the clip value. `tests/d54/for_10_clip_fori.lua`, design and
+  figures in docs/notes/for-loop-54.md.
 - Integer `for` loops with an int32 initial value and step and a limit
   beyond int32 (`for i = 1, math.huge`, `1, 1e10`, `1, math.maxinteger`,
   the descending mirrors) run on the int32 path while the index fits and are

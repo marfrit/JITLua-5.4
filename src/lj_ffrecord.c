@@ -1343,6 +1343,10 @@ static void recff_format(jit_State *J, RecordFFData *rd, TRef hdr, int sbufx)
   lj_strfmt_init(&fs, strdata(fmt), fmt->len);
   while ((sf = lj_strfmt_parse(&fs)) != STRFMT_EOF) {  /* Parse format. */
     TRef tra = sf == STRFMT_LIT ? 0 : J->base[++arg];
+    if (sf != STRFMT_LIT && !tra) {  /* "no value": the interpreter raises. */
+      recff_nyiu(J, rd);
+      return;
+    }
     TRef trsf = lj_ir_kint(J, (int32_t)sf);
     IRCallID id;
     switch (STRFMT_TYPE(sf)) {
@@ -1371,7 +1375,11 @@ static void recff_format(jit_State *J, RecordFFData *rd, TRef hdr, int sbufx)
 	  break;
 	}
 #endif
-	goto handle_num;
+	/* 5.4 luaL_checkinteger: a float needs an exact integer value, else
+	** "number has no integer representation"; the truncating conversion
+	** call does not check. Interpreter. */
+	recff_nyiu(J, rd);
+	return;
       }
       if (sf == STRFMT_INT) { /* Shortcut for plain %d. */
 	tr = emitir(IRTG(IR_BUFPUT, IRT_PGC), tr,
@@ -1393,7 +1401,6 @@ static void recff_format(jit_State *J, RecordFFData *rd, TRef hdr, int sbufx)
       goto handle_int;
     case STRFMT_NUM:
       id = IRCALL_lj_strfmt_putfnum;
-    handle_num:
       tra = lj_ir_tonum(J, tra);
       tr = lj_ir_call(J, id, tr, trsf, tra);
       if (LJ_SOFTFP32) lj_needsplit(J);

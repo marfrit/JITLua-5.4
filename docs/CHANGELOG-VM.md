@@ -966,6 +966,13 @@ target x86_64 (GC64) and arm64.
   `lobject.c` `luaO_pushvfstring` does. Evidence: puc-code, measured-here on
   x86_64 and aarch64. `tests/capi/api54.c`, built against both libraries
   with identical output.
+- An `__eq` metamethod that cannot be called raised the generic call error:
+  `setmetatable({}, {__eq = false}) == {}` gave "attempt to call a boolean
+  value", without a position and without the metamethod. PUC names it, like
+  every other metamethod: "file:line: attempt to call a boolean value
+  (metamethod 'eq')" (`ldebug.c` `luaG_callerror`). `lj_meta_equal` raises
+  that error when the handler is no function and has no `__call`.
+  `tests/d54/meta_10_eq_notcallable.lua` (mode A; mode B at all opt levels).
 
 ## Known JIT/performance rows (not semantic divergences)
 

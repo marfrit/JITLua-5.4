@@ -65,4 +65,8 @@ end
 p("r1 read in enclosing loop", r1())
 p("r2 read by later closure", r2())
 p("r3 for loop, enclosing read", r3())
+-- r4's loop allocates only a table that the JIT sinks, which does not advance
+-- the collector (IMPL-DEFINED, docs/DIFFERENCES.md): assert the interpreter.
+local jit = rawget(_G, "jit")
+if jit then jit.off(r4) end
 p("r4 overwritten slot dies", r4())

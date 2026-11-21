@@ -5,6 +5,18 @@
 --! Guards: every waiting loop is bounded by an iteration count, never a timeout.
 local function p(...) print(...) end
 
+-- Under a GC-stress run (pause 0) PUC 5.4.9 itself finalizes these objects or
+-- not depending on the heap layout of the file, so there only the live-local
+-- column is printed; the finalizer outcome is compared at the normal pause.
+local stress = (function()
+  local prev = collectgarbage("setpause", 200)
+  collectgarbage("setpause", prev)
+  return prev == 0
+end)()
+local function pf(label, finish, live, bounded)
+  if stress then print(label, live) else print(label, finish, live, bounded) end
+end
+
 -- GC1 shape, table constructor into the lower local 'u', 'b' live above it.
 local function t1()
   local u
@@ -80,12 +92,35 @@ local function t6()
   return finish, b[1] == 34, n <= 200000
 end
 
-p("t1 table lower local", t1())
-p("t2 concat lower local", t2())
-p("t3 closure lower local", t3())
+-- The same shape with a constructor that escapes, so the JIT allocates it.
+local function t1j()
+  local u
+  local b
+  local finish = false
+  u = setmetatable({}, {__gc = function() finish = true end})
+  b = {34}
+  local keep = {}
+  local n = 0
+  repeat u = {}; keep[1] = u; n = n + 1 until finish or n > 200000
+  return finish, b[1] == 34, n <= 200000
+end
+
+-- t1, t5 and j5 allocate only tables that the JIT eliminates (allocation
+-- sinking). A compiled loop whose allocations are eliminated does not advance
+-- the collector, so under the JIT their finalizer need not run (IMPL-DEFINED,
+-- docs/DIFFERENCES.md). They assert the interpreter, which follows PUC; t1j
+-- and j5j are the same shapes with an allocation that escapes, so the JIT's
+-- dead-slot clearing is asserted as well.
+local jit = rawget(_G, "jit")
+if jit then jit.off(t1); jit.off(t5) end
+
+pf("t1 table lower local", t1())
+pf("t2 concat lower local", t2())
+pf("t3 closure lower local", t3())
 p("t4 array constructor", t4())
-p("t5 table above", t5())
-p("t6 closure above", t6())
+pf("t5 table above", t5())
+pf("t6 closure above", t6())
+pf("t1j escaping table", t1j())
 
 -- Semantics of values across a GC check at a loop head (JIT and interpreter).
 local function j1()
@@ -131,4 +166,14 @@ p("j1 live local above", j1())
 p("j2 loop control", j2())
 p("j3 capture in loop", j3())
 p("j4 repeat body local", j4())
-p("j5 anonymous dead slot", j5())
+local function j5j()
+  local finish = false
+  setmetatable({}, {__gc = function() finish = true end})
+  local acc, hold = 0, {}
+  for i = 1, 40000 do local t = {}; hold[1] = t; acc = acc + i + #t end
+  return finish, acc > 0
+end
+
+if jit then jit.off(j5) end
+do local f, a = j5(); pf("j5 anonymous dead slot", f, a, true) end
+do local f, a = j5j(); pf("j5j escaping table", f, a, true) end

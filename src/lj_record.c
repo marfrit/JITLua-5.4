@@ -753,17 +753,37 @@ static TRef fori_load(jit_State *J, BCReg slot, IRType t, int mode)
 		mode + conv);
 }
 
-/* Convert FORI argument to expected target type. */
+/* Convert FORI argument to expected target type. An int64 ref (a 5.4
+** integer outside int32 while recording, any 64-bit value at runtime) is
+** converted exactly: guarded to fit int32 for an integer loop, to a float
+** like PUC's luaV_tonumber_ for a float loop. */
 static TRef fori_conv(jit_State *J, TRef tr, IRType t)
 {
   if (t == IRT_INT) {
+    if (tref_isi64(tr))
+      return emitir(IRTGI(IR_CONV), tr, IRCONV_INT_I64|IRCONV_CHECK);
     if (!tref_isinteger(tr))
       return emitir(IRTGI(IR_CONV), tr, IRCONV_INT_NUM|IRCONV_CHECK);
   } else {
+    if (tref_isi64(tr))
+      return emitir(IRTN(IR_CONV), tr, IRCONV_NUM_I64);
     if (!tref_isnum(tr))
       return emitir(IRTN(IR_CONV), tr, IRCONV_NUM_INT);
   }
   return tr;
+}
+
+/* The slots of a running loop that a trace can represent: all three int32
+** (small integer loop) or all three floats. A wide integer loop, and slots
+** rewritten through the debug library, are left to the interpreter. */
+static int rec_for_isrecordable(cTValue *o)
+{
+  int i, nint = 0, nnum = 0;
+  for (i = FORL_IDX; i <= FORL_STEP; i++) {
+    if (tvisint(&o[i]) && !tvisi47w(&o[i])) nint++;
+    else if (tvisnum(&o[i])) nnum++;
+  }
+  return nint == 3 || nnum == 3;
 }
 
 /* Peek before FORI to find a const initializer. Otherwise load from slot. */
@@ -853,6 +873,10 @@ static void rec_for_loop(jit_State *J, const BCIns *fori, ScEvEntry *scev,
   BCReg ra = bc_a(*fori);
   cTValue *tv = &J->L->base[ra];
   TRef idx = J->base[ra+FORL_IDX];
+  if (!rec_for_isrecordable(tv)) {  /* A wide loop (see rec_for). */
+    setintV(&J->errinfo, BC_FORI);
+    lj_trace_err_info(J, LJ_TRERR_NYIBC);
+  }
   /* The loop kind follows PUC 5.4's rule, which lj_meta_for has already
   ** applied to the slots: an integer loop has int32 slots (small kind), a
   ** float loop has float slots. Do not narrow integral float values to an
@@ -902,9 +926,11 @@ static LoopEvent rec_for(jit_State *J, const BCIns *fori, int isforl)
   LoopEvent ev;
   TRef stop;
   IRType t;
-  /* A wide integer loop is not recorded in this step: its state object in
-  ** FOR_IDX has no IR representation. The interpreter runs the loop. */
-  if (tvisforstate(&tv[FORL_IDX])) {
+  TValue cv[3];  /* FORI: the values the interpreter's FORI works on. */
+  cTValue *iv = tv;
+  /* A wide integer loop is not recorded: its index, limit or step has no
+  ** int32 or float form for the whole loop. The interpreter runs it. */
+  if (isforl && !rec_for_isrecordable(tv)) {
     setintV(&J->errinfo, BC_FORI);
     lj_trace_err_info(J, LJ_TRERR_NYIBC);
   }
@@ -930,29 +956,49 @@ static LoopEvent rec_for(jit_State *J, const BCIns *fori, int isforl)
     }
   } else {  /* Handle FORI/JFORI opcodes. */
     BCReg i;
-    /* Lua 5.4 forprep: prepare the slots as the interpreter's FORI would.
-    ** RETRY leaves int32 (small integer loop) or float values; SKIP/WIDE
-    ** means a wide integer loop, which is not recorded. */
-    if (lj_meta_for(J->L, tv) != LJ_FOR_RETRY) {
+    int dir;
+    /* Lua 5.4 forprep without side effects: the interpreter's FORI converts
+    ** the slots after the recording. cv[] gets the int32 values of a small
+    ** integer loop or the floats of a float loop; anything else is left to
+    ** the interpreter. The trace converts the values the same way: tonumber
+    ** for a float loop, floor (ascending) or ceil (descending) for the limit
+    ** of an integer loop, guarded to fit int32 (a limit that does not makes
+    ** a wide loop: the guard exits to the interpreter). The loop kind itself
+    ** follows from the IR types of the start and the step. */
+    if (lj_meta_forkind(J->L, tv, cv) != LJ_FOR_RETRY) {
       setintV(&J->errinfo, BC_FORI);
       lj_trace_err_info(J, LJ_TRERR_NYIBC);
     }
-    t = (LJ_DUALNUM && tvisint(&tv[FORL_IDX]) &&
-	 tvisint(&tv[FORL_STEP])) ? IRT_INT : IRT_NUM;
+    t = tvisint(&cv[FORL_IDX]) ? IRT_INT : IRT_NUM;
+    dir = rec_for_direction(&cv[FORL_STEP]);
     for (i = FORL_IDX; i <= FORL_STEP; i++) {
       if (!tr[i]) sload(J, ra+i);
-      lj_assertJ(tref_isnumber_str(tr[i]), "bad FORI argument type");
+      lj_assertJ(tref_isnumber_str(tr[i]) || tref_isi64(tr[i]),
+		 "bad FORI argument type");
       if (tref_isstr(tr[i]))
 	tr[i] = emitir(IRTG(IR_STRTO, IRT_NUM), tr[i], 0);
+      if (t == IRT_INT && i == FORL_STOP && tref_isnum(tr[i]))
+	tr[i] = emitir(IRTN(IR_FPMATH), tr[i],
+		       dir ? IRFPM_FLOOR : IRFPM_CEIL);
       tr[i] = fori_conv(J, tr[i], t);
     }
     tr[FORL_EXT] = tr[FORL_IDX];
     stop = tr[FORL_STOP];
-    rec_for_check(J, t, rec_for_direction(&tv[FORL_STEP]),
-		  stop, tr[FORL_STEP], 1);
+    rec_for_check(J, t, dir, stop, tr[FORL_STEP], 1);
+    iv = cv;
   }
 
-  ev = rec_for_iter(&op, tv, isforl);
+  ev = rec_for_iter(&op, iv, isforl);
+  /* A NaN limit met at runtime (one seen while recording aborts above):
+  ** PUC forprep enters a float loop unless the start is past the limit, so
+  ** FORI enters on an unordered comparison, as the interpreter's FORI does;
+  ** FORL continues only on an ordered one, so the guard that the loop is
+  ** left must hold for an unordered comparison as well. */
+  if (t == IRT_NUM) {
+    int d = rec_for_direction(&iv[FORL_STEP]);
+    if (!isforl && ev != LOOPEV_LEAVE) op = d ? IR_ULE : IR_UGE;
+    else if (isforl && ev == LOOPEV_LEAVE) op = d ? IR_UGT : IR_ULT;
+  }
   if (ev == LOOPEV_LEAVE) {
     J->maxslot = ra+FORL_EXT+1;
     J->pc = fori+1;
@@ -1764,33 +1810,23 @@ static void rec_mm_callcomp(jit_State *J, RecordIndex *ix, int op)
   lj_record_call(J, func, 2);
 }
 
-/* Record call to equality comparison metamethod (for tab and udata only). */
+/* Record call to equality comparison metamethod (for tab and udata only).
+** 5.4 rule (lvm.c luaV_equalobj, lj_meta_equal): the first operand's __eq,
+** only if it has none the second operand's, called with the operands in
+** source order. Each lookup guards the metatable it reads, so a trace that
+** meets another pairing exits. (lj_meta_equal skips the second lookup when
+** both share one metatable: it finds the same nothing.) */
 static void rec_mm_equal(jit_State *J, RecordIndex *ix, int op)
 {
   ix->tab = ix->val;
   copyTV(J->L, &ix->tabv, &ix->valv);
-  if (lj_record_mm_lookup(J, ix, MM_eq)) {  /* Lookup mm on 1st operand. */
-    cTValue *bv;
-    TRef mo1 = ix->mobj;
-    TValue mo1v;
-    copyTV(J->L, &mo1v, &ix->mobjv);
-    /* Avoid the 2nd lookup and the objcmp if the metatables are equal. */
-    bv = &ix->keyv;
-    if (tvistab(bv) && tabref(tabV(bv)->metatable) == ix->mtv) {
-      TRef mt2 = emitir(IRT(IR_FLOAD, IRT_TAB), ix->key, IRFL_TAB_META);
-      emitir(IRTG(IR_EQ, IRT_TAB), mt2, ix->mt);
-    } else if (tvisudata(bv) && tabref(udataV(bv)->metatable) == ix->mtv) {
-      TRef mt2 = emitir(IRT(IR_FLOAD, IRT_TAB), ix->key, IRFL_UDATA_META);
-      emitir(IRTG(IR_EQ, IRT_TAB), mt2, ix->mt);
-    } else {  /* Lookup metamethod on 2nd operand and compare both. */
-      ix->tab = ix->key;
-      copyTV(J->L, &ix->tabv, bv);
-      if (!lj_record_mm_lookup(J, ix, MM_eq) ||
-	  lj_record_objcmp(J, mo1, ix->mobj, &mo1v, &ix->mobjv))
-	return;
-    }
-    rec_mm_callcomp(J, ix, op);
+  if (!lj_record_mm_lookup(J, ix, MM_eq)) {  /* Lookup mm on 1st operand. */
+    ix->tab = ix->key;
+    copyTV(J->L, &ix->tabv, &ix->keyv);
+    if (!lj_record_mm_lookup(J, ix, MM_eq))  /* Lookup mm on 2nd operand. */
+      return;
   }
+  rec_mm_callcomp(J, ix, op);
 }
 
 /* Record call to ordered comparison metamethods (for arbitrary objects). */
@@ -3589,9 +3625,8 @@ static const BCIns *rec_setup_root(jit_State *J)
   BCReg ra = bc_a(ins);
   switch (bc_op(ins)) {
   case BC_FORL:
-    /* A wide integer loop keeps its state in a private object in FOR_IDX and
-    ** is not recorded: there is no IR representation for it. */
-    if (tvisforstate(&J->L->base[ra])) {
+    /* A wide integer loop is not recorded (see rec_for). */
+    if (!rec_for_isrecordable(&J->L->base[ra])) {
       setintV(&J->errinfo, BC_FORI);
       lj_trace_err_info(J, LJ_TRERR_NYIBC);
     }

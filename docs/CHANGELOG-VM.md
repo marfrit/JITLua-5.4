@@ -66,6 +66,66 @@ target x86_64 (GC64) and arm64.
   the 64-bit `>>`. The D and B fields are masked now; `tests/jitutil-smoke.sh`
   checks every target of a `-bl` listing with loops and forward jumps
   (`tests/lib/bclist-fixture.lua`, `bclist-check.lua`).
+- Wide integer `for` loops keep plain numbers in their slots. The private
+  state object the first 5.4 implementation kept in `FOR_IDX` was reachable
+  through the debug library: `debug.setlocal` on the step slot of a float
+  loop made `lj_meta_forl` read the float as the state object (SIGSEGV and a
+  write through a forged pointer, x86_64 and arm64, `-joff` and `-jon`), a
+  state copied into another loop jumped to another function's loop body,
+  `debug.getlocal` showed a userdata, and every loop start allocated. Now
+  index, converted limit and step are numbers in their canonical encoding
+  (an int32 index next to a wider limit or step as a float, see
+  `docs/DIFFERENCES.md`); `lj_meta_forl` checks every slot, raises a clean
+  error for a value it cannot use, decides with an overflow-free limit test
+  (PUC's iterations), takes the body PC from the FORL instruction (a JFORL's
+  from its trace) and hands a loop whose values fit int32 again back to the
+  int32 path. Boxing the control variable or the limit steps the collector
+  (`lj_gc_check_fixtop`): `for i = 1<<50, (1<<50)+3e6` grew the heap by
+  about 200 MB, now it stays flat like PUC's. The recorder aborts unless the
+  slots are all int32 or all floats. `tests/d54/for_03_wide_state.lua`,
+  `for_04_forged_state.lua` (mode B), `for_05_wide_gc.lua`. Design:
+  docs/notes/for-loop-54.md.
+- Numeric `for` loops started inside a trace (a recorded FORI). The recorder
+  called `lj_meta_for` on the live slots before the interpreter ran the FORI
+  and converted with `CONV int.num check`, which failed on every
+  non-integral limit (`for i = 1, #t/2` with an odd length: a side exit per
+  run and about 100 side traces); it now classifies without side effects
+  (`lj_meta_forkind`) and converts like `forprep`: floor/ceil under an int32
+  range guard for an integer loop, `tonumber` for a float loop, where an
+  int64 limit now gets `CONV num.i64` (it got `num.int`: 0 or 1 iterations
+  instead of PUC's for `for i = 0, math.maxinteger, 1.0`), and a float FORI
+  enters on an unordered comparison (a NaN limit ran 0 times compiled, once
+  in PUC and the interpreter), while the guard that a compiled float FORL
+  is left holds for an unordered comparison too (a side trace resumed the
+  loop for a second run). A zero-trip loop is recorded as a guarded
+  skip instead of aborting the trace. `tests/d54/for_06_rec_limits.lua`.
+  Measured (`-jon`, median of 7, interleaved): the half-limit loop 25x
+  faster on x86_64 and 41x on arm64, a zero-trip inner loop 26x/22x; the
+  table is in docs/notes/for-loop-54.md.
+- After a stack overflow whose `pcall`/`xpcall` closes `<close>` values on
+  the error path (the VM chain, `lj_meta_tbcerr`), the stack keeps its
+  normal limit again: the relimit of the unwinding ran while the top was
+  still above the highest pending slot and could not shrink it, so the next
+  overflow was reported as "error in error handling" (PUC: "stack
+  overflow"), later recursions went deeper and `<close>` handlers of the
+  deeper levels were refused. The chain relimits when it is done
+  (`tests/d54/err_17_stkov_close_relimit.lua`).
+- A boxed integer (in `[2^31, 2^32)` or outside the 47-bit inline range) is
+  a string argument like any number: `lj_lib_checkstr`, `luaL_checklstring`
+  and `load` convert it as `lua_tolstring` does, so `string.len`, `upper`,
+  `sub`, `rep`, `gsub`, `string.pack("z", ...)`, `table.concat`
+  separators and `load` accept it as PUC's `luaL_checklstring`
+  does (`tests/d54/str_05_checkstr_int64.lua`).
+- `currentline` of a frame that has not executed its first instruction yet
+  (a call hook) is the line of that instruction, as PUC's `luaD_hookcall`
+  reports it (for a vararg function after `OP_VARARGPREP`), not
+  `linedefined` (`tests/d54/debug_12_callhook_line.lua`).
+- Compiled `==`/`~=` with `__eq` follows the 5.4 selection like the
+  interpreter: the first operand's handler, else the second's. The recorder
+  kept the 5.1 rule (identical handlers on both sides), so a compiled
+  comparison of an object with `__eq` against a plain table or one with
+  another handler skipped or mixed up the call (SIGSEGV under `-jon`, wrong
+  call counts). `tests/d54/meta_09_eq_jit_select.lua`.
 - `collectgarbage("step", n)` with `n > 0` works off `n` KB of extra debt
   before it returns, as PUC's `incstep` does, so a larger `n` finishes a cycle
   in fewer calls and a huge one in a single call (`gc.lua:201/205`); a

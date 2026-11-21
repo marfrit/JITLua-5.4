@@ -500,7 +500,7 @@ static const char *reader_func(lua_State *L, void *ud, size_t *size)
   if (tvisnil(L->top)) {
     *size = 0;
     return NULL;
-  } else if (tvisstr(L->top) || tvisnumber(L->top)) {
+  } else if (tvisstr(L->top) || tvisnumber(L->top) || tvisi64(L->top)) {
     copyTV(L, L->base+4, L->top);  /* Anchor string in reserved stack slot. */
     return lua_tolstring(L, 5, size);
   } else {
@@ -515,7 +515,8 @@ LJLIB_CF(load)
   GCstr *mode = lj_lib_optstr(L, 3);
   int status;
   if (L->base < L->top &&
-      (tvisstr(L->base) || tvisnumber(L->base) || tvisbuf(L->base))) {
+      (tvisstr(L->base) || tvisnumber(L->base) || tvisi64(L->base) ||
+       tvisbuf(L->base))) {
     const char *s;
     MSize len;
     if (tvisbuf(L->base)) {

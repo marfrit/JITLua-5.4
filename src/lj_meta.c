@@ -26,6 +26,7 @@
 #include "lj_debug.h"
 #include "lj_state.h"
 #include "lj_i64.h"
+#include "lj_dispatch.h"
 #include "lj_udata.h"
 #if LJ_HASFFI
 #include "lj_ctype.h"
@@ -865,21 +866,42 @@ TValue *lj_meta_call(lua_State *L, TValue *func, TValue *top)
 ** an integer loop iff the initial value and the step are integers (no string
 ** coercion for those two). Then the limit is converted with floor for an
 ** ascending and ceil for a descending loop, clipped to the integer bounds or
-** skipping the loop; the iteration count is precomputed as unsigned 64 bit and
-** the index wraps like intop(+), so the integer limits cannot make a loop run
-** forever. Otherwise all three values are converted with tonumber. Step zero
-** raises for both kinds. Three loop kinds after FORI: small integer (init,
-** step and clipped limit fit int32, the existing int32 FORI/FORL paths are
-** exact for it), float, and wide integer (any of the three outside int32).
+** skipping the loop; the index wraps like intop(+), so the integer limits
+** cannot make a loop run forever. Otherwise all three values are converted
+** with tonumber. Step zero raises for both kinds. Three loop kinds after
+** FORI: small integer (init, step and clipped limit fit int32, the existing
+** int32 FORI/FORL paths are exact for it), float, and wide integer (any of
+** the three outside int32).
 **
-** A wide loop keeps PUC's state (current index, remaining count, step) in a
-** private GCudata in FOR_IDX: one allocation per loop start, none per
-** iteration. FORL then calls lj_meta_forl once per iteration. FOR_EXT holds
-** the control variable in its canonical 5.4 integer encoding. */
+** A wide loop keeps plain numbers in its slots, as PUC does: the index in
+** FOR_IDX, the clipped limit in FOR_STOP and the step in FOR_STEP, all in
+** their canonical 5.4 integer encoding, and the control variable in FOR_EXT.
+** The one exception is an index that fits int32 while the limit or the step
+** does not: FOR_IDX then holds it as a float (exact), because the int32 FORL
+** path takes FOR_IDX as the only witness and reads the other two slots by
+** their low words. A wide loop's step is an integer, which sends the FP path
+** of FORL/IFORL/JFORL to lj_meta_forl once per iteration. Nothing in the
+** slots is a pointer the VM follows, so values written there through the
+** debug library cannot corrupt anything: lj_meta_forl takes the slots as
+** they are (see there). FORL takes the body address from its own
+** instruction (a JFORL's from the trace's start instruction). */
 
 static int for_isint(cTValue *o)
 {
   return tvisint(o) || tvisi64(o);  /* int32, 47-bit inline, or boxed */
+}
+
+#define for_fits32(v)	((int64_t)(int32_t)(v) == (v))
+
+/* lj_i64_getint, inline for the per-iteration path of a wide loop. */
+static LJ_AINLINE int for_getint(cTValue *o, int64_t *p)
+{
+#if LJ_GC64
+  if (tvisi47w(o)) { *p = intV47(o); return 1; }
+#endif
+  if (tvisint(o)) { *p = (int64_t)intV(o); return 1; }
+  if (tvisi64(o)) { *p = i64V(o); return 1; }
+  return 0;
 }
 
 /* PUC luaV_flttointeger: floor for an ascending loop, ceil for a descending
@@ -965,19 +987,35 @@ static int forlimit(lua_State *L, int64_t init, cTValue *lim, int64_t *limit,
   return step > 0 ? init > *limit : init < *limit;
 }
 
+/* Store the index of an integer loop that lj_meta_for or lj_meta_forl runs:
+** FOR_EXT gets the canonical integer (it may box), FOR_IDX the same value,
+** except an int32 index of a loop whose limit or step is not int32 (small is
+** zero): a float there keeps the int32 FORL path away. */
+static void for_setidx(lua_State *L, TValue *o, int64_t idx, int small)
+{
+  if (for_fits32(idx)) {
+    setintV(o + FORL_EXT, (int32_t)idx);
+    if (small)
+      setintV(o, (int32_t)idx);
+    else
+      setnumV(o, (lua_Number)idx);
+  } else {
+    ptrdiff_t ofs = savestack(L, o);
+    lj_i64_toTValue(L, o + FORL_EXT, idx);  /* Stores base-relative. */
+    o = restorestack(L, ofs);
+    copyTV(L, o, o + FORL_EXT);
+  }
+}
+
 int LJ_FASTCALL lj_meta_for(lua_State *L, TValue *o)
 {
   int64_t init, step;
-  /* The recorder calls this before the FORI executes; a wide loop it prepared
-  ** must not be coerced again, so an existing state object means "enter". */
-  if (tvisforstate(o)) return LJ_FOR_WIDE;
   if (for_isint(o) && for_isint(o+2) && for_toint(o, &init, 0) &&
       for_toint(o+2, &step, 0)) {
     int64_t limit;
     if (step == 0) lj_err_msg(L, LJ_ERR_FORZERO);
     if (forlimit(L, init, o+1, &limit, step)) return LJ_FOR_SKIP;
-    if ((int64_t)(int32_t)init == init && (int64_t)(int32_t)step == step &&
-	(int64_t)(int32_t)limit == limit) {
+    if (for_fits32(init) && for_fits32(step) && for_fits32(limit)) {
       /* Small integer loop: the int32 FORI/FORL paths are exact (an int32
       ** overflow of idx + step leaves before the wrapped index compares). */
       setintV(o, (int32_t)init);
@@ -985,28 +1023,13 @@ int LJ_FASTCALL lj_meta_for(lua_State *L, TValue *o)
       setintV(o+2, (int32_t)step);
       return LJ_FOR_RETRY;
     } else {
-      uint64_t count;
-      ptrdiff_t ofs = o - L->base;
-      GCudata *ud;
-      ForState *s;
-      if (step > 0) {	/* ascending */
-	count = (uint64_t)limit - (uint64_t)init;
-	if (step != 1) count /= (uint64_t)step;
-      } else {	/* descending; -(step + 1) avoids negating mininteger */
-	count = (uint64_t)init - (uint64_t)limit;
-	count /= (uint64_t)(-(step + 1)) + 1u;
-      }
-      /* A GC allocation may move the stack: address the slots base-relative
-      ** after it (the offset is taken before). */
-      ud = lj_udata_new(L, sizeof(ForState), tabref(L->env));
-      ud->udtype = UDTYPE_FORSTATE;
-      s = (ForState *)uddata(ud);
-      s->idx = init;
-      s->count = count;
-      s->step = step;
-      s->body = NULL;	/* the VM's FORI/wide stub fills in the body PC */
-      setudataV(L, L->base + ofs, ud);
-      lj_i64_toTValue(L, L->base + ofs + FORL_EXT, init);
+      /* Wide integer loop: the step slot already holds the canonical step.
+      ** Boxing may allocate: pay for it like any allocation of the VM, with
+      ** the frame's slots below the top (lj_gc_check_fixtop). */
+      ptrdiff_t ofs = savestack(L, o);
+      lj_i64_toTValue(L, o+1, limit);
+      for_setidx(L, restorestack(L, ofs), init, 0);
+      lj_gc_check_fixtop(L);
       return LJ_FOR_WIDE;
     }
   }
@@ -1025,18 +1048,86 @@ int LJ_FASTCALL lj_meta_for(lua_State *L, TValue *o)
   }
 }
 
-/* One iteration of a wide integer loop: PUC OP_FORLOOP's integer branch.
-** Returns 1 if the loop continues, 0 if it must finish. */
-int LJ_FASTCALL lj_meta_forl(lua_State *L, TValue *o)
+/* The trace recorder's view of a FORI that has not executed yet: what
+** lj_meta_for would leave in the slots, without raising, writing the slots
+** or deciding the skip. LJ_FOR_RETRY with out[] holding the int32 values of
+** a small integer loop or the floats of a float loop (entered or skipped:
+** the recorder decides from them), LJ_FOR_WIDE for everything the recorder
+** leaves to the interpreter: a wide loop, a limit outside the integer range,
+** step zero, a value that is no number. */
+int lj_meta_forkind(lua_State *L, cTValue *o, TValue *out)
 {
-  GCudata *ud = udataV(o);
-  ForState *s = (ForState *)uddata(ud);
-  lj_assertX(tvisforstate(o), "bad wide 'for' state");
-  if (s->count == 0) return 0;
-  s->count--;
-  s->idx = (int64_t)((uint64_t)s->idx + (uint64_t)s->step);
-  lj_i64_toTValue(L, o + FORL_EXT, s->idx);  /* may box and move the stack */
-  return 1;
+  int64_t init, step, limit;
+  if (for_isint(o) && for_isint(o+2) && for_toint(o, &init, 0) &&
+      for_toint(o+2, &step, 0)) {
+    if (step == 0 || !for_tointeger(L, o+1, &limit, step < 0) ||
+	!(for_fits32(init) && for_fits32(step) && for_fits32(limit)))
+      return LJ_FOR_WIDE;
+    setintV(out, (int32_t)init);
+    setintV(out+1, (int32_t)limit);
+    setintV(out+2, (int32_t)step);
+    return LJ_FOR_RETRY;
+  } else {
+    lua_Number ninit, nlimit, nstep;
+    if (!for_tonumber(L, o+1, &nlimit) || !for_tonumber(L, o+2, &nstep) ||
+	!for_tonumber(L, o, &ninit) || nstep == 0)
+      return LJ_FOR_WIDE;
+    setnumV(out, ninit);
+    setnumV(out+1, nlimit);
+    setnumV(out+2, nstep);
+    return LJ_FOR_RETRY;
+  }
+}
+
+/* One iteration of an integer loop that is not small: PUC OP_FORLOOP's
+** integer branch. FORL comes here from its FP path whenever the step slot
+** does not hold a float, i.e. for a wide loop, and for a loop whose slots
+** were rewritten through the debug library. The slots are taken as they are
+** now, like PUC reads them: the step must be an integer (not zero), the index
+** an integer or a float with an exact integer value, the limit is converted
+** like forprep converts it. Anything else is a clean error; no value in the
+** slots is followed as a pointer. There is a next value iff index + step does
+** not pass the limit (computed without overflow), the same iterations as
+** PUC's precomputed count. The control variable gets the canonical encoding;
+** when index, limit and step all fit int32 again, the slots go back to the
+** int32 form and the int32 FORL path takes over. Returns the PC of the loop
+** body to continue, or NULL to leave. */
+const BCIns * LJ_FASTCALL lj_meta_forl(lua_State *L, TValue *o)
+{
+  const BCIns *pc = cframe_pc(cframe_raw(L->cframe));  /* After the FORL. */
+  BCIns ins = pc[-1];
+  int64_t idx, limit, step;
+  int stop;
+  ptrdiff_t ofs = savestack(L, o);
+#if LJ_HASJIT
+  if (bc_op(ins) == BC_JFORL)  /* Its jump field holds the trace number. */
+    ins = traceref(L2J(L), bc_d(ins))->startins;
+#endif
+  lj_assertL(bc_op(ins) == BC_FORL || bc_op(ins) == BC_IFORL,
+	     "bad FORL instruction %d", bc_op(ins));
+  if (!for_getint(o+2, &step)) for_errnum(L, o+2, "step");
+  if (step == 0) lj_err_msg(L, LJ_ERR_FORZERO);
+  if (tvisnum(o)) {  /* An int32 index of a wide loop, see for_setidx. */
+    if (!lj_i64_numtoint(numV(o), &idx)) lj_err_msg(L, LJ_ERR_NUMNOINT);
+  } else if (!for_getint(o, &idx)) {
+    for_errnum(L, o, "initial value");
+  }
+  if (!for_getint(o+1, &limit)) {
+    if (forlimit(L, idx, o+1, &limit, step)) return NULL;
+    lj_i64_toTValue(L, o+1, limit);  /* Keep the converted limit. */
+    o = restorestack(L, ofs);
+  }
+  if (step > 0)
+    stop = idx > limit || (uint64_t)limit - (uint64_t)idx < (uint64_t)step;
+  else
+    stop = idx < limit ||
+	   (uint64_t)idx - (uint64_t)limit < (uint64_t)0 - (uint64_t)step;
+  if (stop) return NULL;
+  idx = (int64_t)((uint64_t)idx + (uint64_t)step);
+  for_setidx(L, o, idx, for_fits32(idx) && for_fits32(limit) &&
+			for_fits32(step));
+  lj_gc_check_fixtop(L);  /* The control variable may be a new box. */
+  return pc + bc_j(ins);
 }
 
 
@@ -1253,6 +1344,11 @@ TValue * LJ_FASTCALL lj_meta_tbcerr(lua_State *L)
       copyTV(L, pbase, err);
       L->top = pbase + 1;
       L->base = pbase;
+      /* The chain is done: bring a stack that a stack overflow enlarged back
+      ** to its normal limit, now that the top is down at the pcall (the
+      ** unwinding left it above the highest pending slot, where the relimit
+      ** of err_unwind could not shrink it). The VM reloads BASE. */
+      lj_state_relimitstack(L);
       return NULL;
     }
     L->tbcn--;

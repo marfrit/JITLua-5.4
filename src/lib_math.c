@@ -144,8 +144,15 @@ LJLIB_ASM(math_log)		LJLIB_REC(math_log)
   return FFH_RETRY;
 }
 
-LJLIB_LUA(math_deg) /* function(x) return x * 57.29577951308232 end */
-LJLIB_LUA(math_rad) /* function(x) return x * 0.017453292519943295 end */
+/* 5.4: C functions as in PUC, x * (180/pi) and x * (pi/180) on the float
+** value of the argument (luaL_checknumber). The fallback converts strings
+** and boxed int64 values in place. */
+LJLIB_ASM(math_deg)		LJLIB_REC(math_degrad 0)
+{
+  lj_lib_checknum(L, 1);
+  return FFH_RETRY;
+}
+LJLIB_ASM_(math_rad)		LJLIB_REC(math_degrad 1)
 
 LJLIB_ASM(math_atan2)		LJLIB_REC(.)
 {

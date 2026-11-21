@@ -817,6 +817,16 @@ static void LJ_FASTCALL recff_math_unary(jit_State *J, RecordFFData *rd)
   J->base[0] = emitir(IRTN(IR_FPMATH), lj_ir_tonum(J, J->base[0]), rd->data);
 }
 
+/* Record math.deg (rd->data = 0) and math.rad (rd->data = 1). The factors
+** are the doubles of PUC's 180.0/PI and PI/180.0 (lmathlib.c). */
+static void LJ_FASTCALL recff_math_degrad(jit_State *J, RecordFFData *rd)
+{
+  TRef tr = lj_ir_tonum(J, J->base[0]);
+  J->base[0] = emitir(IRTN(IR_MUL), tr,
+		      lj_ir_knum(J, rd->data ? 0.017453292519943295 :
+					       57.29577951308232));
+}
+
 /* Record math.log. */
 static void LJ_FASTCALL recff_math_log(jit_State *J, RecordFFData *rd)
 {
@@ -1098,6 +1108,13 @@ static TRef recff_string_start(jit_State *J, GCstr *s, int32_t *st, TRef tr,
   }
   *st = start;
   return tr;
+}
+
+static void LJ_FASTCALL recff_string_len(jit_State *J, RecordFFData *rd)
+{
+  J->base[0] = emitir(IRTI(IR_FLOAD), lj_ir_tostr(J, J->base[0]),
+		      IRFL_STR_LEN);
+  UNUSED(rd);
 }
 
 /* Handle string.byte (rd->data = 0) and string.sub (rd->data = 1). */

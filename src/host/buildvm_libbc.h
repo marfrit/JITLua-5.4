@@ -4,11 +4,6 @@ static const int libbc_endian = 0;
 
 static const uint8_t libbc_code[] = {
 #if LJ_FR2
-/* math.deg */ 0,1,2,0,0,1,2,BC_MULVN,1,0,0,BC_RET1,1,2,0,241,135,158,166,3,
-220,203,178,130,4,
-/* math.rad */ 0,1,2,0,0,1,2,BC_MULVN,1,0,0,BC_RET1,1,2,0,243,244,148,165,20,
-198,190,199,252,3,
-/* string.len */ 0,1,2,0,0,0,3,BC_ISTYPE,0,5,0,BC_LEN,1,0,0,BC_RET1,1,2,0,
 /* table.foreachi */ 0,2,10,0,0,0,15,BC_ISTYPE,0,12,0,BC_ISTYPE,1,9,0,
 BC_KSHORT,2,1,0,BC_LEN,3,0,0,BC_KSHORT,4,1,0,BC_FORI,2,8,128,BC_MOV,6,1,0,
 BC_MOV,8,5,0,BC_TGETR,9,5,0,BC_CALL,6,3,2,BC_ISEQP,6,0,0,BC_JMP,7,1,128,
@@ -21,11 +16,6 @@ BC_UCLO,0,0,128,BC_RET1,8,2,0,BC_ITERN,6,3,3,BC_ITERL,6,246,127,BC_TBCCLO,2,0,
 128,BC_RET0,0,1,0,1,255,255,249,255,15,
 /* table.getn */ 0,1,2,0,0,0,3,BC_ISTYPE,0,12,0,BC_LEN,1,0,0,BC_RET1,1,2,0,
 #else
-/* math.deg */ 0,1,2,0,0,1,2,BC_MULVN,1,0,0,BC_RET1,1,2,0,241,135,158,166,3,
-220,203,178,130,4,
-/* math.rad */ 0,1,2,0,0,1,2,BC_MULVN,1,0,0,BC_RET1,1,2,0,243,244,148,165,20,
-198,190,199,252,3,
-/* string.len */ 0,1,2,0,0,0,3,BC_ISTYPE,0,5,0,BC_LEN,1,0,0,BC_RET1,1,2,0,
 /* table.foreachi */ 0,2,9,0,0,0,15,BC_ISTYPE,0,12,0,BC_ISTYPE,1,9,0,
 BC_KSHORT,2,1,0,BC_LEN,3,0,0,BC_KSHORT,4,1,0,BC_FORI,2,8,128,BC_MOV,6,1,0,
 BC_MOV,7,5,0,BC_TGETR,8,5,0,BC_CALL,6,3,2,BC_ISEQP,6,0,0,BC_JMP,7,1,128,
@@ -42,12 +32,9 @@ BC_UCLO,0,0,128,BC_RET1,8,2,0,BC_ITERN,6,3,3,BC_ITERL,6,246,127,BC_TBCCLO,2,0,
 };
 
 static const struct { const char *name; int ofs; } libbc_map[] = {
-{"math_deg",0},
-{"math_rad",25},
-{"string_len",50},
-{"table_foreachi",69},
-{"table_foreach",136},
-{"table_getn",249},
-{NULL,268}
+{"table_foreachi",0},
+{"table_foreach",67},
+{"table_getn",180},
+{NULL,199}
 };
 

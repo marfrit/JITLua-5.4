@@ -2034,6 +2034,25 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov [BASE-16], RB
   |  jmp ->fff_res1
   |
+  |// 5.4 math.deg/math.rad: x * (180/pi), x * (pi/180) on the float value.
+  |.ffunc_1 math_deg
+  |  mov64 RA, U64x(404ca5dc,1a63c1f8)	// 180.0/PI
+  |  jmp >1
+  |.ffunc_1 math_rad
+  |  mov64 RA, U64x(3f91df46,a2529d39)	// PI/180.0
+  |1:
+  |  mov RB, [BASE]
+  |  checkint RB, >2
+  |  cvtsi2sd xmm0, RBd
+  |  jmp >3
+  |2:
+  |  checknumtp [BASE], ->fff_fallback
+  |  movsd xmm0, qword [BASE]
+  |3:
+  |  movq xmm1, RA
+  |  mulsd xmm0, xmm1
+  |  jmp ->fff_resxmm0
+  |
   |.ffunc_n math_sqrt, sqrtsd
   |->fff_resxmm0:
   |  mov PC, [BASE-8]
@@ -2222,6 +2241,12 @@ static void build_subroutines(BuildCtx *ctx)
   |  math_minmax math_max, cmovl, maxsd
   |
   |//-- String library -----------------------------------------------------
+  |
+  |.ffunc_1 string_len
+  |  mov STR:RB, [BASE]
+  |  checkstr STR:RB, ->fff_fallback
+  |  mov RBd, dword STR:RB->len
+  |  jmp ->fff_resi
   |
   |.ffunc string_byte			// Only handle the 1-arg case here.
   |  cmp NARGS:RDd, 1+1;  jne ->fff_fallback

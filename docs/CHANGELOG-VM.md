@@ -761,6 +761,16 @@ target x86_64 (GC64) and arm64.
   100000 links is named in about the time PUC needs; a chain of `MOV`s
   still costs one pass per move, as in PUC
   (`tests/d54/debug_12_slotname_chain.lua`).
+- `lua_checkstack` lets the stack grow up to its maximum, as PUC's does
+  (lapi.c, `luaD_growstack`), instead of capping every C function at
+  `LUAI_MAXCSTACK` (8000) slots as in 5.1, and `string.byte` checks its
+  result count with `luaL_checkstack` like PUC's `str_byte` instead of the
+  same cap: `table.unpack({}, 1, 10000)`, `string.byte` and
+  `utf8.codepoint` over 20000 characters return all values. A request that
+  cannot fit below `LJ_STACK_MAX` is refused before the stack grows, so it
+  fails with the caller's message ("too many results to unpack") and never
+  as a stack overflow (`tests/d54/tbl_11_unpack_many.lua`). The limit itself
+  is the stack-depth row of `docs/DIFFERENCES.md`.
 
 ## Known JIT/performance rows (not semantic divergences)
 

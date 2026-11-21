@@ -347,99 +347,117 @@ const char *lj_debug_uvnamev(cTValue *o, uint32_t idx, TValue **tvp, GCobj **op)
   return NULL;
 }
 
-/* 5.4 ldebug.c findsetreg/filterpc: the write at ipw of a slot used at
-** ipuse is conditional if an earlier forward jump lands after it, at or
-** before the use (an and/or operand, a branch). PUC then names nothing. */
-static int debug_condwrite(GCproto *pt, const BCIns *ipw, const BCIns *ipuse)
+/* 5.4 ldebug.c findsetreg/filterpc, in one forward pass: the last
+** instruction before ipuse that writes slot. NULL if that is a call or
+** another instruction that overwrites every slot from its base up (BCMbase),
+** or if the write is conditional: an earlier forward jump lands after it, at
+** or before the use (an and/or operand, a branch). PUC then names nothing. */
+static const BCIns *debug_findsetreg(GCproto *pt, const BCIns *ipuse,
+				     BCReg slot)
 {
-  const BCIns *ip;
-  for (ip = proto_bc(pt)+1; ip < ipw; ip++) {
-    BCOp op = bc_op(*ip);
-    if (op == BC_JMP || op == BC_UCLO) {
-      const BCIns *dest = ip + 1 + bc_j(*ip);
-      if (dest > ipw && dest <= ipuse) return 1;
-    }
-  }
-  return 0;
-}
-
-/* 5.4 ldebug.c isEnv: is the table read at ip a local or an upvalue named
-** _ENV? Then the field read through it is a global. */
-static int debug_isenv(GCproto *pt, const BCIns *ip, BCReg tslot)
-{
-  const char *n = NULL;
-  const char *k = lj_debug_slotname(pt, ip, tslot, &n);
-  return k && (*k == 'l' || *k == 'u') && n && strcmp(n, "_ENV") == 0;
-}
-
-/* Deduce name of an object from slot number and PC. */
-const char *lj_debug_slotname(GCproto *pt, const BCIns *ip, BCReg slot,
-			      const char **name)
-{
-  const char *lname;
-  const BCIns *ipuse = ip;
-restart:
-  lname = debug_varname(pt, proto_bcpos(pt, ip), slot);
-  if (lname != NULL) { *name = lname; return "local"; }
-  while (--ip > proto_bc(pt)) {
+  const BCIns *ip, *setreg = NULL;
+  const BCIns *jmptarget = proto_bc(pt);  /* Code before it is conditional. */
+  int cond = 0;
+  for (ip = proto_bc(pt)+1; ip < ipuse; ip++) {
     BCIns ins = *ip;
     BCOp op = bc_op(ins);
     BCReg ra = bc_a(ins);
-    if (bcmode_a(op) == BCMbase) {
-      if (slot >= ra && (op != BC_KNIL || slot <= bc_d(ins)))
-	return NULL;
-    } else if (bcmode_a(op) == BCMdst && ra == slot) {
-      if (debug_condwrite(pt, ip, ipuse))
-	return NULL;
-      switch (bc_op(ins)) {
-      case BC_MOV:
-	if (ra == slot) { slot = bc_d(ins); ipuse = ip; goto restart; }
-	break;
-      case BC_GGET:
-	*name = strdata(gco2str(proto_kgc(pt, ~(ptrdiff_t)bc_d(ins))));
-	return "global";
-      case BC_KSTR:  /* 5.4 reports the constant in operand errors */
-	*name = strdata(gco2str(proto_kgc(pt, ~(ptrdiff_t)bc_d(ins))));
-	return "constant";
-      case BC_TGETS:
-	*name = strdata(gco2str(proto_kgc(pt, ~(ptrdiff_t)bc_c(ins))));
-	if (ip > proto_bc(pt)) {
-	  BCIns insp = ip[-1];
-	  if (bc_op(insp) == BC_MOV && bc_a(insp) == ra+1+LJ_FR2 &&
-	      bc_d(insp) == bc_b(ins))
-	    return "method";
-	}
-	return debug_isenv(pt, ip, bc_b(ins)) ? "global" : "field";
-      case BC_TGETB:  /* 5.4 OP_GETI: a constant integer key (0..255). */
-	*name = "integer index";
-	return "field";
-      case BC_TGETV: {
-	/* 5.4 OP_GETTABLE/OP_SELF with the key in a register: its name only
-	** if that is a string constant (a key past the constant operand,
-	** loaded by KSTR), else "?" (ldebug.c rname). */
-	const char *kname, *kwhat;
-	BCReg kslot = bc_c(ins);
-	kwhat = lj_debug_slotname(pt, ip, kslot, &kname);
-	*name = (kwhat && *kwhat == 'c') ? kname : "?";  /* "constant" */
-	if (ip-1 > proto_bc(pt)) {  /* Method call: MOV obj, KSTR key, TGETV. */
-	  BCIns insk = ip[-1], insp = ip[-2];
-	  if (bc_op(insk) == BC_KSTR && bc_a(insk) == kslot &&
-	      bc_op(insp) == BC_MOV && bc_a(insp) == ra+1+LJ_FR2 &&
-	      bc_d(insp) == bc_b(ins))
-	    return "method";
-	}
-	return debug_isenv(pt, ip, bc_b(ins)) ? "global" : "field";
-	}
-      case BC_UGET:
-	/* 5.4 names an upvalue without debug info "?". */
-	*name = proto_uvinfo(pt) ? lj_debug_uvname(pt, bc_d(ins)) : "?";
-	return "upvalue";
-      default:
-	return NULL;
+    if (op == BC_JMP || op == BC_UCLO) {
+      const BCIns *dest = ip + 1 + bc_j(ins);
+      if (dest <= ipuse && dest > jmptarget) jmptarget = dest;
+    } else if (bcmode_a(op) == BCMbase) {
+      if (slot >= ra && (op != BC_KNIL || slot <= bc_d(ins))) {
+	setreg = ip;
+	cond = 1;  /* No name after a call or a KNIL range. */
       }
+    } else if (bcmode_a(op) == BCMdst && ra == slot) {
+      setreg = ip;
+      cond = ip < jmptarget;
     }
   }
-  return NULL;
+  return cond ? NULL : setreg;
+}
+
+/* Deduce name of an object from slot number and PC. 'basic' is PUC's
+** basicgetobjname: locals, upvalues, constants and moves only, no table
+** reads. It names the table of a field read (isEnv) and the key of TGETV
+** (rname), so a chain t.a.a...a is named without recursion. */
+static const char *debug_slotname(GCproto *pt, const BCIns *ip, BCReg slot,
+				  const char **name, int basic)
+{
+  const char *lname;
+  const BCIns *ipw;
+  BCIns ins;
+restart:
+  lname = debug_varname(pt, proto_bcpos(pt, ip), slot);
+  if (lname != NULL) { *name = lname; return "local"; }
+  ipw = debug_findsetreg(pt, ip, slot);
+  if (ipw == NULL) return NULL;
+  ins = *ipw;
+  switch (bc_op(ins)) {
+  case BC_MOV:
+    slot = bc_d(ins); ip = ipw; goto restart;
+  case BC_KSTR:  /* 5.4 reports the constant in operand errors */
+    *name = strdata(gco2str(proto_kgc(pt, ~(ptrdiff_t)bc_d(ins))));
+    return "constant";
+  case BC_UGET:
+    /* 5.4 names an upvalue without debug info "?". */
+    *name = proto_uvinfo(pt) ? lj_debug_uvname(pt, bc_d(ins)) : "?";
+    return "upvalue";
+  default:
+    break;
+  }
+  if (basic) return NULL;
+  switch (bc_op(ins)) {
+  case BC_GGET:
+    *name = strdata(gco2str(proto_kgc(pt, ~(ptrdiff_t)bc_d(ins))));
+    return "global";
+  case BC_TGETS: {
+    const char *tn, *tk;
+    BCReg ra = bc_a(ins);
+    *name = strdata(gco2str(proto_kgc(pt, ~(ptrdiff_t)bc_c(ins))));
+    if (ipw > proto_bc(pt)) {
+      BCIns insp = ipw[-1];
+      if (bc_op(insp) == BC_MOV && bc_a(insp) == ra+1+LJ_FR2 &&
+	  bc_d(insp) == bc_b(ins))
+	return "method";
+    }
+    /* 5.4 isEnv: a field of a local or upvalue named _ENV is a global. */
+    tk = debug_slotname(pt, ipw, bc_b(ins), &tn, 1);
+    return (tk && (*tk == 'l' || *tk == 'u') && strcmp(tn, "_ENV") == 0) ?
+	   "global" : "field";
+    }
+  case BC_TGETB:  /* 5.4 OP_GETI: a constant integer key (0..255). */
+    *name = "integer index";
+    return "field";
+  case BC_TGETV: {
+    /* 5.4 OP_GETTABLE/OP_SELF with the key in a register: its name only
+    ** if that is a string constant (a key past the constant operand,
+    ** loaded by KSTR), else "?" (ldebug.c rname). */
+    const char *kname, *kwhat, *tn, *tk;
+    BCReg ra = bc_a(ins), kslot = bc_c(ins);
+    kwhat = debug_slotname(pt, ipw, kslot, &kname, 1);
+    *name = (kwhat && *kwhat == 'c') ? kname : "?";  /* "constant" */
+    if (ipw-1 > proto_bc(pt)) {  /* Method call: MOV obj, KSTR key, TGETV. */
+      BCIns insk = ipw[-1], insp = ipw[-2];
+      if (bc_op(insk) == BC_KSTR && bc_a(insk) == kslot &&
+	  bc_op(insp) == BC_MOV && bc_a(insp) == ra+1+LJ_FR2 &&
+	  bc_d(insp) == bc_b(ins))
+	return "method";
+    }
+    tk = debug_slotname(pt, ipw, bc_b(ins), &tn, 1);
+    return (tk && (*tk == 'l' || *tk == 'u') && strcmp(tn, "_ENV") == 0) ?
+	   "global" : "field";
+    }
+  default:
+    return NULL;
+  }
+}
+
+const char *lj_debug_slotname(GCproto *pt, const BCIns *ip, BCReg slot,
+			      const char **name)
+{
+  return debug_slotname(pt, ip, slot, name, 0);
 }
 
 /* Deduce function name from caller of a frame. */

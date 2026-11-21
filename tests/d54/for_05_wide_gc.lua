@@ -7,7 +7,7 @@
 -- code. A value inside the inline 47-bit range allocates nothing.
 -- Prints booleans only: the heap sizes themselves differ by design.
 
-local LIMIT = 64 * 1024   -- KB of growth tolerated (the collector's pace)
+local LIMIT = 16 * 1024   -- KB of growth tolerated (the collector's pace)
 
 local function grows(name, f)
   collectgarbage(); collectgarbage()
@@ -23,7 +23,7 @@ end
 -- Boxed control values (outside the 47-bit inline range).
 grows("boxed asc", function(probe)
   local n = 0
-  for i = 1 << 50, (1 << 50) + 3000000 do
+  for i = 1 << 50, (1 << 50) + 1000000 do
     n = n + 1
     if n % 100000 == 0 then probe() end
   end
@@ -31,7 +31,7 @@ grows("boxed asc", function(probe)
 end)
 grows("boxed desc", function(probe)
   local n = 0
-  for i = math.mininteger + 3000000, math.mininteger, -1 do
+  for i = math.mininteger + 1000000, math.mininteger, -1 do
     n = n + 1
     if n % 100000 == 0 then probe() end
   end
@@ -40,7 +40,7 @@ end)
 -- Inline 47-bit control values: nothing to collect.
 grows("inline", function(probe)
   local n = 0
-  for i = 1 << 40, (1 << 40) + 3000000 do
+  for i = 1 << 40, (1 << 40) + 1000000 do
     n = n + 1
     if n % 100000 == 0 then probe() end
   end
@@ -52,14 +52,14 @@ grows("huge", function(probe)
   for i = 1, math.huge do
     n = n + 1
     if n % 100000 == 0 then probe() end
-    if n >= 3000000 then break end
+    if n >= 1000000 then break end
   end
   probe()
 end)
 -- Many short wide loops: every loop start must be paid for, too.
 grows("starts", function(probe)
   local n = 0
-  for k = 1, 300000 do
+  for k = 1, 100000 do
     for i = (1 << 50) + k, (1 << 50) + k + 1 do n = n + 1 end
     if k % 10000 == 0 then probe() end
   end

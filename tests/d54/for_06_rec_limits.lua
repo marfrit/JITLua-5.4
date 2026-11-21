@@ -11,6 +11,10 @@
 -- Each shape runs 300 times with one kind of value (so it is compiled), then
 -- with the others. Every loop has an iteration guard.
 
+-- A side trace starts after the first taken exit, so the exits of the
+-- compiled loops are recorded as well (PUC has no jit module).
+if jit and jit.opt then jit.opt.start("hotexit=1") end
+
 local function tp(x) return tostring(x) .. ":" .. (math.type(x) or type(x)) end
 
 local function shape(name, f, warm, vals)
@@ -104,4 +108,14 @@ do
     return c
   end
   print("zerotrip", inner(0), inner(-5), inner(3), inner(0))
+end
+
+-- A NaN limit met again and again by compiled loops, so side traces start
+-- from the loop exits: a float loop runs its body once, at FORI and FORL.
+do
+  local r = {}
+  for k = 1, 60 do
+    r[#r + 1] = fdesc(0/0) .. fstep(0/0) .. finit(0/0) .. fdesc(-3.5)
+  end
+  print("nan side", table.concat(r, ","))
 end

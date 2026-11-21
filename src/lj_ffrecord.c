@@ -1736,6 +1736,22 @@ static void LJ_FASTCALL recff_buffer_decode(jit_State *J, RecordFFData *rd)
 
 /* -- Table library fast functions ---------------------------------------- */
 
+/* 5.4 table library: an argument table with __index, __newindex or __len
+** (as selected by mask: 1, 2, 4) takes the metamethod-aware interpreter
+** path. lj_record_mm_lookup emits the guards (no metatable, or this metatable
+** without the metamethod), so a trace recorded for a plain table exits when
+** a proxy reaches the same call site later. */
+static int recff_tab_hasmm(jit_State *J, RecordFFData *rd, int mask)
+{
+  RecordIndex ix;
+  ix.tab = J->base[0];
+  copyTV(J->L, &ix.tabv, &rd->argv[0]);
+  if ((mask & 1) && lj_record_mm_lookup(J, &ix, MM_index)) return 1;
+  if ((mask & 2) && lj_record_mm_lookup(J, &ix, MM_newindex)) return 1;
+  if ((mask & 4) && lj_record_mm_lookup(J, &ix, MM_len)) return 1;
+  return 0;
+}
+
 static void LJ_FASTCALL recff_table_insert(jit_State *J, RecordFFData *rd)
 {
   RecordIndex ix;
@@ -1743,6 +1759,12 @@ static void LJ_FASTCALL recff_table_insert(jit_State *J, RecordFFData *rd)
   ix.val = J->base[1];
   rd->nres = 0;
   if (tref_istab(ix.tab) && ix.val) {
+    if (recff_tab_hasmm(J, rd, 1|2|4)) {
+      /* 5.4: the raw ALEN/idx fast path would bypass __index/__newindex/
+      ** __len; let the interpreter (now metamethod-aware) run instead. */
+      recff_nyiu(J, rd);
+      return;
+    }
     if (!J->base[2]) {  /* Simple push: t[#t+1] = v */
       TRef trlen = emitir(IRTI(IR_ALEN), ix.tab, TREF_NIL);
       GCtab *t = tabV(&rd->argv[0]);
@@ -1762,6 +1784,12 @@ static void LJ_FASTCALL recff_table_concat(jit_State *J, RecordFFData *rd)
 {
   TRef tab = J->base[0];
   if (tref_istab(tab)) {
+    if (recff_tab_hasmm(J, rd, 1|4)) {
+      /* 5.4: lj_buf_puttab reads raw slots and the raw ALEN default end;
+      ** with __index/__len the interpreter (metamethod-aware) must run. */
+      recff_nyiu(J, rd);
+      return;
+    }
     TRef sep = !tref_isnil(J->base[1]) ?
 	       lj_ir_tostr(J, J->base[1]) : lj_ir_knull(J, IRT_STR);
     TRef tri = (J->base[1] && !tref_isnil(J->base[2])) ?

@@ -20,6 +20,7 @@
 #include "lj_err.h"
 #include "lj_buf.h"
 #include "lj_tab.h"
+#include "lj_meta.h"
 #include "lj_ff.h"
 #include "lj_lib.h"
 #include "lj_strfmt.h"
@@ -32,6 +33,54 @@ typedef size_t lj_tab_Unsigned;  /* Unsigned counterpart of lua_Integer. */
 #define LJ_TAB_MAXINT ((lua_Integer)(~(lj_tab_Unsigned)0 >> 1))
 
 #define LJLIB_MODULE_table
+
+/* PUC 5.4.9 ltablib.c table-like rules: the operations an object must
+** define to mimic a table (some functions only need some of them). */
+#define TAB_R	1		/* read */
+#define TAB_W	2		/* write */
+#define TAB_L	4		/* length */
+#define TAB_RW	(TAB_R | TAB_W)		/* read/write */
+
+/*
+** PUC-mirror checktab (5.4.9 ltablib.c): the argument must be a table, or a
+** value whose metatable carries the required metamethods as non-nil raw
+** fields (a field set to false still counts as present, as in PUC).
+** Returns the GCtab when the argument is a plain table with none of the
+** requested metamethods (the raw-access fast path is correct), NULL when the
+** generic lua_geti/lua_seti/luaL_len path must be used (a table with the
+** relevant metamethods or a table-like value). Otherwise raises the standard
+** "table expected, got ..." error.
+*/
+static GCtab *tab_checktab(lua_State *L, int arg, int what)
+{
+  cTValue *o = L->base + (arg - 1);
+  GCtab *t, *mt;
+  if (!tvistab(o)) {
+    int n = 1;  /* Number of elements to pop. */
+    if (lua_getmetatable(L, arg) &&  /* Must have a metatable. */
+	(!(what & TAB_R) ||
+	 (lua_pushlstring(L, "__index", 7),
+	  lua_rawget(L, -++n) != LUA_TNIL)) &&
+	(!(what & TAB_W) ||
+	 (lua_pushlstring(L, "__newindex", 10),
+	  lua_rawget(L, -++n) != LUA_TNIL)) &&
+	(!(what & TAB_L) ||
+	 (lua_pushlstring(L, "__len", 5),
+	  lua_rawget(L, -++n) != LUA_TNIL)))
+      lua_pop(L, n);  /* Pop the metatable and the tested metamethods. */
+    else
+      lj_err_argt(L, arg, LUA_TTABLE);  /* Force an error. */
+    return NULL;  /* Generic path. */
+  }
+  t = tabV(o);
+  mt = tabref(t->metatable);  /* NULL when the table has no metatable. */
+  if (mt != NULL &&
+      (((what & TAB_R) && lj_meta_fast(L, mt, MM_index)) ||
+       ((what & TAB_W) && lj_meta_fast(L, mt, MM_newindex)) ||
+       ((what & TAB_L) && lj_meta_fast(L, mt, MM_len))))
+    return NULL;  /* Generic path: metamethod-aware access. */
+  return t;  /* Fast path: raw access is correct. */
+}
 
 /* The Lua 5.1 iteration and size helpers: pairs/#/table.unpack cover them in
 ** 5.4, so they are not part of the default build. Only with
@@ -92,22 +141,30 @@ LJLIB_CF(table_maxn)
 
 LJLIB_CF(table_insert)		LJLIB_REC(.)
 {
-  GCtab *t = lj_lib_checktab(L, 1);
-  int32_t n, i;
-  /* 5.4: #t goes through luaL_len, so a __len result is type-checked with
-  ** PUC's "object length is not an integer" error instead of reading the
-  ** raw array length. */
-  lua_Integer len = luaL_len(L, 1);
-  i = len < 0x7fffffff ? (int32_t)len + 1 : 0x7fffffff;
-  int nargs = (int)((char *)L->top - (char *)L->base);
-  if (nargs != 2*sizeof(TValue)) {
-    if (nargs != 3*sizeof(TValue))
-      lj_err_caller(L, LJ_ERR_TABINS);
-    n = lj_lib_checkint(L, 2);
-    if ((uint32_t)(n - 1) >= (uint32_t)i)  /* 5.4: 1 <= pos <= #t+1 */
+  GCtab *t = tab_checktab(L, 1, TAB_RW | TAB_L);
+  lua_Integer pos, e;
+  int nargs = (int)(L->top - L->base);
+  if (t)
+    e = (lua_Integer)lj_tab_len(t) + 1;  /* Plain table: no __len, no wrap. */
+  else
+    e = luaL_intop(+, luaL_len(L, 1), 1);  /* PUC: __len, wraps on overflow. */
+  if (nargs == 2) {
+    pos = e;  /* Insert new element at the end. */
+  } else if (nargs == 3) {
+    /* PUC: 2nd argument is the position; a non-integral float is an error.
+    ** Check whether 'pos' is in [1, e]. */
+    pos = luaL_checkinteger(L, 2);
+    if (!((lj_tab_Unsigned)pos - 1u < (lj_tab_Unsigned)e))
       lj_err_arg(L, 2, LJ_ERR_TABINSPOS);
+  } else {
+    lj_err_caller(L, LJ_ERR_TABINS);
+  }
+  if (t) {
+    int32_t i, n = (int32_t)pos, el = (int32_t)e;
+    /* The bound check passed: for a plain table e <= #t+1 < 2^24 and
+    ** 1 <= pos <= e, so both fit in int32. */
     /* NOBARRIER: This just moves existing elements around. */
-    for (; i > n; i--) {
+    for (i = el; i > n; i--) {
       /* The set may invalidate the get pointer, so need to do it first! */
       TValue *dst = lj_tab_setint(L, t, i);
       cTValue *src = lj_tab_getint(t, i-1);
@@ -117,19 +174,46 @@ LJLIB_CF(table_insert)		LJLIB_REC(.)
 	setnilV(dst);
       }
     }
-    i = n;
+    {
+      TValue *dst = lj_tab_setint(L, t, n);
+      copyTV(L, dst, L->top-1);  /* Set new value. */
+      lj_gc_barriert(L, t, dst);
+    }
+    return 0;
   }
+  /* Generic path (PUC tinsert): shift and store through the API so
+  ** __index/__newindex are honoured. */
   {
-    TValue *dst = lj_tab_setint(L, t, i);
-    copyTV(L, dst, L->top-1);  /* Set new value. */
-    lj_gc_barriert(L, t, dst);
+    lua_Integer i;
+    for (i = e; i > pos; i--) {
+      lua_geti(L, 1, i - 1);
+      lua_seti(L, 1, i);  /* t[i] = t[i - 1] */
+    }
+    lua_seti(L, 1, pos);  /* t[pos] = v */
   }
   return 0;
 }
 
 LJLIB_CF(table_remove)
 {
-  GCtab *t = lj_lib_checktab(L, 1);
+  GCtab *t = tab_checktab(L, 1, TAB_RW | TAB_L);
+  if (!t) {
+    /* Generic path (PUC tremove): element access through the API so
+    ** __index/__newindex are honoured; #t via __len. */
+    lua_Integer size = luaL_len(L, 1);
+    lua_Integer pos = (L->top > L->base + 1) ? luaL_checkinteger(L, 2) : size;
+    if (pos != size &&
+	((lj_tab_Unsigned)pos - 1u > (lj_tab_Unsigned)size))
+      lj_err_arg(L, 2, LJ_ERR_TABINSPOS);
+    lua_geti(L, 1, pos);  /* result = t[pos] */
+    for (; pos < size; pos++) {
+      lua_geti(L, 1, pos + 1);
+      lua_seti(L, 1, pos);  /* t[pos] = t[pos + 1] */
+    }
+    lua_pushnil(L);
+    lua_seti(L, 1, pos);  /* remove entry t[pos] */
+    return 1;
+  }
   lua_Integer len = luaL_len(L, 1);
   lua_Integer pos = (L->top > L->base + 1) ? luaL_checkinteger(L, 2) : len;
   /* 5.4 tremove: a given pos is validated as (unsigned)pos - 1 <= (unsigned)
@@ -167,26 +251,6 @@ LJLIB_CF(table_remove)
   }
 }
 
-LJLIB_LUA(table_move) /*
-  function(a1, f, e, t, a2)
-    CHECK_tab(a1)
-    CHECK_int(f)
-    CHECK_int(e)
-    CHECK_int(t)
-    if a2 == nil then a2 = a1 end
-    CHECK_tab(a2)
-    if e >= f then
-      local d = t - f
-      if t > e or t <= f or a2 ~= a1 then
-	for i=f,e do a2[i+d] = a1[i] end
-      else
-	for i=e,f,-1 do a2[i+d] = a1[i] end
-      end
-    end
-    return a2
-  end
-*/
-
 /* A 5.4 integer argument (PUC luaL_optinteger): exact, so a bound outside
 ** int32 stays what it is; a non-integral float is an error like in PUC. */
 static int64_t tab_concat_int64(lua_State *L, int narg, int64_t def)
@@ -203,20 +267,47 @@ static int64_t tab_concat_int64(lua_State *L, int narg, int64_t def)
 
 LJLIB_CF(table_concat)		LJLIB_REC(.)
 {
-  GCtab *t = lj_lib_checktab(L, 1);
+  GCtab *t = tab_checktab(L, 1, TAB_R | TAB_L);
   GCstr *sep = lj_lib_optstr(L, 2);
   int64_t i = tab_concat_int64(L, 3, 1);
   int64_t e = (L->base+3 < L->top && !tvisnil(L->base+3)) ?
-	      tab_concat_int64(L, 4, 0) : (int64_t)lj_tab_len(t);
+	      tab_concat_int64(L, 4, 0) :
+	      (int64_t)(t ? lj_tab_len(t) : luaL_len(L, 1));
   SBuf *sb = lj_buf_tmp_(L);
   SBuf *sbx;
   int64_t fail = 0;
-  if (i >= -0x7fffffff-1 && i <= 0x7fffffff &&
+  if (t && i >= -0x7fffffff-1 && i <= 0x7fffffff &&
       e >= -0x7fffffff-1 && e <= 0x7fffffff) {
     sbx = lj_buf_puttab(sb, t, sep, (int32_t)i, (int32_t)e);
     if (LJ_UNLIKELY(!sbx)) fail = (int32_t)(intptr_t)sb->w;
-  } else {
+  } else if (t) {
     sbx = lj_buf_puttab64(L, sb, t, sep, i, e, &fail);
+  } else {
+    /* Generic path (PUC tconcat): element reads through lua_geti so __index
+    ** is honoured; the default end went through __len above. */
+    MSize seplen = sep ? sep->len : 0;
+    if (i <= e) {
+      int64_t j;
+      for (j = i; ; j++) {
+	char *w;
+	cTValue *o;
+	lua_geti(L, 1, j);
+	o = L->top - 1;  /* Stays on the stack (GC anchor) until it is copied. */
+	if (LJ_UNLIKELY(!lj_buf_puttab_elem(sb, o, seplen, &w))) {
+	  GCstr *sidx = lj_strfmt_i64(L, j);
+	  lj_err_callerv(L, LJ_ERR_TABCAT,
+			 lj_obj_itypename[itypemap(o)], strdata(sidx));
+	}
+	L->top--;
+	if (j == e) {
+	  sb->w = w;
+	  break;
+	}
+	if (seplen) w = lj_buf_wmem(w, strdata(sep), seplen);
+	sb->w = w;
+      }
+    }
+    sbx = sb;
   }
   if (LJ_UNLIKELY(!sbx)) {  /* Error: bad element type at index 'fail'. */
     TValue k;
@@ -234,10 +325,23 @@ LJLIB_CF(table_concat)		LJLIB_REC(.)
 
 /* ------------------------------------------------------------------------ */
 
-static void set2(lua_State *L, int i, int j)
+/* Sort element access: 'mm' selects the metamethod-aware API (proxy and
+** table-like tables honour __index/__newindex); for plain tables the raw
+** access is equivalent and kept as the fast path. */
+static int sort_geti(lua_State *L, int mm, int i)
 {
-  lua_rawseti(L, 1, i);
-  lua_rawseti(L, 1, j);
+  return mm ? lua_geti(L, 1, i) : lua_rawgeti(L, 1, i);
+}
+
+static void sort_seti(lua_State *L, int mm, int i)
+{
+  if (mm) lua_seti(L, 1, i); else lua_rawseti(L, 1, i);
+}
+
+static void set2(lua_State *L, int mm, int i, int j)
+{
+  sort_seti(L, mm, i);
+  sort_seti(L, mm, j);
 }
 
 static int sort_comp(lua_State *L, int a, int b)
@@ -256,46 +360,46 @@ static int sort_comp(lua_State *L, int a, int b)
   }
 }
 
-static void auxsort(lua_State *L, int l, int u)
+static void auxsort(lua_State *L, int l, int u, int mm)
 {
   while (l < u) {  /* for tail recursion */
     int i, j;
     /* sort elements a[l], a[(l+u)/2] and a[u] */
-    lua_rawgeti(L, 1, l);
-    lua_rawgeti(L, 1, u);
+    sort_geti(L, mm, l);
+    sort_geti(L, mm, u);
     if (sort_comp(L, -1, -2))  /* a[u] < a[l]? */
-      set2(L, l, u);  /* swap a[l] - a[u] */
+      set2(L, mm, l, u);  /* swap a[l] - a[u] */
     else
       lua_pop(L, 2);
     if (u-l == 1) break;  /* only 2 elements */
     i = (l+u)/2;
-    lua_rawgeti(L, 1, i);
-    lua_rawgeti(L, 1, l);
+    sort_geti(L, mm, i);
+    sort_geti(L, mm, l);
     if (sort_comp(L, -2, -1)) {  /* a[i]<a[l]? */
-      set2(L, i, l);
+      set2(L, mm, i, l);
     } else {
       lua_pop(L, 1);  /* remove a[l] */
-      lua_rawgeti(L, 1, u);
+      sort_geti(L, mm, u);
       if (sort_comp(L, -1, -2))  /* a[u]<a[i]? */
-	set2(L, i, u);
+	set2(L, mm, i, u);
       else
 	lua_pop(L, 2);
     }
     if (u-l == 2) break;  /* only 3 elements */
-    lua_rawgeti(L, 1, i);  /* Pivot */
+    sort_geti(L, mm, i);  /* Pivot */
     lua_pushvalue(L, -1);
-    lua_rawgeti(L, 1, u-1);
-    set2(L, i, u-1);
+    sort_geti(L, mm, u-1);
+    set2(L, mm, i, u-1);
     /* a[l] <= P == a[u-1] <= a[u], only need to sort from l+1 to u-2 */
     i = l; j = u-1;
     for (;;) {  /* invariant: a[l..i] <= P <= a[j..u] */
       /* repeat ++i until a[i] >= P */
-      while (lua_rawgeti(L, 1, ++i), sort_comp(L, -1, -2)) {
+      while (sort_geti(L, mm, ++i), sort_comp(L, -1, -2)) {
 	if (i>=u) lj_err_caller(L, LJ_ERR_TABSORT);
 	lua_pop(L, 1);  /* remove a[i] */
       }
       /* repeat --j until a[j] <= P */
-      while (lua_rawgeti(L, 1, --j), sort_comp(L, -3, -1)) {
+      while (sort_geti(L, mm, --j), sort_comp(L, -3, -1)) {
 	if (j<=l) lj_err_caller(L, LJ_ERR_TABSORT);
 	lua_pop(L, 1);  /* remove a[j] */
       }
@@ -303,11 +407,11 @@ static void auxsort(lua_State *L, int l, int u)
 	lua_pop(L, 3);  /* pop pivot, a[i], a[j] */
 	break;
       }
-      set2(L, i, j);
+      set2(L, mm, i, j);
     }
-    lua_rawgeti(L, 1, u-1);
-    lua_rawgeti(L, 1, i);
-    set2(L, u-1, i);  /* swap pivot (a[u-1]) with a[i] */
+    sort_geti(L, mm, u-1);
+    sort_geti(L, mm, i);
+    set2(L, mm, u-1, i);  /* swap pivot (a[u-1]) with a[i] */
     /* a[l..i-1] <= a[i] == P <= a[i+1..u] */
     /* adjust so that smaller half is in [j..i] and larger one in [l..u] */
     if (i-l < u-i) {
@@ -315,13 +419,13 @@ static void auxsort(lua_State *L, int l, int u)
     } else {
       j=i+1; i=u; u=j-2;
     }
-    auxsort(L, j, i);  /* call recursively the smaller one */
+    auxsort(L, j, i, mm);  /* call recursively the smaller one */
   }  /* repeat the routine for the larger one */
 }
 
 LJLIB_CF(table_sort)
 {
-  lj_lib_checktab(L, 1);
+  GCtab *t = tab_checktab(L, 1, TAB_RW | TAB_L);
   {
     /* 5.4: length goes through luaL_len (__len honored); a huge result is
     ** PUC's "array too big", and n <= 1 sorts nothing. */
@@ -333,7 +437,7 @@ LJLIB_CF(table_sort)
       lua_settop(L, 2);
       if (!tvisnil(L->base+1))
 	lj_lib_checkfunc(L, 2);
-      auxsort(L, 1, n);
+      auxsort(L, 1, n, t == NULL);  /* mm: metamethod-aware access. */
     }
   }
   return 0;
@@ -366,8 +470,10 @@ LJLIB_CF(table_move)
   lua_Integer e = luaL_checkinteger(L, 3);
   lua_Integer t = luaL_checkinteger(L, 4);
   int tt = !lua_isnoneornil(L, 5) ? 5 : 1;  /* destination table */
-  lj_lib_checktab(L, 1);
-  lj_lib_checktab(L, tt);
+  /* PUC checktab: source needs __index (TAB_R), destination __newindex
+  ** (TAB_W); no length involved. Table-like values are accepted. */
+  tab_checktab(L, 1, TAB_R);
+  tab_checktab(L, tt, TAB_W);
   if (e >= f) {  /* otherwise, nothing to move */
     lua_Integer n, i;
     luaL_argcheck(L, f > 0 || e < LJ_TAB_MAXINT + f, 3,

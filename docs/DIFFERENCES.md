@@ -108,12 +108,6 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
 - `IMPL-DEFINED` Sparse-table border for runtime-built tables may differ: 5.4
   allows any border; LuaJIT's array-growth policy differs from PUC's alimit hint
   (`tbl_03_border_divergence`).
-- `PENDING` A return hook without a call hook (`debug.sethook(f, "r")`) gets
-  no return event for some of the fast functions implemented in assembler
-  (measured: `tostring`, `string.sub`; `type` and `math.abs` do report):
-  their return event is fired from a note the call event leaves, and no call
-  event is dispatched without the call mask. With `"cr"` the events equal
-  PUC's (`tests/d54/debug_07_tostring_hook.lua`).
 - `PENDING` Return hook of a function that ends in a tail call to a C
   function: PUC calls the return hook for the Lua caller after the C function
   returns; here the caller returns through the continuation without a hook

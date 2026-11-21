@@ -423,6 +423,15 @@ target x86_64 (GC64) and arm64.
   pseudo-frame of a yield from a hook. A C hook that yields while it runs for
   a C function now gets the C-call boundary error instead of a pseudo-frame
   that could not be resumed (`tests/d54/coro_05_yield_return_hook.lua`).
+- Return events of assembler fast functions under the return mask alone
+  (`debug.sethook(f, "r")`). Such a function's results cover its function
+  slot by the time it returns, so `lj_dispatch_ffret` fires the event from a
+  note the call dispatch leaves (`L->hookff`); that note was only written
+  with the call mask set, and `tostring`, `string.sub`, `math.max`, `next`,
+  `pairs`/`ipairs` and about twenty more returned without an event. The call
+  dispatch now runs while either mask is set and always writes the note; the
+  call event stays behind the call mask
+  (`tests/d54/debug_08_rethook_ff.lua`).
 - `__tostring` must return a string (5.4 `luaL_tolstring`). The
   conversion paths `tostring()`, `print()`, `string.format("%s")`, the C API
   `luaL_tolstring` and the standalone message handler now enforce it: a string

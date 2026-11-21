@@ -1,24 +1,95 @@
 # JITLua-5.4 — master execution plan
 
-Companion to `MISSION.md`. Tracks every phase as concrete tasks with
-dependencies, verification gates and status. Read `docs/phase0-status.md` for
-environment/repo facts. **Rule: no task is done until the harness is green and
-the change is committed with a phase-labeled message.**
+Companion to `MISSION.md`. Tracks every phase with its gate and status.
+Updated 2026-11-21 for the 1.0.0 release; the measured counts are in
+[README.md](../README.md), the remaining differences in
+[DIFFERENCES.md](DIFFERENCES.md), the fixed ones in
+[CHANGELOG-VM.md](CHANGELOG-VM.md). The session log of the early phases is
+[phase0-status.md](phase0-status.md).
 
-Legend: `[x]` done · `[~]` in progress · `[ ]` open · `(dep: …)` blocking dependency.
+Legend: `[x]` done · `[~]` done with a stated exception · `[ ]` open.
 
-## Status snapshot (see docs/phase0-status.md for the session log)
-Verification: d54 **PASS 71 / XFAIL 19 / FAIL 0** (30 files); full corpus
-**PASS 115 / XFAIL 36 / SKIP 12 / TIMEOUT 2 / FAIL 0**; C API harness **34/34**;
-mode-B differential fuzz green at opt levels 0–3 with GC pressure.
-Done: Phase 0 (harness/fuzzers/CI), and large parts of Phase 1 (lexer/scanner
-int-float split, parser float constants + `<const>` + goto diagnostics, table
-borders, `__len`/`__pairs`/`__name`, error messages, C API) and Phase 5 (utf8,
-string.pack, `%q`, gmatch, os/io, debug upvalues, math.type/tointeger/ult).
-**Critical blocker: ADR-001 (int64 value model).** Everything numeric beyond
-int32+double — `//`, int64 bitwise, math.maxinteger, exact large-int
-arithmetic/compare, 5.4 dump format — depends on it. Also open: `<close>` /
-coroutine.close, generational GC + table `__gc`, `_ENV`, and UBSan cleanliness.
+## Status snapshot, 2026-11-21
+
+Release: **1.0.0** (tarball `JITLua-5.4-1.0.0.tar.gz`; the name `5.4.0` of
+MISSION section 9 was replaced, see the decision in MISSION.md).
+Platforms: Linux x86_64 (GC64) and Linux arm64.
+
+Verification, identical on both architectures (README.md has the full list):
+
+- `tests/d54` differential gates against PUC Lua 5.4.9: A+B 342 PASS / 0 FAIL
+  / 4 XFAIL; JIT optimization levels 0–3: 732; dump/reload round-trip (R):
+  175; assertion build: 183; GC stress: 187; ASan/UBSan A+B+R: 517 PASS /
+  0 FAIL / 4 XFAIL; C API checks 258 + 92 + 18 and the `udfinal` probe.
+- Full corpus (PUC 5.4.9 test suite plus `tests/d54`) with `--strict`, the
+  public CI command: 592 PASS / 0 FAIL / 16 XFAIL / 3 SKIP / 0 TIMEOUT
+  (217 tests, 608 jobs). Every XFAIL is a row in
+  `tests/known-different.tsv` and in DIFFERENCES.md.
+- `tests/known-bad.tsv`: no open defect.
+- Classic benchmarks: no workload more than 10 % slower than stock LuaJIT 2.1
+  (`docs/perf-report-1.0.0.md`).
+
+## Deviation from MISSION, 2026-11-21
+
+MISSION phase 6 asks for 30 consecutive green days of coverage-guided fuzzing
+before release. For 1.0.0 fuzzing is **not a release gate**. The fuzzers
+(`tests/fuzz`, `tests/soak`) run in the local CI and found no open failure,
+but the 30-day campaign has not been run. It continues after the release and
+feeds 1.0.x. The decision and its reasoning are recorded in MISSION.md.
+
+## Phases
+
+| Phase | Gate (MISSION) | State |
+|---|---|---|
+| 0 — verification harness | harness runs, ASan clean | `[x]` harness (modes A, B, R), fuzzers, sanitizer builds, CI scripts |
+| 1 — lexer, parser, bytecode, interpreter | mode A green | `[x]` int64 value model (ADR-001, ADR-001b), 5.4 grammar, numeric semantics, `<close>`, C API surface |
+| 2 — IR int domain | mode B green for numeric, bits, metamethods | `[x]` |
+| 3 — optimizer and backends | harness green at opt levels 0–3, all backends | `[~]` x86_64 and arm64 only; the 10M-program fuzz count of the gate is not part of 1.0.0 |
+| 4 — GC and strings | GC stress green, ASan clean | `[~]` weak tables, `__gc`, 5.4 `collectgarbage` interface; one incremental collector, no real generational collector (`docs/gc-newgen-plan.md` Stage 3) |
+| 5 — standard libraries | PUC suite green in mode A, mode B green | `[x]` all PUC suite files run except `all`, `api`, `code`; FFI re-validated |
+| 6 — hardening and release | zero open failures, 30-day fuzz, perf report | `[~]` perf report and docs done; fuzz campaign moves to 1.0.x |
+
+Release documents: `docs/LUA54.md` (overview), `docs/DIFFERENCES.md`,
+`docs/CHANGELOG-VM.md`, `docs/perf-report-1.0.0.md`,
+`docs/RELEASE-NOTES-1.0.0.md`.
+
+## Remaining for 1.0.x
+
+1. **Fuzzing campaign.** Coverage-guided fuzzing of the interpreter and the
+   JIT, differential in both directions, continuing after the release;
+   failing seeds go into the corpus (MISSION section 7.3). Defects found are
+   fixed in 1.0.x releases.
+2. **Dead-slot liveness from snapshots.** A compiled loop keeps dead stack
+   slots alive until the trace exits (the `gc.lua` GC1/GC2 loops at
+   `-O0`..`-O2`). A bytecode scan per GC step was tried and removed because it
+   mistook an inner `break` for the loop's back edge. Not tried yet: a bound
+   from the snapshot use-def analysis (`lj_snap.c` `snap_usedef`), which the
+   JIT already uses for its exits (DIFFERENCES.md, the row on eliminated
+   allocations).
+3. **Huge numeric-for limits.** `for i = 1, math.huge` and `for i = 1, 1e10`
+   are wide loops, run by the interpreter with one C call per iteration and
+   never compiled. The design that keeps them on the int32 path until the
+   index leaves int32 is written down and not implemented
+   (`docs/notes/for-loop-54.md`, "Next step: huge limits on the int32 path").
+4. **Latent 16-bit shift in `src/jit/bcsave.lua`.** `f16(x)` is
+   `bswap(x) >> 16` (two copies, lines 254 and 386 at this commit), a 16-bit
+   shift of a byte-swapped value that was written for LuaJIT's 32-bit bit
+   operations. It is noted at release review as latent: no failing test
+   exists. Before the file is touched, write a test that saves and reloads
+   an object through `jit.bcsave` for a target of the other endianness, and
+   decide from that result.
+5. **Remaining difference rows.** Each `IMPL-DEFINED`/`FORK` row of
+   DIFFERENCES.md that rests on "cannot be matched" is subject to the
+   AGENTS.md rule that a negative never tried is not verified; rows get
+   re-examined as time allows. A real generational collector is Stage 3 of
+   `docs/gc-newgen-plan.md`.
+6. **Other backends.** x86 (GC32 VM) lacks `BC_IDIV`, `BC_KI64`, `BC_TBC` and
+   `BC_TBCCLO`; the interpreter port is tracked in
+   `docs/notes/nogc64-2026-11-19.md`. arm, ppc and mips are not ported.
+7. **Re-measure the 10 ms benchmarks.** x86_64 `fasta` read 0.84 against stock
+   in the 2026-11-21 run (`docs/perf-report-1.0.0.md`); a ten-millisecond
+   workload measured three times while other jobs ran is within noise.
+   Repeat it with the interleaved runner (median of 9).
 
 ---
 
@@ -73,115 +144,20 @@ harness is run on arm64 (native) and x64 (CI).
 
 ---
 
-## Phase 0 — verification harness (M0)  `[x]`
-See `docs/phase0-status.md`. Baseline: PASS 82, XFAIL 39, SKIP 12, TIMEOUT 2,
-FAIL 0, BAD 0; ASan+UBSan build clean on `tests/d54`.
-Remaining polish: `[ ]` per-test timeout overrides for `heavy.lua`/`calls.lua`;
-`[ ]` full-corpus ASan run; `[ ]` persistence of decisions in the project's shared memory store.
-
-## Phase 1 — lexer, parser, bytecode, interpreter (M1)
-Gate: **mode A fully green** (interpreter ≡ PUC 5.4.7), dump round-trip normalized.
-
-* `[ ]` **P1.1 value model** — ADR-001 steps 1–4. (dep: none; blocks P1.4, P2, P3)
-* `[ ]` **P1.2 lexer** (`lj_lex.c`, `lj_strscan.c`): 5.4 numeral grammar — decimal
-  int vs float, hex ints, hex floats, overflow→float, `1.`/`.5`, malformed-number
-  messages. No underscores, no `0b` (verified). Tests: `lex_01_literals.lua`,
-  upstream `literals.lua`.
-* `[ ]` **P1.3 parser/bytecode** (`lj_parse.c`, `lj_bc.h`, `lj_bcread.c`,
-  `lj_bcwrite.c`): tokens `// & | ~ << >>`, 5.4 precedence table, `<close>`/
-  `<const>` attributives, goto/label 5.4 scoping, `OP_IDIV/OP_BAND/…`, int
-  constants via EXTRAARG, 5.4 dump header + strip. Tests: `goto_01_labels.lua`,
-  `numeric_03_idiv.lua`, `bits_01_ops.lua`, upstream `constructs.lua`.
-  **NOTE:** bitwise BC ops (BNOT/BAND/BOR/BXOR/BSHL/BSHR/BSAR), IR ops, recorder
-  and all backends ALREADY EXIST in 2.1 (int32 semantics via lj_num2bit) — the
-  task is to change semantics to int64/5.4, not to add infrastructure. `//`
-  (IDIV) is the only genuinely new arithmetic op.
-* `[ ]` **P1.3b table borders** — replicate PUC `luaH_getn` in `lj_tab_len`
-  (5.4 `#` returns 3 for `{1,nil,3}`, 2.1 returns 1). Fixes `table.concat`,
-  `table.unpack`, `#{...}` diffs. Also fix the dump/reload template-table
-  inconsistency found by mode R (`tests/d54/dump_02_border.lua`): the same
-  source gives border 1 direct and 3 after `string.dump`→`load`.
-* `[ ]` **P1.8 error messages** — LuaJIT reports `bad argument #1 to '?'` when a
-  library function is called without a name context (e.g. `pcall(table.move,…)`);
-  PUC resolves `table.move` by searching globals/upvalues. Port PUC's
-  `getobjname`/`funcnamefromcode` name search into `lj_debug.c`/`lj_err.c`.
-* `[ ]` **P1.4 interpreter semantics** (`lj_vm*.dasc`, `lj_meta.c`, `lj_vmmath.c`):
-  int64 wrap arithmetic, `//` floor, `%` sign rules, `^`→float, bitwise with
-  exactly-representable floats, mod-64/negative shifts, exact int↔float compare,
-  10-way metamethod operand matrix, `__len` any value, `__pairs` ignored,
-  `error(level)`/error objects, vararg, concat. Tests: all `numeric_*`, `bits_*`,
-  `meta_*`, `err_01`, upstream `math.lua`, `bitwise.lua`, `vararg.lua`.
-* `[ ]` **P1.5 to-be-closed** (`<close>`, `__close`, `coroutine.close`): VM close
-  handling, coroutine close, error-path ordering. Tests: `gc_01_tbc_gc.lua`,
-  `coro_01_close.lua`.
-* `[~]` **P1.6 C API surface** (`lj_api.c`, `lauxlib.c`, `luaconf.h`, `lua.h`):
-  DONE: `lua_absindex`, `lua_isinteger`, `lua_geti`, `lua_seti`, `lua_len`,
-  `lua_compare`, `lua_stringtonumber`, `luaL_len`, `luaL_getsubtable`
-  (29-check C harness `tests/capi/`, all green).
-  TODO: `lua_Integer`→int64 exactness (dep: P1.1), `lua_pushvfstring` audit,
-  `lua_gc` 5.4 actions, version strings, `lua_arith`, `lua_getiuservalue`,
-  `lua_setiuservalue`, `lua_newuserdatauv`, `lua_warning`.
-* `[ ]` **P1.7 number formatting/parsing** (`lj_strfmt*.c`, `lj_strscan.c`):
-  `%.14g` rendering, `%d` integer-representation rule, `%a`, `%q` for numbers,
-  `tonumber` bases/hex/whitespace. Tests: `fmt_01_format.lua`, `lex_01_literals.lua`.
-
-## Phase 2 — IR int domain (M2)
-Gate: mode B green for `numeric*`, `bits*`, `metamethod*`; no interpreter changes.
-* `[ ]` P2.1 `IRT_I64` type + `IR_*` int ops (`lj_ir.h`, `lj_ir.c`). (dep: P1.1)
-* `[ ]` P2.2 int↔float `IR_CONV` with 5.4 rules; literal int64 IR; exact folding.
-* `[ ]` P2.3 domain propagation: prove integer-ness only where the interpreter
-  guarantees it; explicit coercions where bytecode forces them.
-* `[ ]` P2.4 metamethod guard model: snapshot predicates for "operand is integer",
-  10-way dispatch matrix reproduced exactly (`lj_record.c`, `lj_snap.c`).
-
-## Phase 3 — optimizer + backends (M3)
-Gate: harness green at opt levels 0–3, ≥10M fuzz programs, all backends.
-* `[ ]` P3.1 5.4-exact folds, overflow-aware (`lj_opt_fold.c`, `lj_opt_*.c`).
-* `[ ]` P3.2 register allocation for int64 in the 64-bit class (`lj_asm.c`,
-  `lj_regalloc.c`, `lj_snap.c`).
-* `[ ]` P3.3 backends: x64 → x86 → arm64/arm → ppc/mips. `idiv` floor correction,
-  int mod sign correction, mod-64 shifts, logical `>>`, wrap codegen.
-* `[ ]` P3.4 deopt correctness: int/float tags restored exactly (deopt fuzz).
-
-## Phase 4 — GC and strings (M4)
-Gate: GC-fuzz mode green, ASan/LSan clean.
-* `[ ]` P4.1 generational GC 5.4 (minor/major, `collectgarbage` args, step counts).
-* `[ ]` P4.2 weak tables + `__gc` resurrection/finalizer rules, cycles.
-* `[ ]` P4.3 string interning/buffer tricks audited vs 5.4 GC timing; `lj_strfmt`
-  float formatting per 5.4.
-* `[ ]` P4.4 `lua_gc` actions, GCpause defaults, LSan leak checks.
-
-## Phase 5 — standard libraries (M5)
-Gate: PUC 5.4 suite green in mode A; mode B green; per-library sign-off.
-Independent of the numeric core (can proceed in parallel):
-* `[ ]` P5.1 `utf8` (new `lj_lib_utf8.c` or `lib_utf8.c`). Tests: `utf8_01_lib.lua`.
-* `[x]` P5.2 `string.pack/unpack/packsize` — implemented in `lib_string.c`
-  (adapted from 5.4.7 reference); `str_02_pack.lua` matches PUC except the
-  P1.8 function-name issue.
-* `[~]` P5.3 `table.move/pack/unpack(i,j)/concat` 5.4 — `table.move` and
-  `table.unpack` implemented with metamethod-aware `lua_geti/lua_seti`;
-  `table.pack` ungated from LJ_52. Remaining: `#` border algorithm (P1.3b).
-* `[ ]` P5.4 `string` lib 5.4 (`rep` sep, `format`, patterns). Tests: `dump_str_01.lua`, `pm.lua`.
-* `[ ]` P5.5 `math` 5.4 (`type/tointeger/ult/maxinteger/mininteger`, random). (dep: P1.1)
-* `[ ]` P5.6 `os`/`io` 5.4. Tests: `math_os_01.lua`, `files.lua`.
-* `[ ]` P5.7 `coroutine` 5.4 (`close`, error messages). (dep: P1.5)
-* `[ ]` P5.8 `debug` 5.4 (`upvalueid`, `info` fields, hooks). Tests: `db.lua`, `closure.lua`.
-* `[ ]` P5.9 `package`/`require` 5.4. Tests: `attrib.lua`.
-* `[ ]` P5.10 FFI re-validation against the new value type (every phase).
-
-## Phase 6 — hardening + release (M6)
-* `[ ]` P6.1 30-day coverage-guided fuzzing (interpreter + JIT), differential both ways.
-* `[ ]` P6.2 perf sanity (JIT ≫ interpreter), int-path report.
-* `[ ]` P6.3 docs: what's 5.4 vs LuaJIT-specific; MANIFEST-level.
-* `[ ]` P6.4 tarball + release notes.
-
 ---
+
+## Phase record (as planned in 2026-11)
+
+The task lists of phases 0–6 that stood here are complete as listed in the
+table above; their per-task history is in `docs/phase0-status.md` and in the
+commit log (messages `Phase N (Mx): <task>`). The text of MISSION section 6 is
+unchanged.
 
 ## Working agreements
 * Tests before code (MISSION §7.2); every §4 box maps to a test in `docs/54port.md`.
 * Keep the tree buildable and the harness green at every commit; use
   `tests/known-bad.tsv` to record expected failures, never to hide regressions.
 * Long runs: background + poll, or `timeout N`. Never two harness runs at once.
-* Commit messages: `Phase N (Mx): <task> — <what/why>`.
-* Deviations from MISSION are recorded in `docs/phase0-status.md` (errata) and
-  here (ADRs), never silently.
+* Commit messages: subject = content.
+* Deviations from MISSION are recorded in `MISSION.md` (dated decisions), in
+  `docs/phase0-status.md` (errata) and here (ADRs), never silently.

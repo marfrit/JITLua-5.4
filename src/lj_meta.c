@@ -1329,6 +1329,11 @@ TValue * LJ_FASTCALL lj_meta_tbcerr(lua_State *L)
       copyTV(L, pbase, err);
       L->top = pbase + 1;
       L->base = pbase;
+      /* The chain is done: bring a stack that a stack overflow enlarged back
+      ** to its normal limit, now that the top is down at the pcall (the
+      ** unwinding left it above the highest pending slot, where the relimit
+      ** of err_unwind could not shrink it). The VM reloads BASE. */
+      lj_state_relimitstack(L);
       return NULL;
     }
     L->tbcn--;

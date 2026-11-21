@@ -718,6 +718,11 @@ target x86_64 (GC64) and arm64.
   which then took a function from, and popped it off, the stack of the
   thread being inspected; a '>' elsewhere is an invalid option of
   `lua_getinfo` (`tests/d54/debug_13_getinfo_gt.lua`).
+- `debug.setcstacklimit` exists, as in PUC 5.4.9 (ldblib.c
+  `db_setcstacklimit`): it checks its argument with `luaL_checkinteger` and
+  returns what `lua_setcstacklimit` returns, `LUAI_MAXCCALLS` (200), without
+  changing a limit (lstate.c); the C function was present, the library entry
+  was not (`tests/d54/dbg_setcstacklimit.lua`).
 
 ## Known JIT/performance rows (not semantic divergences)
 

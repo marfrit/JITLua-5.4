@@ -273,41 +273,45 @@ LJLIB_CF(table_concat)		LJLIB_REC(.)
   int64_t e = (L->base+3 < L->top && !tvisnil(L->base+3)) ?
 	      tab_concat_int64(L, 4, 0) :
 	      (int64_t)(t ? lj_tab_len(t) : luaL_len(L, 1));
-  SBuf *sb = lj_buf_tmp_(L);
+  SBuf *sb;
   SBuf *sbx;
   int64_t fail = 0;
-  if (t && i >= -0x7fffffff-1 && i <= 0x7fffffff &&
-      e >= -0x7fffffff-1 && e <= 0x7fffffff) {
-    sbx = lj_buf_puttab(sb, t, sep, (int32_t)i, (int32_t)e);
-    if (LJ_UNLIKELY(!sbx)) fail = (int32_t)(intptr_t)sb->w;
-  } else if (t) {
-    sbx = lj_buf_puttab64(L, sb, t, sep, i, e, &fail);
-  } else {
+  if (!t) {
     /* Generic path (PUC tconcat): element reads through lua_geti so __index
-    ** is honoured; the default end went through __len above. */
+    ** is honoured. The result is built in a luaL_Buffer of this call, as in
+    ** PUC: an __index may run any code, including code that uses or frees
+    ** the global temp buffer (string.format, '..', a nested table.concat, a
+    ** collection), so nothing may stay in that buffer across lua_geti. */
+    luaL_Buffer b;
     MSize seplen = sep ? sep->len : 0;
+    lua_settop(L, 2);  /* The separator stays anchored in slot 2. */
+    luaL_buffinit(L, &b);
     if (i <= e) {
       int64_t j;
       for (j = i; ; j++) {
-	char *w;
 	cTValue *o;
 	lua_geti(L, 1, j);
-	o = L->top - 1;  /* Stays on the stack (GC anchor) until it is copied. */
-	if (LJ_UNLIKELY(!lj_buf_puttab_elem(sb, o, seplen, &w))) {
+	o = L->top - 1;
+	if (LJ_UNLIKELY(!(tvisstr(o) || tvisnumber(o) || tvisi64(o)))) {
 	  GCstr *sidx = lj_strfmt_i64(L, j);
 	  lj_err_callerv(L, LJ_ERR_TABCAT,
 			 lj_obj_itypename[itypemap(o)], strdata(sidx));
 	}
-	L->top--;
-	if (j == e) {
-	  sb->w = w;
-	  break;
-	}
-	if (seplen) w = lj_buf_wmem(w, strdata(sep), seplen);
-	sb->w = w;
+	luaL_addvalue(&b);
+	if (j == e) break;
+	if (seplen) luaL_addlstring(&b, strdata(sep), seplen);
       }
     }
-    sbx = sb;
+    luaL_pushresult(&b);
+    return 1;
+  }
+  sb = lj_buf_tmp_(L);
+  if (i >= -0x7fffffff-1 && i <= 0x7fffffff &&
+      e >= -0x7fffffff-1 && e <= 0x7fffffff) {
+    sbx = lj_buf_puttab(sb, t, sep, (int32_t)i, (int32_t)e);
+    if (LJ_UNLIKELY(!sbx)) fail = (int32_t)(intptr_t)sb->w;
+  } else {
+    sbx = lj_buf_puttab64(L, sb, t, sep, i, e, &fail);
   }
   if (LJ_UNLIKELY(!sbx)) {  /* Error: bad element type at index 'fail'. */
     TValue k;

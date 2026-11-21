@@ -210,9 +210,9 @@ LJ_NORET LJ_NOINLINE static void err_token(LexState *ls, LexToken tok)
 LJ_NORET static void err_limit(FuncState *fs, uint32_t limit, const char *what)
 {
   if (fs->minline == 0)
-    lj_lex_error(fs->ls, 0, LJ_ERR_XLIMM, limit, what);
+    lj_lex_error(fs->ls, 0, LJ_ERR_XLIMM, what, limit);
   else
-    lj_lex_error(fs->ls, 0, LJ_ERR_XLIMF, fs->minline, limit, what);
+    lj_lex_error(fs->ls, 0, LJ_ERR_XLIMF, what, limit, fs->minline);
 }
 
 #define checklimit(fs, v, l, m)		if ((v) >= (l)) err_limit(fs, l, m)

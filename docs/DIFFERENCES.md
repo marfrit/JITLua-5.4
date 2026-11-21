@@ -153,12 +153,6 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   vs 0.24 KB on x86_64 and aarch64). `tests/lib/gc-count-weak-repro.lua`.
 - `FORK` A stripped dump keeps no `linedefined`/`lastlinedefined` (both are 0
   after loading it); PUC's stripped dumps keep them (`db.lua` line 1002).
-- `PENDING` A yield inside a coroutine running under a `"clr"` hook loses the
-  coroutine's `return` hook event: PUC records
-  `call,line,call,return,line,return` for `coroutine.lua:341` and here the
-  trace is `call,line,call,line,return` (one event short), so the event count
-  check at `coroutine.lua:352` fails. The events at a normal function return
-  are unaffected; only the yield/resume boundary differs.
 - `IMPL-DEFINED` Inside a `__close` handler on an error path, debug level 2 is
   the unwound Lua function; PUC shows the pcall C function
   (`close_03/04`; documented divergence).

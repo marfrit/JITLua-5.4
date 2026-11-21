@@ -410,6 +410,19 @@ target x86_64 (GC64) and arm64.
   the metamethod cleared it, so `tostring(obj)` had a call event and no return
   event. `lj_ffh_tostring` keeps the note across the call
   (`tests/d54/debug_07_tostring_hook.lua`).
+- The return event of `coroutine.yield` (and of any C function that ends in
+  `lua_yield`). PUC finishes that C call when the coroutine is resumed
+  (`ldo.c` `resume` -> `luaD_poscall` -> `rethook`), so the event fires at
+  resume time with the values passed to `resume` as the transfer values. The
+  yield never returned through a path with a hook here, so under a `"clr"`
+  hook the trace was one event short (`coroutine.lua:352/354`), and a
+  coroutine that finished after a yield seemed to lose its last return.
+  `vm_resume` (x64 and arm64) now calls `lj_dispatch_yret` on the
+  resume-after-yield path when the return mask is set; it fires the event for
+  the yielding frame, whose function slot is still intact, and skips the
+  pseudo-frame of a yield from a hook. A C hook that yields while it runs for
+  a C function now gets the C-call boundary error instead of a pseudo-frame
+  that could not be resumed (`tests/d54/coro_05_yield_return_hook.lua`).
 - `__tostring` must return a string (5.4 `luaL_tolstring`). The
   conversion paths `tostring()`, `print()`, `string.format("%s")`, the C API
   `luaL_tolstring` and the standalone message handler now enforce it: a string

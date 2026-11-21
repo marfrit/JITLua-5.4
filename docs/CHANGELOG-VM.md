@@ -36,7 +36,9 @@ target x86_64 (GC64) and arm64.
   int64 limit now gets `CONV num.i64` (it got `num.int`: 0 or 1 iterations
   instead of PUC's for `for i = 0, math.maxinteger, 1.0`), and a float FORI
   enters on an unordered comparison (a NaN limit ran 0 times compiled, once
-  in PUC and the interpreter). A zero-trip loop is recorded as a guarded
+  in PUC and the interpreter), while the guard that a compiled float FORL
+  is left holds for an unordered comparison too (a side trace resumed the
+  loop for a second run). A zero-trip loop is recorded as a guarded
   skip instead of aborting the trace. `tests/d54/for_06_rec_limits.lua`.
   Measured (`-jon`, median of 7, interleaved): the half-limit loop 25x
   faster on x86_64 and 41x on arm64, a zero-trip inner loop 26x/22x; the

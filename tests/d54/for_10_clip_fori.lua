@@ -6,43 +6,46 @@
 -- and must be compiled, not end the trace; otherwise the code around a short
 -- `for j = 1, math.huge do ... break end` stays in the interpreter.
 --
--- The compiled check needs no timing: on the way around the outer loop a
--- trace either passes the FORI and links back to compiled code, or it gives
--- up there and falls back to the interpreter. PUC has no jit module and
+-- The compiled check needs no timing: a trace that meets a bytecode the
+-- recorder does not handle is aborted, and the trace event of jit.attach
+-- reports the abort with that opcode; before this FORI was recorded every
+-- pass around the outer loop ended that way. PUC has no jit module and
 -- `-joff` compiles nothing, so every arm prints "compiled" when the rule
 -- holds. The values are PUC 5.4.9's (lvm.c forprep/forlimit/OP_FORLOOP).
 
 local jit = rawget(_G, "jit")
-local jutil
+local FORI
 if jit and jit.status() then
-  local ok, m = pcall(require, "jit.util")
-  if ok then jutil = m end
-end
-
-local function links()  -- traces that end in compiled code / in the interpreter
-  local good, bad = 0, 0
-  for n = 1, 100000 do
-    local ti = jutil.traceinfo(n)
-    if not ti then break end
-    if ti.linktype == "interpreter" then bad = bad + 1
-    elseif ti.linktype == "loop" or ti.linktype == "root" then good = good + 1 end
+  local ok, jutil = pcall(require, "jit.util")
+  if ok then
+    -- The opcode from a loop with an empty body: its FORI jumps one
+    -- instruction forward (lj_bc.h orders FORI JFORI FORL IFORL JFORL).
+    local function probe() for i = 1, 2 do end end
+    for pc = 1, 100 do
+      local ins = jutil.funcbc(probe, pc)
+      if not ins then break end
+      if (ins >> 16) & 0xffff == 0x8001 then FORI = ins & 0xff end
+    end
   end
-  return good, bad
 end
 
 local function tp(x) return tostring(x) .. ":" .. (math.type(x) or type(x)) end
 
 local function check(name, f, ...)
-  local g0, b0
-  if jutil then g0, b0 = links() end
+  local nyi, stops = 0, 0
+  local function ev(what, tr, func, pc, code, info)
+    if what == "stop" then stops = stops + 1
+    elseif what == "abort" and (info == FORI or info == FORI + 1) then
+      nyi = nyi + 1
+    end
+  end
+  if FORI then jit.attach(ev, "trace") end
   local r = table.pack(f(...))
+  if FORI then jit.attach(ev) end
   local state = "compiled"
   if jit and jit.status() then
-    if not jutil then state = "no jit.util"
-    else
-      local g1, b1 = links()
-      if g1 - g0 < 2 or b1 ~= b0 then state = "NOT compiled" end
-    end
+    if not FORI then state = "no jit.util"
+    elseif nyi > 0 or stops == 0 then state = "NOT compiled" end
   end
   for i = 1, r.n do r[i] = tp(r[i]) end
   print(name, state, table.concat(r, " "))

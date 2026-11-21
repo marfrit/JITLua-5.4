@@ -81,8 +81,6 @@ Short list; every item has its technical reason in
 - The border of a runtime-built sparse table may differ from PUC's.
 - The continuation API (`lua_callk`, `lua_pcallk`, `lua_yieldk`) exists but
   never calls the continuation.
-- `for i = 1, math.huge` and similar wide loops run in the interpreter and are
-  not compiled.
 - Inherited syntax `->` and `continue`, FFI literal suffixes.
 
 ## Supported platforms

@@ -66,11 +66,11 @@ Release documents: `docs/LUA54.md` (overview), `docs/DIFFERENCES.md`,
    from the snapshot use-def analysis (`lj_snap.c` `snap_usedef`), which the
    JIT already uses for its exits (DIFFERENCES.md, the row on eliminated
    allocations).
-3. **Huge numeric-for limits.** `for i = 1, math.huge` and `for i = 1, 1e10`
-   are wide loops, run by the interpreter with one C call per iteration and
-   never compiled. The design that keeps them on the int32 path until the
-   index leaves int32 is written down and not implemented
-   (`docs/notes/for-loop-54.md`, "Next step: huge limits on the int32 path").
+3. **Huge numeric-for limits (done for 1.0.0).** `for i = 1, math.huge`,
+   `for i = 1, 1e10` and `for i = 1, math.maxinteger` run on the int32 path
+   while the index fits and are compiled (`docs/notes/for-loop-54.md`, step
+   4c). Open: a loop whose index really crosses 2^31 continues in the
+   interpreter, and short nested inner loops measured 2-8 % slower on x86_64.
 4. **Latent 16-bit shift in `src/jit/bcsave.lua`.** `f16(x)` is
    `bswap(x) >> 16` (two copies, lines 254 and 386 at this commit), a 16-bit
    shift of a byte-swapped value that was written for LuaJIT's 32-bit bit

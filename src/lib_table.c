@@ -268,11 +268,16 @@ static int64_t tab_concat_int64(lua_State *L, int narg, int64_t def)
 LJLIB_CF(table_concat)		LJLIB_REC(.)
 {
   GCtab *t = tab_checktab(L, 1, TAB_R | TAB_L);
+  /* PUC tconcat: aux_getn calls __len first, before the separator and the
+  ** bounds are checked, and also when an explicit end is given. For a plain
+  ** table the raw length is not observable, so it is only taken when no end
+  ** is given. */
+  int64_t len = t ? 0 : (int64_t)luaL_len(L, 1);
   GCstr *sep = lj_lib_optstr(L, 2);
   int64_t i = tab_concat_int64(L, 3, 1);
   int64_t e = (L->base+3 < L->top && !tvisnil(L->base+3)) ?
 	      tab_concat_int64(L, 4, 0) :
-	      (int64_t)(t ? lj_tab_len(t) : luaL_len(L, 1));
+	      (t ? (int64_t)lj_tab_len(t) : len);
   SBuf *sb;
   SBuf *sbx;
   int64_t fail = 0;

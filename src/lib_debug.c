@@ -281,6 +281,16 @@ LJLIB_CF(debug_upvaluejoin)
   return 0;
 }
 
+/* 5.4.9 ldblib.c db_setcstacklimit: kept for compatibility. The argument is
+** checked with luaL_checkinteger; the result is what lua_setcstacklimit
+** returns, LUAI_MAXCCALLS, and no limit changes (lstate.c). */
+LJLIB_CF(debug_setcstacklimit)
+{
+  int limit = (int)luaL_checkinteger(L, 1);
+  lua_pushinteger(L, lua_setcstacklimit(L, (unsigned int)limit));
+  return 1;
+}
+
 #if LJ_52
 /* 5.4 debug.getuservalue(u, n): the n-th user value plus true, or fail. */
 LJLIB_CF(debug_getuservalue)

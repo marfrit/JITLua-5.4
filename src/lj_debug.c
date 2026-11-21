@@ -347,11 +347,37 @@ const char *lj_debug_uvnamev(cTValue *o, uint32_t idx, TValue **tvp, GCobj **op)
   return NULL;
 }
 
+/* 5.4 ldebug.c findsetreg/filterpc: the write at ipw of a slot used at
+** ipuse is conditional if an earlier forward jump lands after it, at or
+** before the use (an and/or operand, a branch). PUC then names nothing. */
+static int debug_condwrite(GCproto *pt, const BCIns *ipw, const BCIns *ipuse)
+{
+  const BCIns *ip;
+  for (ip = proto_bc(pt)+1; ip < ipw; ip++) {
+    BCOp op = bc_op(*ip);
+    if (op == BC_JMP || op == BC_UCLO) {
+      const BCIns *dest = ip + 1 + bc_j(*ip);
+      if (dest > ipw && dest <= ipuse) return 1;
+    }
+  }
+  return 0;
+}
+
+/* 5.4 ldebug.c isEnv: is the table read at ip a local or an upvalue named
+** _ENV? Then the field read through it is a global. */
+static int debug_isenv(GCproto *pt, const BCIns *ip, BCReg tslot)
+{
+  const char *n = NULL;
+  const char *k = lj_debug_slotname(pt, ip, tslot, &n);
+  return k && (*k == 'l' || *k == 'u') && n && strcmp(n, "_ENV") == 0;
+}
+
 /* Deduce name of an object from slot number and PC. */
 const char *lj_debug_slotname(GCproto *pt, const BCIns *ip, BCReg slot,
 			      const char **name)
 {
   const char *lname;
+  const BCIns *ipuse = ip;
 restart:
   lname = debug_varname(pt, proto_bcpos(pt, ip), slot);
   if (lname != NULL) { *name = lname; return "local"; }
@@ -363,9 +389,11 @@ restart:
       if (slot >= ra && (op != BC_KNIL || slot <= bc_d(ins)))
 	return NULL;
     } else if (bcmode_a(op) == BCMdst && ra == slot) {
+      if (debug_condwrite(pt, ip, ipuse))
+	return NULL;
       switch (bc_op(ins)) {
       case BC_MOV:
-	if (ra == slot) { slot = bc_d(ins); goto restart; }
+	if (ra == slot) { slot = bc_d(ins); ipuse = ip; goto restart; }
 	break;
       case BC_GGET:
 	*name = strdata(gco2str(proto_kgc(pt, ~(ptrdiff_t)bc_d(ins))));
@@ -381,7 +409,7 @@ restart:
 	      bc_d(insp) == bc_b(ins))
 	    return "method";
 	}
-	return "field";
+	return debug_isenv(pt, ip, bc_b(ins)) ? "global" : "field";
       case BC_TGETB:  /* 5.4 OP_GETI: a constant integer key (0..255). */
 	*name = "integer index";
 	return "field";
@@ -400,7 +428,7 @@ restart:
 	      bc_d(insp) == bc_b(ins))
 	    return "method";
 	}
-	return "field";
+	return debug_isenv(pt, ip, bc_b(ins)) ? "global" : "field";
 	}
       case BC_UGET:
 	/* 5.4 names an upvalue without debug info "?". */

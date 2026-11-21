@@ -125,19 +125,19 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   function: PUC calls the return hook for the Lua caller after the C function
   returns; here the caller returns through the continuation without a hook
   event, as it did when the frame was replaced.
-- `IMPL-DEFINED` Ephemeron convergence. PUC 5.4 uses the converged ephemeron
-  marking (`luaC_ephemeron`), so an ephemeron table whose keys point to values
-  that die loses those entries in the same cycle; here the weak-key algorithm
-  is the pre-5.4 one, so after a full collection the dead entries remain until
-  a later cycle (`gc.lua:347`: `next(a) == nil` fails, the reachable chain is
-  the same 100 entries in both arms). `tests/lib/gc-ephemeron-repro.lua`.
 - `FORK` `collectgarbage("count")` after clearing a weak kv table
-  (`gc.lua:475/487`): the 2^22-byte key is a long string, which LuaJIT interns
-  (the `FORK` string interning row above) and therefore still counts after the
-  table is cleared, while PUC frees it; independently, `count` reports
-  LuaJIT's allocation grain, so the absolute figure differs before the weak
-  table is involved too (measured `after fill` 12288 vs 8192 KB, `final` 2045
-  vs 0.24 KB on x86_64 and aarch64). `tests/lib/gc-count-weak-repro.lua`.
+  (`gc.lua:475/487`, now passing). The persistent part is fixed: the global
+  temp buffer is released in the atomic phase instead of halved, so after the
+  table is cleared the count drops back (the `gc.lua:487` assertion passes on
+  both arches and both JIT modes). Two residuals remain, both observables:
+  `count` reports LuaJIT's allocation grain, so the absolute figures differ
+  (`after collect` 4093 vs 4096 KB, `final` -2.8 vs +0.35 KB relative to the
+  baseline, x86_64 and aarch64, `-joff` and `-jon`); and while a long string
+  is being built, the builder buffer is counted (after fill 12288 vs 8192 KB),
+  because LuaJIT builds into its reused global temp buffer, freed at the next
+  atomic, whereas PUC's builder memory is not counted. Freeing the buffer per
+  call would match that instant but reallocates megabytes per string build;
+  keeping it is the cheaper allocation strategy. `tests/lib/gc-count-weak-repro.lua`.
 - `FORK` A stripped dump keeps no `linedefined`/`lastlinedefined` (both are 0
   after loading it); PUC's stripped dumps keep them (`db.lua` line 1002).
 - `PENDING` A yield inside a coroutine running under a `"clr"` hook loses the
@@ -207,13 +207,20 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   200, `src/lj_gc.c`; `LUA_GCSTEP` there is stock LuaJIT, unchanged since
   2.0.0-beta1). One old all-weak table holding a fresh table: PUC clears the
   entry after one `step 0` in incremental *and* in generational mode, ours after
-  12; with `collectgarbage("setstepmul", 20000)` ours clears it in one basic step
+  11; with `collectgarbage("setstepmul", 20000)` ours clears it in one basic step
   and reports the finished cycle, so only the quantum differs, not the weak-table
   semantics. The same loop over a ~1.9 MB live heap reports a finished cycle at
-  the first basic step in PUC and at the 808th here. The manual fixes neither the
+  the first basic step in PUC and at the 1055th here. The manual fixes neither the
   work per basic step nor after how many steps a weak entry dies, so this is a
   difference and not a defect; a real generational collector is Stage 3 of
-  `docs/gc-newgen-plan.md` and open (`docs/plan.md` P4.1). Measured the same on
+  `docs/gc-newgen-plan.md` and open (`docs/plan.md` P4.1). What a program can
+  observe from the generational section of `gengc.lua`: the mode string returned
+  by `collectgarbage("generational")`/`("incremental")` and
+  `collectgarbage("isrunning")` behave as in PUC; the `T.gcage`/`T.gccolor`
+  object ages are not observable (no `T` hooks here); the barrier-driven data
+  checks pass because no object is moved between age lists; and the one
+  assertion that does look at collector progress (line 122) counts steps as
+  above. Everything else in the file is inert on both sides. Measured the same on
   x86_64 and aarch64, `-joff` and `-jon` alike; repro
   `tests/lib/gc-step-quantum-repro.lua`, in the harness the mode-A row of
   `tests/corpus/puc54/gengc.lua` (its assert at line 122) in

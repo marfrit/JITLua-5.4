@@ -211,6 +211,12 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   with `LJ_ERR_XLIMM/XLIMF`), and `tests/d54/parse_02_limit_msgs.lua` prints
   the whole set; the depth at which a nesting shape is refused is the part that
   cannot match, because PUC measures it in C frames. `errors.lua:646` reads it.
+- `IMPL-DEFINED` How many collection cycles a program triggers. The 5.4 manual
+  leaves the pacing to the implementation, and this collector's pause, step
+  work and accounting differ (see the basic-step and GC policy rows). The
+  suite helper `tracegc.lua` writes one `.` to stderr per finished cycle, so
+  `locals.lua` prints a different number of dots than PUC (mode A row in
+  `tests/known-different.tsv`).
 - `IMPL-DEFINED` Constants per function: at most 65536 numbers and 65536
   other constants (strings, nested functions, table templates) in one
   function, "too many constants (limit is 65536) in main function"; PUC

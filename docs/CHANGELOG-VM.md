@@ -469,6 +469,15 @@ target x86_64 (GC64) and arm64.
   This parser had no such limit (only the shared variable stack). Two counters
   in `LexState` follow PUC's lists, with the same message
   (`tests/d54/parse_03_label_limit.lua`).
+- Debug levels inside `__close` handlers run by `coroutine.close`, by the
+  error close of `coroutine.wrap`, by `lua_closethread` and by a protected
+  call from C. The closed thread's frames, or the frames discarded by the
+  error, were levels below the handler; PUC resets the CallInfo chain first
+  (`lua_closethread`, `luaD_pcall`), so the handler's caller is the C
+  function that made the protected call, or there is none. The closers set
+  the thread's base to the bottom of its stack before the handlers run, and
+  the unwinder hands a protected call from C the caller's base
+  (`tests/d54/close_10_errpath_levels.lua`).
 - `__tostring` must return a string (5.4 `luaL_tolstring`). The
   conversion paths `tostring()`, `print()`, `string.format("%s")`, the C API
   `luaL_tolstring` and the standalone message handler now enforce it: a string

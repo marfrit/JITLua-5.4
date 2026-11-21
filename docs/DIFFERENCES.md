@@ -125,18 +125,6 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   function: PUC calls the return hook for the Lua caller after the C function
   returns; here the caller returns through the continuation without a hook
   event, as it did when the frame was replaced.
-- `IMPL-DEFINED` When an object referenced only from a dead stack slot is
-  collected. The stack of a running Lua function is scanned up to the top of
-  its frame (inherited from LuaJIT), so a value left in the argument slot of
-  a finished call stays alive until the slot is reused or the function
-  returns. PUC limits the scan to the live registers of the instruction that
-  started the collection. `db.lua` line 913 waits in a loop for the finalizer
-  of such an object and does not end here (the runner bounds the file at
-  10 s; `tests/known-different.tsv`). `gc.lua` has the same loops at lines
-  63/82/87/92 (`repeat u = {} until finish`, GC1/GC2): PUC finalizes after 39
-  iterations, here the loop does not end, so the file is bounded at 10 s too
-  and everything after line 339 is not exercised in the corpus run;
-  `tests/lib/gc-finloop-repro.lua`.
 - `IMPL-DEFINED` When a weak *value* disappears relative to its finalizer. PUC
   5.4 clears weak values in the atomic phase, before finalizers run, so a
   finalizer of a weakly referenced object already sees the entry gone

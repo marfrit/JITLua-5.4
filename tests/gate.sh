@@ -98,7 +98,7 @@ classify() {
       echo "modeA modeB modeR gcstress capi";;
     # harness and test infrastructure
     tests/lib/runner.py|tests/harness.sh|tests/known-*.tsv|tests/t-guarded.tsv|tests/lib/dump_reload.lua) echo "selftest modeA modeB modeR";;
-    tests/lib/runner-selftest.sh) echo selftest;;
+    tests/lib/runner-selftest.sh|tests/gate.sh) echo selftest;;
     tests/lib/assertbuild-d54.sh) echo assert;;
     tests/lib/compat51*) echo compat51;;
     tests/lib/*.lua) echo libchecks;;
@@ -173,7 +173,7 @@ if [ -n "$REMOTE" ] && [ "$DRY" = 0 ]; then
     exec $REMOTE sh tests/gate.sh --tier full
   fi
   if [ "$EFF" != full ] && [ "$SEL" = " " ]; then
-    echo "gate $TIER: only docs/non-code changes ($NCHG files vs $BASEDESC), nothing to run"
+    echo "gate $TIER: no code or test changes ($NCHG files vs $BASEDESC), nothing to run"
     exit 0
   fi
   cp "$CL" .gate-changed
@@ -322,7 +322,7 @@ if [ "$EFF" = full ]; then
 fi
 
 if [ "$SEL" = " " ]; then
-  echo "gate $TIER: only docs/non-code changes ($NCHG files vs $BASEDESC), nothing to run"
+  echo "gate $TIER: no code or test changes ($NCHG files vs $BASEDESC), nothing to run"
   exit 0
 fi
 

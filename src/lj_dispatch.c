@@ -124,7 +124,10 @@ void LJ_FASTCALL lj_dispatch_update(global_State *g, int nolock)
   mode |= (g->hookmask & HOOK_PROFILE) ? (DISPMODE_PROF|DISPMODE_INS) : 0;
 #endif
   mode |= (g->hookmask & (LUA_MASKLINE|LUA_MASKCOUNT)) ? DISPMODE_INS : 0;
-  mode |= (g->hookmask & LUA_MASKCALL) ? DISPMODE_CALL : 0;
+  /* The return mask needs the call dispatch, too: lj_dispatch_call leaves
+  ** the note (L->hookff) the return event of an ASM fast function is fired
+  ** from, see lj_dispatch_ffret. */
+  mode |= (g->hookmask & (LUA_MASKCALL|LUA_MASKRET)) ? DISPMODE_CALL : 0;
   mode |= (g->hookmask & LUA_MASKRET) ? DISPMODE_RET : 0;
   if (oldmode != mode) {  /* Mode changed? */
     ASMFunction *disp = G2GG(g)->dispatch;
@@ -659,7 +662,7 @@ ASMFunction LJ_FASTCALL lj_dispatch_call(lua_State *L, const BCIns *pc)
 	       "unbalanced stack after hot instruction");
   }
 #endif
-  if ((g->hookmask & LUA_MASKCALL) && !hook_active(g)) {
+  if ((g->hookmask & (LUA_MASKCALL|LUA_MASKRET)) && !hook_active(g)) {
     int i;
     /* 5.4 "tail call" event: BC_CALLT marked the frame. C callees get a
     ** plain "call", their frame is never marked. */
@@ -668,10 +671,11 @@ ASMFunction LJ_FASTCALL lj_dispatch_call(lua_State *L, const BCIns *pc)
 				    (MSize)(L->top - L->base);
     /* An ASM fast function whose fallback handler returned FFH_RETRY is
     ** re-dispatched through its header: that is the same call, no second
-    ** event. Its return event comes from lj_dispatch_ffret() (hookff). */
+    ** event. Its return event comes from lj_dispatch_ffret() (hookff),
+    ** which needs this note with the return mask alone as well. */
     int isasmff = bc_op(pc[-1]) >= BC__MAX;
     setmref(L->hookff, isasmff ? fn : NULL);
-    if (!retry) {
+    if (!retry && (g->hookmask & LUA_MASKCALL)) {
       for (i = 0; i < missing; i++)  /* Add missing parameters. */
 	setnilV(L->top++);
       callhook(L, tail ? LUA_HOOKTAILCALL : LUA_HOOKCALL, -1, nparams ? 1 : 0,

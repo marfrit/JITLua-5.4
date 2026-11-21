@@ -7,6 +7,18 @@ target x86_64 (GC64) and arm64.
 
 ## Language and VM
 
+- JIT: a compiled call of `ipairs` on a table whose metatable has `__ipairs`
+  recorded a call of that metamethod, although Lua 5.4 has none and the
+  interpreter's `ipairs` ignores it (`lib_base.c` `ffh_pairs`). The trace
+  then held a frame the VM never pushed, and every slot behind it was off:
+  SIGSEGV at `-O0`..`-O3` on x86_64 and arm64, `rec_check_slots: slot N type
+  mismatch` in the assertion build. Penlight's `tablex.readonly` proxies
+  carry `__ipairs`; its `tests/test-tablex.lua` failed in about one run in
+  ten under `-jon`, whenever a trace reached that call (arm64 assertion
+  build 11 of 200, 23 of 60 with `-Ohotexit=1`). Stock LuaJIT 2.1 honours
+  `__ipairs` in both places and is not affected (0 of 700 runs). The
+  recorder now takes the metamethod path of `ipairs` for cdata only, as the
+  VM does (`recff_xpairs`). `tests/d54/iter_04_ipairs_no_mm_jit.lua`.
 - JIT: a side trace that started at the FORL exit of an integer loop crashed
   when the parent trace had only loaded the loop's step from its own slot
   (SIGSEGV at `-O0`..`-O3` on x86_64 and arm64; the assertion build stopped

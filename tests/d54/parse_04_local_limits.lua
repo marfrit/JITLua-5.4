@@ -13,10 +13,8 @@
 --! being parsed on one variable stack of 65281 entries. A parameter list
 --! over the 200 limit reported an uninitialized line. Printed: the first
 --! line of each load result, the value of chunks that capture variables
---! declared after many others. (Code follows each label: this parser
---! threads a jump to a jump, so gotos whose labels are followed by the next
---! goto would all be patched to the last label, past the jump distance limit
---! of the bytecode, a separate difference.)
+--! declared after many others. (Code follows each label, so the chunk does
+--! not depend on how jumps to jumps are threaded: parse_05_jump_chains.lua.)
 local function try (name, src, ...)
   local f, err = load(src, "=x")
   if f then

@@ -1805,33 +1805,23 @@ static void rec_mm_callcomp(jit_State *J, RecordIndex *ix, int op)
   lj_record_call(J, func, 2);
 }
 
-/* Record call to equality comparison metamethod (for tab and udata only). */
+/* Record call to equality comparison metamethod (for tab and udata only).
+** 5.4 rule (lvm.c luaV_equalobj, lj_meta_equal): the first operand's __eq,
+** only if it has none the second operand's, called with the operands in
+** source order. Each lookup guards the metatable it reads, so a trace that
+** meets another pairing exits. (lj_meta_equal skips the second lookup when
+** both share one metatable: it finds the same nothing.) */
 static void rec_mm_equal(jit_State *J, RecordIndex *ix, int op)
 {
   ix->tab = ix->val;
   copyTV(J->L, &ix->tabv, &ix->valv);
-  if (lj_record_mm_lookup(J, ix, MM_eq)) {  /* Lookup mm on 1st operand. */
-    cTValue *bv;
-    TRef mo1 = ix->mobj;
-    TValue mo1v;
-    copyTV(J->L, &mo1v, &ix->mobjv);
-    /* Avoid the 2nd lookup and the objcmp if the metatables are equal. */
-    bv = &ix->keyv;
-    if (tvistab(bv) && tabref(tabV(bv)->metatable) == ix->mtv) {
-      TRef mt2 = emitir(IRT(IR_FLOAD, IRT_TAB), ix->key, IRFL_TAB_META);
-      emitir(IRTG(IR_EQ, IRT_TAB), mt2, ix->mt);
-    } else if (tvisudata(bv) && tabref(udataV(bv)->metatable) == ix->mtv) {
-      TRef mt2 = emitir(IRT(IR_FLOAD, IRT_TAB), ix->key, IRFL_UDATA_META);
-      emitir(IRTG(IR_EQ, IRT_TAB), mt2, ix->mt);
-    } else {  /* Lookup metamethod on 2nd operand and compare both. */
-      ix->tab = ix->key;
-      copyTV(J->L, &ix->tabv, bv);
-      if (!lj_record_mm_lookup(J, ix, MM_eq) ||
-	  lj_record_objcmp(J, mo1, ix->mobj, &mo1v, &ix->mobjv))
-	return;
-    }
-    rec_mm_callcomp(J, ix, op);
+  if (!lj_record_mm_lookup(J, ix, MM_eq)) {  /* Lookup mm on 1st operand. */
+    ix->tab = ix->key;
+    copyTV(J->L, &ix->tabv, &ix->keyv);
+    if (!lj_record_mm_lookup(J, ix, MM_eq))  /* Lookup mm on 2nd operand. */
+      return;
   }
+  rec_mm_callcomp(J, ix, op);
 }
 
 /* Record call to ordered comparison metamethods (for arbitrary objects). */

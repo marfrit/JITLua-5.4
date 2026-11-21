@@ -42,6 +42,7 @@ LJ_FUNC_NORET void lj_err_ccall(lua_State *L);
 #define lj_err_ccallover(L)	lj_err_ccallover_n((L)->ccallnest)
 LJ_FUNC_NORET void lj_err_lex(lua_State *L, GCstr *src, const char *tok,
 			      BCLine line, ErrMsg em, va_list argp);
+LJ_FUNC const char *lj_err_typename(lua_State *L, cTValue *o);
 LJ_FUNC_NORET void lj_err_optype(lua_State *L, cTValue *o, ErrMsg opm);
 LJ_FUNC_NORET void lj_err_envtype(lua_State *L, cTValue *o);
 LJ_FUNC_NORET void lj_err_comp(lua_State *L, cTValue *o1, cTValue *o2);

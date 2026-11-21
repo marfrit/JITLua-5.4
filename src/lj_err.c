@@ -1174,10 +1174,13 @@ LJ_NOINLINE void lj_err_lex(lua_State *L, GCstr *src, const char *tok,
 
 /* Typecheck error for operands. */
 /* 5.4: a metatable's __name field overrides the type name in errors. */
-static const char *err_typename(lua_State *L, cTValue *o)
+const char *lj_err_typename(lua_State *L, cTValue *o)
 {
   GCtab *mt = NULL;
   if (tvisi64(o)) return "number";  /* ADR-001b: never report "userdata" */
+  /* LuaJIT's io handles are plain udata with a udtype, not PUC's
+  ** luaL_newmetatable("FILE*") object: report the same type name. */
+  if (tvisudata(o) && udataV(o)->udtype == UDTYPE_IO_FILE) return "FILE*";
   if (tvistab(o)) mt = tabref(tabV(o)->metatable);
   else if (tvisudata(o)) mt = tabref(udataV(o)->metatable);
   if (mt) {
@@ -1189,7 +1192,7 @@ static const char *err_typename(lua_State *L, cTValue *o)
 
 LJ_NOINLINE void lj_err_optype(lua_State *L, cTValue *o, ErrMsg opm)
 {
-  const char *tname = err_typename(L, o);
+  const char *tname = lj_err_typename(L, o);
   const char *opname = err2msg(opm);
   if (curr_funcisL(L)) {
     GCproto *pt = curr_proto(L);
@@ -1205,15 +1208,17 @@ LJ_NOINLINE void lj_err_optype(lua_State *L, cTValue *o, ErrMsg opm)
 /* Typecheck error for the implicit 5.4 _ENV operand: PUC names the upvalue. */
 LJ_NOINLINE void lj_err_envtype(lua_State *L, cTValue *o)
 {
-  const char *tname = err_typename(L, o);
+  const char *tname = lj_err_typename(L, o);
   err_msgv(L, LJ_ERR_BADOPRT, err2msg(LJ_ERR_OPINDEX), tname, "upvalue", "_ENV");
 }
 
 /* Typecheck error for ordered comparisons. */
 LJ_NOINLINE void lj_err_comp(lua_State *L, cTValue *o1, cTValue *o2)
 {
-  const char *t1 = lj_typename(o1);
-  const char *t2 = lj_typename(o2);
+  /* 5.4 luaG_ordererror names the types through luaT_objtypename, so a
+  ** metatable's __name is used here too ("two My Type values"). */
+  const char *t1 = lj_err_typename(L, o1);
+  const char *t2 = lj_err_typename(L, o2);
   err_msgv(L, t1 == t2 ? LJ_ERR_BADCMPV : LJ_ERR_BADCMPT, t1, t2);
   /* This assumes the two "boolean" entries are commoned by the C compiler. */
 }
@@ -1384,7 +1389,7 @@ LJ_NOINLINE void lj_err_argtype(lua_State *L, int narg, const char *xname)
     }
   } else {
     TValue *o = narg < 0 ? L->top + narg : L->base + narg-1;
-    tname = o < L->top ? err_typename(L, o) : lj_obj_typename[0];
+    tname = o < L->top ? lj_err_typename(L, o) : lj_obj_typename[0];
   }
   msg = lj_strfmt_pushf(L, err2msg(LJ_ERR_BADTYPE), xname, tname);
   err_argmsg(L, narg, msg);

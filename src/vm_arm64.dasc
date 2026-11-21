@@ -1362,16 +1362,23 @@ static void build_subroutines(BuildCtx *ctx)
   |  bhs >2				// Not in array part?
   |  ldr TMP0, [CARG3, CARG2, lsl #3]
   |1:
-  |   mov TMP1, #(2+1)*8
   |   cmp_nil TMP0
+  |  bne >3
+  |  mov CARG1, TISNIL		// 5.4 ipairsaux: one nil result.
+  |  b ->fff_restv
+  |3:
+  |   mov RC, #(2+1)*8
   |  str TMP0, [BASE, #-8]
-  |   csel RC, RC, TMP1, eq
   |  b ->fff_res
   |2:  // Check for empty hash part first. Otherwise call C function.
-  |  cbz TMP0w, ->fff_res
+  |  cbz TMP0w, >4
   |  bl extern lj_tab_getinth		// (GCtab *t, int32_t key)
   |  // Returns cTValue * or NULL.
-  |  cbz CRET1, ->fff_res
+  |  cbnz CRET1, >5
+  |4:
+  |  mov CARG1, TISNIL		// 5.4 ipairsaux: one nil result.
+  |  b ->fff_restv
+  |5:
   |  ldr TMP0, [CRET1]
   |  b <1
   |

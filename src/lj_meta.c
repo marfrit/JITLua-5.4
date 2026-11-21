@@ -140,6 +140,21 @@ static TValue *mmcall(lua_State *L, ASMFunction cont, cTValue *mo,
   return top;  /* Return new base. */
 }
 
+/* mmcall() for a metamethod whose name is known at the call site: when the
+** metamethod value itself is not callable and has no __call chain, PUC names
+** it in the error ("attempt to call a number value (metamethod 'add')",
+** luaG_typeerror on the metamethod). Without the chain there is nothing left
+** to call, so raise here instead of in the generic call dispatch, which cannot
+** name the metamethod. */
+static TValue *mmcall_mm(lua_State *L, ASMFunction cont, cTValue *mo,
+			 cTValue *a, cTValue *b, const char *mmname)
+{
+  if (LJ_UNLIKELY(!tvisfunc(mo)) &&
+      tvisnil(lj_meta_lookup(L, mo, MM_call)))
+    lj_err_msgv(L, LJ_ERR_BADCALLMM, lj_err_typename(L, mo), mmname);
+  return mmcall(L, cont, mo, a, b);
+}
+
 /* -- C helpers for some instructions, called from assembler VM ----------- */
 
 /* Helper for TGET*. __index chain and metamethod. isenv selects the 5.4
@@ -279,6 +294,13 @@ static LJ_AINLINE void meta_i64_gccheck(lua_State *L, cTValue *ra)
   }
 }
 
+/* The metamethod name without its "__" prefix, for the error wording: PUC's
+** luaG_typeerror names the metamethod value ("metamethod 'add'"). */
+static const char *mmname(lua_State *L, MMS mm)
+{
+  return strdata(mmname_str(G(L), mm)) + 2;
+}
+
 /* Helper for arithmetic instructions. Coercion, metamethod. */
 TValue *lj_meta_arith(lua_State *L, TValue *ra, cTValue *rb, cTValue *rc,
 		      BCReg op)
@@ -357,16 +379,16 @@ TValue *lj_meta_arith(lua_State *L, TValue *ra, cTValue *rb, cTValue *rc,
       mo = lj_meta_lookup(L, rc, mm);
       if (tvisnil(mo)) {
 	if (mm >= MM_add && mm <= MM_idiv && (tvisstr(rb) || tvisstr(rc))) {
-	  const char *verbs[] = {"add","sub","mul","div","mod","pow","unm","idiv"};
-	  lj_err_msgv(L, LJ_ERR_OPBIN54, verbs[mm-MM_add], lj_typename(rb),
-		      lj_typename(rc));
+	  lj_err_msgv(L, LJ_ERR_OPBIN54, mmname(L, mm),
+		      lj_typename(rb), lj_typename(rc));
 	}
 	if (str2num(L, rb, &tempb) == NULL) rc = rb;
 	lj_err_optype(L, rc, LJ_ERR_OPARITH);
 	return NULL;  /* unreachable */
       }
     }
-    return mmcall(L, lj_cont_ra, mo, rb, rc);
+    return mmcall_mm(L, lj_cont_ra, mo, rb, rc,
+		     mmname(L, mm));
   }
 }
 
@@ -414,7 +436,7 @@ TValue *lj_meta_bitop(lua_State *L, TValue *ra, cTValue *rb, cTValue *rc, BCReg 
     }
     {
       cTValue *o = (tvisint(rb) || tvisi64(rb) || tvisnum(rb)) ? rc : rb;
-      const char *tname = lj_typename(o);
+      const char *tname = lj_err_typename(L, o);
       const char *oname = NULL;
       if (curr_funcisL(L)) {
 	GCproto *pt = curr_proto(L);
@@ -705,7 +727,7 @@ TValue *lj_meta_comp(lua_State *L, cTValue *o1, cTValue *o2, int op)
 	  }
 	  goto err;
 	}
-	return mmcall(L, cont, mo, o1, o2);
+	return mmcall_mm(L, cont, mo, o1, o2, mmname(L, mm));
       }
     }
   } else if (tvisbool(o1) && tvisbool(o2)) {

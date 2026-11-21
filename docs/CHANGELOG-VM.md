@@ -7,6 +7,23 @@ target x86_64 (GC64) and arm64.
 
 ## Language and VM
 
+- 5.4 parity in the library and the error messages, five fixes.
+  `coroutine.isyieldable([co])` now reports a fresh, suspended and dead
+  coroutine as yieldable (it tested the caller's C-frame nesting, which a
+  pure LuaJIT coroutine does not have; `tests/d54/coro_04_isyieldable.lua`).
+  `ipairs` keeps its control key as a 5.4 integer and wraps it with
+  `lua_intop(+, i, 1)` instead of truncating to int32, and takes the C path
+  for a metatable or a key outside int32 (`meta_06_ipairs_wrap.lua`).
+  `table.remove` was rewritten in C to PUC's `luaL_argcheck((unsigned)pos-1
+  <= (unsigned)size)` semantics: an empty table with `pos 0` removes `t[0]`,
+  `pos == size+1` is allowed and clears `t[size+1]`, a negative or zero pos on
+  a non-empty table raises "position out of bounds", and it always returns one
+  value (`tbl_05_remove_edges.lua`; the previous Lua emulation skipped the
+  empty branch and accepted pos 0). An arithmetic or comparison error names
+  the non-callable metamethod as PUC's `luaG_typeerror` does, and type errors
+  use a metatable's `__name` (`luaL_newmetatable` sets it; io handles report
+  "FILE*" through their udtype) (`err_11_typename.lua`). The
+  `table.remove` head is regenerated (`src/host/buildvm_libbc.h`).
 - String to number conversion (Lua 5.4 numeral rules), one conversion for the
   interpreter, the library and compiled code. Four defects, all in the two
   functions every such conversion goes through (`lj_strscan_scan`, and
@@ -438,3 +455,16 @@ target x86_64 (GC64) and arm64.
   k-nucleotide at -2.94% with the head faster in 10/10. Off on arm64 because
   the hint costs there. `tests/bench/gc-strsweep.sh` reproduces the A/B,
   `tests/d54/gc_05_strsweep.lua` guards the sweep.
+- Error unwinding truncated the chain of pending `<close>` values
+  nondeterministically: `lj_err.c:tbc_closeunwound` kept the `level` stack
+  pointer across `lj_state_checkstack()` and passed it on to
+  `lj_meta_tbccloseall()`, which saved it again as an offset after the stack
+  had possibly been resized. The offset then described the freed old stack, so
+  the "slot at or above level" test skipped handlers and the last error of the
+  chain was not the one that propagated (`@z` instead of PUC's `@x`,
+  measured on x86_64 in 5-8 of 10 runs of one chain, 8/10 of a second).
+  `level` and `base` are saved as offsets before the check and restored after
+  it. The stale pointer was compared, never dereferenced, so a sanitizer cannot
+  report it; the stress test `tests/d54/close_07_unwind_chain.lua` runs the
+  shape in fresh coroutines after deep recursion, and the deterministic
+  evidence is the file-scope chain described above.

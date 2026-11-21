@@ -88,7 +88,13 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
 - `PENDING` A numeric string as a `for` bound is converted with the
   int32-or-double rule: a decimal integer string outside int32 makes the loop
   a float loop (PUC: integer loop), and a hexadecimal one does not wrap
-  (`for i = 1, "0xffffffffffffffff"` runs; PUC runs it zero times).
+  (`for i = 1, "0xffffffffffffffff"` runs; PUC runs it zero times). The
+  converse also happens: an integral float start or step becomes an integer
+  loop here, while PUC runs a float loop unless start and step are integers.
+  `for i = 1.0, 10 do print(math.type(i)) end` prints `integer` (PUC:
+  `float`), and `for i = -1, -10, -1.0` likewise; PUC's `for i = 1, 3.0, 1`
+  is an integer loop and here too. The suite checks both directions at
+  `nextvar.lua:624/635`, one of the files the harness skips.
 - `IMPL-DEFINED` String arithmetic is part of the VM's arithmetic fallback;
   the string metatable has no `__add`, `__sub`, ... entries (PUC implements
   the coercion through them, so there it can be inspected and replaced).
@@ -106,6 +112,13 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   their return event is fired from a note the call event leaves, and no call
   event is dispatched without the call mask. With `"cr"` the events equal
   PUC's (`tests/d54/debug_07_tostring_hook.lua`).
+- `PENDING` `debug.traceback` of a stack overflow prints no numbered Lua
+  frames here (`xpcall(g, debug.traceback, 1)` yields a message without
+  `:line:` entries), while PUC prints the repeated recursion frames at the
+  overflowing line and then the handler. The recursion depth before the
+  overflow also differs by design (32711 calls here, 999962 in PUC); the suite
+  reads the frame line numbers at `errors.lua:528` in `errors.lua`, one of the
+  files the harness skips.
 - `PENDING` Return hook of a function that ends in a tail call to a C
   function: PUC calls the return hook for the Lua caller after the C function
   returns; here the caller returns through the continuation without a hook
@@ -120,6 +133,12 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   10 s; `tests/known-different.tsv`).
 - `FORK` A stripped dump keeps no `linedefined`/`lastlinedefined` (both are 0
   after loading it); PUC's stripped dumps keep them (`db.lua` line 1002).
+- `PENDING` A yield inside a coroutine running under a `"clr"` hook loses the
+  coroutine's `return` hook event: PUC records
+  `call,line,call,return,line,return` for `coroutine.lua:341` and here the
+  trace is `call,line,call,line,return` (one event short), so the event count
+  check at `coroutine.lua:352` fails. The events at a normal function return
+  are unaffected; only the yield/resume boundary differs.
 - `IMPL-DEFINED` Inside a `__close` handler on an error path, debug level 2 is
   the unwound Lua function; PUC shows the pcall C function
   (`close_03/04`; documented divergence).

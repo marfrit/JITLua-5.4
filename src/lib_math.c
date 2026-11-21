@@ -193,6 +193,19 @@ LJLIB_ASM(math_ldexp)		LJLIB_REC(.)
   return FFH_RETRY;
 }
 
+/* a < b for two arguments of math.min/max. Plain numbers (int32 or float)
+** are compared here: an int32 is exact as a double, so this is PUC's
+** integer/float comparison. Everything else (integers outside int32,
+** strings, metamethods, the errors) is lua_compare's. */
+static int math_less(lua_State *L, int a, int b)
+{
+  cTValue *x = L->base+a-1, *y = L->base+b-1;
+  if ((tvisnum(x) || (tvisint(x) && !tvisi47w(x))) &&
+      (tvisnum(y) || (tvisint(y) && !tvisi47w(y))))
+    return numberVnum(x) < numberVnum(y);
+  return lua_compare(L, a, b, LUA_OPLT);
+}
+
 static int math_minmax(lua_State *L, int ismax)
 {
   /* PUC lmathlib math_min/math_max: lua_compare semantics on every argument,
@@ -204,8 +217,7 @@ static int math_minmax(lua_State *L, int ismax)
   int best = 1;
   luaL_argcheck(L, n >= 1, 1, "value expected");
   for (i = 2; i <= n; i++) {
-    if (ismax ? lua_compare(L, best, i, LUA_OPLT)
-	      : lua_compare(L, i, best, LUA_OPLT))
+    if (ismax ? math_less(L, best, i) : math_less(L, i, best))
       best = i;
   }
   copyTV(L, L->base-1-LJ_FR2, L->base+best-1);

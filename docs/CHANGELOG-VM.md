@@ -678,6 +678,15 @@ target x86_64 (GC64) and arm64.
   (`tests/d54/err_16_operand_names.lua`). `errors.lua` now passes every
   assertion; only its printed stack-overflow depth differs (rows in
   `tests/known-different.tsv`).
+- `table.concat` on a table with `__index`/`__len` builds its result in a
+  `luaL_Buffer` of the call, as PUC's `tconcat`/`addfield` do (ltablib.c).
+  The generic path appended to the global temp buffer and kept the partial
+  result there across `lua_geti`, so an `__index` that used the buffer
+  itself (`..`, `string.format`, a nested `table.concat`) overwrote it
+  ("v1,v2,v3" came out as "v3v3"), and one that only allocated could let the
+  atomic phase free it (`table.concat(p, "", 1, 50)` wrong in 300 of 300
+  runs on both arches). Plain tables keep the temp-buffer fast path, which
+  calls no metamethod (`tests/d54/tbl_08_concat_mm_buffer.lua`).
 
 ## Known JIT/performance rows (not semantic divergences)
 

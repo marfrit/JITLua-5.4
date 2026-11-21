@@ -1198,7 +1198,19 @@ static void atomic(global_State *g, lua_State *L)
   gc_clearweak_keys(g, gcref(g->gc.weak));
   gc_clearweak_vals(g, gcref(g->gc.weak), origweak);
 
-  lj_buf_shrink(L, &g->tmpbuf);  /* Shrink temp buffer. */
+  { /* PUC has no global temp buffer. Releasing it returns collectgarbage("count")
+  ** to the pre-fill baseline after a weak kv table is cleared; halving it left
+  ** the buffer resident for several cycles (gc.lua:487). A buffer built by a
+  ** string/tostring/format call is only alive inside that call -- the owning
+  ** C function copies the content out before its trailing lj_gc_check -- and
+  ** finalizers run after atomic, so it can be freed here. */
+    SBuf *sb = &g->tmpbuf;
+    MSize sz = sbufsz(sb);
+    if (sz > LJ_MIN_SBUF) {
+      lj_mem_free(g, sb->b, sz);
+      sb->w = sb->b = sb->e = NULL;
+    }
+  }
 
   /* Prepare for sweep phase. */
   g->gc.currentwhite = (uint8_t)otherwhite(g);  /* Flip current white. */

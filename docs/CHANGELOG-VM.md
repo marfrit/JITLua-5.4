@@ -703,6 +703,14 @@ target x86_64 (GC64) and arm64.
   `luaB_collectgarbage`); `collectgarbage("collect", 1.5)`,
   `("count", {})` and `("isrunning", "x")` succeed as in PUC instead of
   raising an argument error (`tests/d54/gc_14_collectgarbage_args.lua`).
+- A file handle created while `registry["FILE*"]` is not a table has no
+  metatable, as with PUC's `luaL_setmetatable`; `io_file_new` read the entry
+  with `tabV` unchecked and crashed (bus error) after
+  `debug.getregistry()["FILE*"] = nil`. Another table there becomes the
+  handle's metatable. Operand errors name a handle by its metatable's
+  `__name` like any userdata (`lj_err_typename` no longer fixes "FILE*" for
+  the handle kind), so such a handle is "userdata" or the other table's
+  `__name` there, as in PUC (`tests/d54/io_05_filehandle_registry.lua`).
 
 ## Known JIT/performance rows (not semantic divergences)
 

@@ -698,6 +698,16 @@ void lj_snap_replay(jit_State *J, GCtrace *T)
       if ((sn & SNAP_FORDEC)) {
 	BCReg s = snap_slot(sn);
 	TRef step = J->slot[s+FORL_STEP];
+	if (!step) {
+	  /* The step is not in the snapshot: the parent loaded it from its
+	  ** own slot and never changed it (snapshot_slots leaves such a slot
+	  ** out, e.g. the slots a recorded FORI loads when the trace starts
+	  ** right before it). The stack holds it, as the int32 the parent
+	  ** guarded it to be. */
+	  step = emitir_raw(IRTI(IR_SLOAD), s+FORL_STEP,
+			    IRSLOAD_INHERIT|IRSLOAD_READONLY);
+	  J->slot[s+FORL_STEP] = step;
+	}
 	lj_assertJ(tref_isint(J->slot[s]) && tref_isint(step),
 		   "FORL index or step slot is not an int32");
 	J->slot[s] = emitir(IRTI(IR_SUB), J->slot[s], step);

@@ -105,7 +105,8 @@ static int ffh_pairs(lua_State *L, MMS mm)
     copyTV(L, L->base-1-LJ_FR2, mo);  /* Replace callable. */
     return FFH_TAILCALL;
   } else {
-    if (!tvistab(o)) lj_err_argt(L, 1, LUA_TTABLE);
+    /* 5.4 uses luaL_checkany: a non-table is accepted here and only fails on
+    ** the first step, in the real operation (next or lua_geti). */
     if (LJ_FR2) { copyTV(L, o-1, o); o--; }
     setfuncV(L, o-1, funcV(lj_lib_upvalue(L, 1)));
     if (mm == MM_pairs) setnilV(o+1); else setintV(o+1, 0);
@@ -127,7 +128,8 @@ LJLIB_ASM(pairs)		LJLIB_REC(xpairs 0)
 ** one lands here, as do non-integer keys. */
 LJLIB_NOREGUV LJLIB_ASM(ipairs_aux)	LJLIB_REC(.)
 {
-  GCtab *t = lj_lib_checktab(L, 1);
+  TValue *o = lj_lib_checkany(L, 1);
+  GCtab *t = tvistab(o) ? tabV(o) : NULL;
   lua_Integer i = luaL_checkinteger(L, 2);
   /* 5.4 wraps the index (lua_intop(+, i, 1)): past math.maxinteger the
   ** iterator continues at math.mininteger. */
@@ -135,7 +137,7 @@ LJLIB_NOREGUV LJLIB_ASM(ipairs_aux)	LJLIB_REC(.)
   /* The fast path increments the key itself, so retry it only when the
   ** original key is already an int32 and the 5.4 successor still fits: an
   ** int32 overflow at math.maxinteger must take the integer path below. */
-  if (!tabref(t->metatable) && i == (lua_Integer)(int32_t)i &&
+  if (t && !tabref(t->metatable) && i == (lua_Integer)(int32_t)i &&
       n == (lua_Integer)(int32_t)n) {
     setintV(L->base+1, (int32_t)i);  /* Keep the int key the ASM expects. */
     return FFH_RETRY;  /* Fast path (int key now). */
@@ -578,12 +580,24 @@ LJLIB_CF(collectgarbage)
   int opt = lj_lib_checkopt(L, 1, LUA_GCCOLLECT,  /* ORDER LUA_GC* */
     "\4stop\7restart\7collect\5count\1\377\4step\10setpause\12setstepmul\1\377\11isrunning\x0cgenerational\x0bincremental");
   int32_t data = lj_lib_optint(L, 2, 0);
+  int32_t data2 = 0, data3 = 0;
+  if (opt == LUA_GCGEN || opt == LUA_GCINC) {
+    data2 = lj_lib_optint(L, 3, 0);
+    if (opt == LUA_GCINC) data3 = lj_lib_optint(L, 4, 0);
+  }
   if (G(L)->gc.finalizing) {  /* 5.4: every option fails inside a __gc */
     setnilV(L->top);
   } else if (opt == LUA_GCCOUNT) {
     setnumV(L->top, (lua_Number)G(L)->gc.total/1024.0);
   } else {
-    int res = lua_gc(L, opt, data);
+    int res;
+    if (opt == LUA_GCGEN) {
+      res = lua_gc(L, opt, data, data2);
+    } else if (opt == LUA_GCINC) {
+      res = lua_gc(L, opt, data, data2, data3);
+    } else {
+      res = lua_gc(L, opt, data);
+    }
     if (res == -1) {  /* 5.4: -1 while a __gc runs, pushed as fail (nil) */
       setnilV(L->top);
     } else if (opt == LUA_GCSTEP || opt == LUA_GCISRUNNING) {

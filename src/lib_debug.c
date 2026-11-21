@@ -116,16 +116,18 @@ LJLIB_CF(debug_getinfo)
   int arg, opt_f = 0, opt_L = 0;
   lua_State *L1 = getthread(L, &arg);
   const char *options = luaL_optstring(L, arg+2, "flnSrtu");
-  if (lua_isnumber(L, arg+1)) {
-    if (!lua_getstack(L1, (int)lua_tointeger(L, arg+1), (lua_Debug *)&ar)) {
-      setnilV(L->top-1);
-      return 1;
-    }
-  } else if (L->base+arg < L->top && tvisfunc(L->base+arg)) {
+  /* 5.4 db_getinfo: a function is checked first; anything else is a stack
+  ** level via luaL_checkinteger (so a table gives "number expected, got
+  ** table" and 1.5 gives "number has no integer representation"). */
+  if (L->base+arg < L->top && tvisfunc(L->base+arg)) {
     options = lua_pushfstring(L, ">%s", options);
     setfuncV(L1, L1->top++, funcV(L->base+arg));
   } else {
-    lj_err_arg(L, arg+1, LJ_ERR_NOFUNCL);
+    int level = (int)luaL_checkinteger(L, arg+1);
+    if (!lua_getstack(L1, level, (lua_Debug *)&ar)) {
+      setnilV(L->top-1);
+      return 1;
+    }
   }
   ar.ftransfer = ar.ntransfer = 0;
   if (strchr(options, 'r') && hook_active(G(L))) {  /* Hook transfer info. */

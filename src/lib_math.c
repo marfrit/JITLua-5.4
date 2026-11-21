@@ -186,36 +186,22 @@ LJLIB_ASM(math_ldexp)		LJLIB_REC(.)
   return FFH_RETRY;
 }
 
-/* 5.4: math.min/max compare exactly across integers and floats and return
-** the winning argument as is. The asm fast path handles int32 and float
-** arguments; anything else (widened, boxed, strings) lands here and is
-** finished in C -- retrying the fast path would just come back. */
-/* Exact 5.4 comparison of two numbers (integers of any size, floats):
-** -1, 0, 1, or 2 for unordered (NaN). */
-static int math_cmp(cTValue *a, cTValue *b)
-{
-  int64_t x, y;
-  int ai = lj_i64_getint(a, &x), bi = lj_i64_getint(b, &y);
-  if (ai && bi) return x < y ? -1 : x > y ? 1 : 0;
-  if (ai) return lj_i64_cmpnum(x, numV(b));
-  if (bi) { int c = lj_i64_cmpnum(y, numV(a)); return c == 2 ? 2 : -c; }
-  return numV(a) < numV(b) ? -1 : numV(a) > numV(b) ? 1 : numV(a) == numV(b) ? 0 : 2;
-}
-
 static int math_minmax(lua_State *L, int ismax)
 {
+  /* PUC lmathlib math_min/math_max: lua_compare semantics on every argument,
+  ** the winning argument is pushed unchanged (so its integer/float subtype
+  ** survives), strings compare lexicographically, a numeric string next to a
+  ** number raises PUC's compare error, and a tie keeps the earlier argument,
+  ** including the first NaN and the first signed zero. */
   int i, n = (int)(L->top - L->base);
-  cTValue *best;
-  luaL_checkany(L, 1);  /* PUC: math.max()/math.min() -> "value expected" */
-  for (i = 1; i <= n; i++) lj_lib_checknumber(L, i);
-  best = L->base;
-  for (i = 1; i < n; i++) {
-    cTValue *o = L->base + i;
-    /* PUC: min keeps best unless o < best; max keeps best unless best < o. */
-    if (ismax ? math_cmp(best, o) == -1 : math_cmp(o, best) == -1)
-      best = o;
+  int best = 1;
+  luaL_argcheck(L, n >= 1, 1, "value expected");
+  for (i = 2; i <= n; i++) {
+    if (ismax ? lua_compare(L, best, i, LUA_OPLT)
+	      : lua_compare(L, i, best, LUA_OPLT))
+      best = i;
   }
-  copyTV(L, L->base-1-LJ_FR2, best);
+  copyTV(L, L->base-1-LJ_FR2, L->base+best-1);
   return FFH_RES(1);
 }
 

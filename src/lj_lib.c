@@ -259,9 +259,18 @@ int32_t lj_lib_checkint(lua_State *L, int narg)
     setintV(o, i);
     return i;
   } else {
-    int32_t i = lj_num2int(numV(o));
-    if (LJ_DUALNUM) setintV(o, i);
-    return i;
+    int64_t v2;
+    /* 5.4 luaL_checkinteger semantics: a float (including one produced by
+    ** scanning a numeral string) must be exactly an integer. Out-of-int32
+    ** integers keep the saturating clamp the library code relies on. */
+    if (!lj_i64_numtoint(numV(o), &v2))
+      lj_err_arg(L, narg, LJ_ERR_NUMNOINT);
+    {
+      int32_t i = v2 > 0x7fffffffLL ? 0x7fffffff :
+	v2 < -0x7fffffffLL-1 ? (int32_t)(-0x7fffffffLL-1) : (int32_t)v2;
+      if (LJ_DUALNUM) setintV(o, i);
+      return i;
+    }
   }
 }
 
@@ -313,7 +322,9 @@ GCtab *lj_lib_checktabornil(lua_State *L, int narg)
     else if (tvisnil(o))
       return NULL;
   }
-  lj_err_arg(L, narg, LJ_ERR_NOTABN);
+  /* 5.4 luaB_setmetatable uses luaL_typeerror with "nil or table": the
+  ** message carries the actual type ("nil or table expected, got number"). */
+  lj_err_argtype(L, narg, "nil or table");
   return NULL;  /* unreachable */
 }
 

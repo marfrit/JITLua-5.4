@@ -1753,44 +1753,40 @@ static void build_subroutines(BuildCtx *ctx)
   |  .ffunc_1 name
   |   add RB, BASE, RC
   |   add RA, BASE, #8
-  |  checkint CARG1, >4
-  |1:  // Handle integers.
+  |  checkint CARG1, ->math_minmax_f_ .. name
+  |->math_minmax_i_ .. name:  // Integer fast path (int32 only).
+  |  cmp RA, RB
+  |  bhs ->fff_restv
   |  ldr CARG2, [RA]
-  |   cmp RA, RB
-  |   bhs ->fff_restv
-  |  checkint CARG2, >3
+  |  checkint CARG2, ->fff_fallback
   |  cmp CARG1w, CARG2w
   |   add RA, RA, #8
   |  csel CARG1, CARG2, CARG1, cond
-  |  b <1
-  |3:  // Convert intermediate result to number and continue below.
-  |  scvtf d0, CARG1w
-  |  blo ->fff_fallback
-  |  ldr d1, [RA]
-  |  b >6
-  |
-  |4:
+  |  b ->math_minmax_i_ .. name
+  |  // Float fast path: every argument must be a float. A mixed list (an
+  |  // integer next to a float) goes to C, which preserves the winning subtype.
+  |->math_minmax_f_ .. name:
+  |  checknum CARG1, ->fff_fallback
+  |  beq ->fff_fallback     // widened integer: C keeps its subtype
   |  ldr d0, [BASE]
-  |  blo ->fff_fallback
-  |5:  // Handle numbers.
+  |->math_minmax_fl_ .. name:
+  |  cmp RA, RB
+  |  bhs ->fff_resn
   |  ldr CARG2, [RA]
+  |  checknum CARG2, ->fff_fallback
+  |  beq ->fff_fallback     // integer in a float list: mixed, use C
   |  ldr d1, [RA]
-  |   cmp RA, RB
-  |   bhs ->fff_resn
-  |  checknum CARG2, >7
-  |6:
-  |  fcmp d0, d1
+  |  fcmp d1, d0     // candidate vs running best; MI/GT are false on tie/NaN
   |   add RA, RA, #8
+  |  // Select the candidate only when the comparison is true: mi (candidate
+  |  // less) for min, gt (candidate greater) for max. Both are false on a tie
+  |  // and on unordered, so d0 -- the running best -- survives, PUC's rule.
   |  fcsel d0, d1, d0, fcond
-  |  b <5
-  |7:  // Convert integer to number and continue above.
-  |  scvtf d1, CARG2w
-  |  blo ->fff_fallback
-  |  b <6
+  |  b ->math_minmax_fl_ .. name
   |.endmacro
   |
-  |  math_minmax math_min, gt, pl
-  |  math_minmax math_max, lt, le
+  |  math_minmax math_min, gt, mi
+  |  math_minmax math_max, lt, gt
   |
   |//-- String library -----------------------------------------------------
   |

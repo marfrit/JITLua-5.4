@@ -604,7 +604,9 @@ static void LJ_FASTCALL recff_ipairs_aux(jit_State *J, RecordFFData *rd)
   RecordIndex ix;
   ix.tab = J->base[0];
   if (tref_istab(ix.tab)) {
-    if (!tvisnumber(&rd->argv[1]))  /* No support for string coercion. */
+    /* 5.4 ipairs_aux: luaL_checkinteger for the key (exact integer only, no
+    ** string coercion), and lua_gettable on the state so any value works. */
+    if (!tvisint(&rd->argv[1]))
       lj_trace_err(J, LJ_TRERR_BADTYPE);
     if (tabref(tabV(&rd->argv[0])->metatable)) {  /* 5.3+: __index path. */
       recff_nyiu(J, rd);
@@ -617,7 +619,9 @@ static void LJ_FASTCALL recff_ipairs_aux(jit_State *J, RecordFFData *rd)
     J->base[0] = ix.key = emitir(IRTI(IR_ADD), ix.key, lj_ir_kint(J, 1));
     J->base[1] = lj_record_idx(J, &ix);
     rd->nres = tref_isnil(J->base[1]) ? 0 : 2;
-  }  /* else: Interpreter will throw. */
+  } else {  /* 5.4 accepts any value; the first step raises the index error. */
+    lj_trace_err(J, LJ_TRERR_BADTYPE);
+  }
 }
 
 static void LJ_FASTCALL recff_xpairs(jit_State *J, RecordFFData *rd)
@@ -630,7 +634,9 @@ static void LJ_FASTCALL recff_xpairs(jit_State *J, RecordFFData *rd)
       J->base[1] = tr;
       J->base[2] = rd->data ? lj_ir_kint(J, 0) : TREF_NIL;
       rd->nres = 3;
-    }  /* else: Interpreter will throw. */
+    } else {  /* 5.4 accepts any value and the error comes on first step. */
+      lj_trace_err(J, LJ_TRERR_BADTYPE);
+    }
   }
 }
 
@@ -926,16 +932,23 @@ static void LJ_FASTCALL recff_math_minmax(jit_State *J, RecordFFData *rd)
   if (recff_math_minmax_i64(J, rd)) return;
   for (i = 0; J->base[i] != 0; i++)
     if (tref_istype(J->base[i], IRT_I64)) { recff_nyiu(J, rd); return; }
-  tr = lj_ir_tonumber(J, J->base[0]);
+  /* 5.4 lmathlib: the winning argument keeps its subtype, and a numeric string
+  ** next to a number raises a compare error. Trace only uniform int/int or
+  ** float/float argument lists; mixed or non-number lists stay interpreted. */
+  if (!tref_isinteger(J->base[0]) && !tref_isnum(J->base[0]))
+    lj_trace_err(J, LJ_TRERR_BADTYPE);
   for (i = 1; J->base[i] != 0; i++) {
-    TRef tr2 = lj_ir_tonumber(J, J->base[i]);
-    IRType t = IRT_INT;
-    if (!(tref_isinteger(tr) && tref_isinteger(tr2))) {
-      if (tref_isinteger(tr)) tr = emitir(IRTN(IR_CONV), tr, IRCONV_NUM_INT);
-      if (tref_isinteger(tr2)) tr2 = emitir(IRTN(IR_CONV), tr2, IRCONV_NUM_INT);
-      t = IRT_NUM;
-    }
-    tr = emitir(IRT(op, t), tr, tr2);
+    if (tref_isinteger(J->base[0]) != tref_isinteger(J->base[i]) ||
+	(!tref_isinteger(J->base[i]) && !tref_isnum(J->base[i])))
+      lj_trace_err(J, LJ_TRERR_BADTYPE);
+  }
+  tr = J->base[0];
+  for (i = 1; J->base[i] != 0; i++) {
+    /* IR_MIN/IR_MAX with best first: false comparison keeps the first operand,
+    ** matching PUC on ties, NaN and signed zero. Uniform types only (above),
+    ** so the winning subtype survives. */
+    tr = emitir(IRT(op, tref_isinteger(tr) ? IRT_INT : IRT_NUM),
+		tr, J->base[i]);
   }
   J->base[0] = tr;
 }
@@ -1834,6 +1847,11 @@ static void LJ_FASTCALL recff_io_write(jit_State *J, RecordFFData *rd)
   TRef one = lj_ir_kint(J, 1);
   ptrdiff_t i = rd->data == 0 ? 1 : 0;
   for (; J->base[i]; i++) {
+    /* 5.4 g_write renders floats with "%.14g" (no ".0" suffix); the trace
+    ** string conversion uses tostring rules, so float arguments abort the
+    ** trace, as do non-string non-integer values (g_write wants strings). */
+    if (!tref_isstr(J->base[i]) && !tref_isinteger(J->base[i]))
+      lj_trace_err(J, LJ_TRERR_BADTYPE);
     TRef str = lj_ir_tostr(J, J->base[i]);
     TRef buf = emitir(IRT(IR_STRREF, IRT_PGC), str, zero);
     TRef len = emitir(IRTI(IR_FLOAD), str, IRFL_STR_LEN);

@@ -287,7 +287,7 @@ LUA_API int  (lua_resetthread) (lua_State *L);  /* Deprecated since 5.4.6. */
 #define LUA_GCGEN		10	/* 5.4: accepted; LuaJIT keeps one incremental GC */
 #define LUA_GCINC		11
 
-LUA_API int (lua_gc) (lua_State *L, int what, int data);
+LUA_API int (lua_gc) (lua_State *L, int what, ...);
 
 
 /*

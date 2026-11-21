@@ -628,6 +628,9 @@ static int pmain(lua_State *L)
   /* Stop collector during library initialization. */
   lua_gc(L, LUA_GCSTOP, 0);
   luaL_openlibs(L);
+  /* 5.4 lua.c pmain: the standalone interpreter selects generational mode
+  ** (luaL_newstate keeps its incremental default, as in PUC's lauxlib). */
+  lua_gc(L, LUA_GCGEN, 0, 0);
   lua_gc(L, LUA_GCRESTART, -1);
 
   createargtable(L, argv, s->argc, argn);

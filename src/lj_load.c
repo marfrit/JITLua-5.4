@@ -43,8 +43,10 @@ static TValue *cpparser(lua_State *L, lua_CFunction dummy, void *ud)
       if (c == (LJ_FR2 ? 'W' : 'X')) ls->fr2 = !LJ_FR2;
     }
     if (xmode) {
-      /* 5.4 names the actual chunk kind and the requested mode. */
-      setstrV(L, L->top++, lj_err_str(L, bc ? LJ_ERR_XMODEB : LJ_ERR_XMODET));
+      /* 5.4 ldo.c checkmode: names the actual chunk kind and echoes the
+      ** requested mode string verbatim. */
+      lua_pushfstring(L, "attempt to load a %s chunk (mode is '%s')",
+		      bc ? "binary" : "text", ls->mode);
       lj_err_throw(L, LUA_ERRSYNTAX);
     }
   }

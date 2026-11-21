@@ -1085,12 +1085,14 @@ static void bcemit_binop(FuncState *fs, BinOpr op, ExpDesc *e1, ExpDesc *e2)
       e1->u.s.info = e2->u.s.info;
     } else {
       expr_tonextreg(fs, e2);
+      /* The GC check of BC_CAT uses one past the last operand as the live
+      ** top: the operands must be the topmost temporaries. */
+      lj_assertFS(e2->u.s.info + 1 == fs->freereg &&
+		  e1->u.s.info + 1 == e2->u.s.info,
+		  "CAT operands not consecutive at the free register");
       expr_free(fs, e2);
       expr_free(fs, e1);
       e1->u.s.info = bcemit_ABC(fs, BC_CAT, 0, e1->u.s.info, e2->u.s.info);
-      lj_assertFS(bc_c(*bcptr(fs, e1)) == fs->freereg &&
-		  bc_b(*bcptr(fs, e1)) < bc_c(*bcptr(fs, e1)),
-		  "CAT operands not consecutive at the free register");
     }
     e1->k = VRELOCABLE;
   } else {

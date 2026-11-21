@@ -738,6 +738,8 @@ typedef struct global_State {
   /* 5.4 C-call bound: levels the C stack is deeper than ccallnest of the
   ** running thread says, while __close handlers run during an unwinding. */
   MSize ccallslack;
+  /* Ephemeron index while the atomic phase converges (lj_gc.c), else NULL. */
+  struct GCEph *gceph;
 } global_State;
 
 #define mainthread(g)	(&gcref(g->mainthref)->th)

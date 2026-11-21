@@ -7,6 +7,65 @@ target x86_64 (GC64) and arm64.
 
 ## Language and VM
 
+- JIT: a GC check at the head of a compiled inner loop set live locals of
+  the enclosing loop body to nil. The generalised dead-slot clearing looked
+  for the loop's back edge by scanning forward from the trace's start for the
+  first backward jump; an inner `break` that the parser threads to the outer
+  loop's back edge, or a `goto` to the LOOP of an enclosing `repeat`, is such
+  a jump, so the outer loop's register bound was taken and the slots above it
+  cleared (`attempt to index a nil value (local 'a')` at `-O0`..`-O3`, x86_64
+  and aarch64). The clearing is back to the stock rule: only traces that read
+  a weak table clear the slots above the loop's registers, and no bytecode is
+  scanned per GC step. Other compiled loops keep their dead slots alive until
+  the trace exits (IMPL-DEFINED, entry "A compiled loop whose allocations the
+  JIT eliminates" in DIFFERENCES.md). `tests/d54/gc_14_jit_outer_loop_slots.lua`
+  (nested `break`, `for` outer loop, `goto` to `repeat`, weak trace).
+- The dump format version is 0x85. The parser keeps a table constructor or
+  closure at the free register and the VM takes `dst+1` as the live top of
+  their GC check, so bytecode written before that change (version 0x84) loses
+  live locals above the destination when the atomic phase clears the slots
+  above the top. Such a dump is now refused with the normal "cannot load
+  incompatible bytecode" error instead of loading
+  (`tests/d54/dump_04_old_version.lua`; PUC refuses a foreign version too).
+- Ephemeron convergence is linear in the number of entries. Each pass
+  traversed every ephemeron table again until no value was newly marked; a
+  chain whose keys are reached only through the previous entry's value took
+  one pass per link, i.e. quadratic work in one atomic step (LuaJIT's mixed
+  pointer hash does not follow the chain order, which PUC's often does). After
+  two plain passes the atomic phase now indexes the pending entries (white
+  key, white value) by key in a temporary hash; while it converges `gc_mark`
+  reports each newly marked object, and the values of its entries are queued
+  and marked. Ephemeron tables found during the convergence are indexed as
+  they appear; without memory for the index the plain passes finish the
+  fixpoint. One full collection over a 20000/40000-entry chain, `-joff`,
+  interleaved medians of 7: x86_64 2.22/11.81 s before, 0.0085/0.0214 s
+  after (PUC 0.086/0.197 s, single run); aarch64 0.32/1.38 s before,
+  0.0033/0.0041 s after (PUC 0.015/0.025 s); the base values spread widely
+  (x86_64 9.8-16.5 s at 40000) with the hash layout, the new ones do not
+  (`tests/bench/ephemeron-chain.lua`; `tests/d54/gc_16_ephemeron_chain.lua`
+  checks the fixpoint over one table, two tables and a nested table).
+- `collectgarbage("stop")` holds across `"collect"` and an explicit step.
+  The end of a collection set the normal threshold, so after `"collect"` or
+  `step(0)` the collector ran automatically again while `isrunning` said
+  false (200000 garbage tables grew the heap by 66 KB instead of PUC's 14 MB),
+  and `step(n)` while stopped computed its debt against the parked threshold,
+  did nothing and returned false. As in 5.4 (`lapi.c` `lua_gc` with
+  `g->gcstp`, `lgc.c` `luaC_step`), `lj_gc_step` does nothing while the user
+  stop is set, the end of a cycle keeps the threshold parked, and a step of
+  `n` KB while stopped does `n` KB of work and reports the end of a cycle
+  (`tests/d54/gc_15_stopped_collect.lua`).
+- The parser no longer reads the name of an invalidated label when it
+  resolves backward gotos at the end of a scope (`gola_fixup`): a `goto`
+  that leaves two nested scopes made it dereference a nulled name, which the
+  sanitizer build reports as undefined behaviour (x86_64 and aarch64, found
+  by `tests/d54/gc_14_jit_outer_loop_slots.lua`); the generated code is
+  unchanged.
+- `luajit -bl` printed the jump targets of forward jumps and loop exits as
+  numbers near 2^48 (`=> 281474976645133`): `jit.util.funcbc` returns the
+  instruction as a signed 32-bit integer, and `src/jit/bc.lua` shifted it with
+  the 64-bit `>>`. The D and B fields are masked now; `tests/jitutil-smoke.sh`
+  checks every target of a `-bl` listing with loops and forward jumps
+  (`tests/lib/bclist-fixture.lua`, `bclist-check.lua`).
 - `collectgarbage("step", n)` with `n > 0` works off `n` KB of extra debt
   before it returns, as PUC's `incstep` does, so a larger `n` finishes a cycle
   in fewer calls and a huge one in a single call (`gc.lua:201/205`); a

@@ -108,9 +108,11 @@ end
 -- t1, t5 and j5 allocate only tables that the JIT eliminates (allocation
 -- sinking). A compiled loop whose allocations are eliminated does not advance
 -- the collector, so under the JIT their finalizer need not run (IMPL-DEFINED,
--- docs/DIFFERENCES.md). They assert the interpreter, which follows PUC; t1j
--- and j5j are the same shapes with an allocation that escapes, so the JIT's
--- dead-slot clearing is asserted as well.
+-- docs/DIFFERENCES.md). They assert the interpreter, which follows PUC. t1j
+-- and j5j are the same shapes with an allocation that escapes; a compiled
+-- loop keeps its dead stack slots alive until the trace exits (same entry),
+-- so they too assert the interpreter, and under the JIT only the live-local
+-- column is compared (t1j_jit, j5j_jit below).
 local jit = rawget(_G, "jit")
 if jit then jit.off(t1); jit.off(t5) end
 
@@ -120,7 +122,22 @@ pf("t3 closure lower local", t3())
 p("t4 array constructor", t4())
 pf("t5 table above", t5())
 pf("t6 closure above", t6())
+-- t1j again for the JIT (its own prototype, so jit.off(t1j) does not reach
+-- it): the finalizer may wait for the trace to exit, the live local may not.
+local function t1jc()
+  local u
+  local b
+  local finish = false
+  u = setmetatable({}, {__gc = function() finish = true end})
+  b = {34}
+  local keep = {}
+  local n = 0
+  repeat u = {}; keep[1] = u; n = n + 1 until finish or n > 200000
+  return b[1] == 34
+end
+if jit then jit.off(t1j) end
 pf("t1j escaping table", t1j())
+p("t1j compiled, live local", t1jc())
 
 -- Semantics of values across a GC check at a loop head (JIT and interpreter).
 local function j1()
@@ -174,6 +191,15 @@ local function j5j()
   return finish, acc > 0
 end
 
-if jit then jit.off(j5) end
+local function j5jc()
+  local finish = false
+  setmetatable({}, {__gc = function() finish = true end})
+  local acc, hold = 0, {}
+  for i = 1, 40000 do local t = {}; hold[1] = t; acc = acc + i + #t end
+  return acc
+end
+
+if jit then jit.off(j5); jit.off(j5j) end
 do local f, a = j5(); pf("j5 anonymous dead slot", f, a, true) end
 do local f, a = j5j(); pf("j5j escaping table", f, a, true) end
+p("j5j compiled, result", j5jc())

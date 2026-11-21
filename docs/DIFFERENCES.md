@@ -212,15 +212,37 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   elimination (stock LuaJIT optimizations), so the compiled loop allocates
   nothing and never reaches a GC step, while PUC allocates every object. A loop
   that allocates only to wait for a finalizer or for a weak-table entry to be
-  cleared may therefore not end under the JIT; the interpreter (`-joff`, and
-  `-O0`..`-O2`, which do not sink) follows PUC. A trace that read a weak table
+  cleared may therefore not end under the JIT; the interpreter (`-joff`)
+  follows PUC. A trace that read a weak table
   keeps its allocations. The manual does not say when the collector runs.
   `gc.lua`'s GC1/GC2 loops (lines 57-93, `repeat u = {} until finish`) do not
-  end under `-jon` on x86_64 and aarch64 (mode B row in
+  end under `-jon` on x86_64 and aarch64: at `-O3` for this reason, at
+  `-O0`..`-O2` for the dead-slot reason below (mode B row in
   `tests/known-different.tsv`); `tests/d54/gc_13_dropped_alloc_pace.lua`
   asserts the interpreter. Charging such loops a virtual allocation per pass
   would end them, but costs a vector-add loop with a sunk table 50 vs 156 ms
   (x86_64, `-jon`); that was not taken.
+  A compiled loop also keeps its dead stack slots alive until the trace
+  exits. The trace holds locals in registers and writes the stack only at an
+  exit, so a value the interpreter left in a slot that the loop overwrites or
+  no longer reads stays a GC root while the trace runs; PUC's `checkGC`
+  narrows the top at every constructor, closure and concatenation, and the
+  interpreter here does the same. The collector's atomic phase can run inside
+  the trace's GC step, before an exit writes the slots back, which is what
+  keeps `gc.lua`'s GC1/GC2 waiting at `-O0`..`-O2` (`u` still holds the
+  finalizable object). Only a trace that reads a weak table clears
+  the slots above its loop's registers at the loop-head GC check (the stock
+  rule, `lj_gc.c` `gc_jit_cleardead`). A general bound computed from a
+  bytecode scan at every GC step was tried and removed: it took a backward
+  jump out of the loop for the loop's back edge (an inner `break` threaded to
+  the enclosing loop, a `goto` to a `repeat`) and set live locals of the
+  enclosing body to nil, on x86_64 and aarch64 at `-O0`..`-O3`
+  (`tests/d54/gc_14_jit_outer_loop_slots.lua`), and it scanned the bytecode
+  at every step. Not tried yet: a bound from the snapshot use-def analysis
+  (`lj_snap.c` `snap_usedef`), which the JIT already relies on for its exits.
+  Evidence: `measured-here`, both arches; `tests/d54/gc_08_dead_slots.lua`
+  (`t1j`, `j5j`) and `gc_12_jit_dead_reads.lua` (`r4`) assert the
+  interpreter and compare only the live locals under `-jon`.
 
 ### Known JIT/performance rows (not semantic divergences)
 

@@ -70,7 +70,7 @@ local function bcline(func, pc, prefix)
   local op = sub(bcnames, oidx+1, oidx+6)
   local s = format("%04d %s %-6s %3s ",
     pc, prefix or "  ", op, ma == 0 ? "" : a)
-  local d = ins >> 16
+  local d = (ins >> 16) & 0xffff -- ins is a signed 32-bit value
   if mc == 13 then -- BCMjump
     return format("%s=> %04d\n", s, pc+d-0x7fff)
   end
@@ -101,7 +101,7 @@ local function bcline(func, pc, prefix)
     if kc then kc = ka.." ; "..kc else kc = ka end
   end
   if mb != 0 then
-    local b = ins >> 24
+    local b = (ins >> 24) & 0xff
     if kc then return format("%s%3d %3d  ; %s\n", s, b, d, kc) end
     return format("%s%3d %3d\n", s, b, d)
   end
@@ -116,7 +116,9 @@ local function bctargets(func)
   for pc=1,1000000000 do
     local ins, m = funcbc(func, pc)
     if not ins then break end
-    if m & (15 << 7) == (13 << 7) then target[pc+(ins >> 16)-0x7fff] = true end
+    if m & (15 << 7) == (13 << 7) then
+      target[pc+((ins >> 16) & 0xffff)-0x7fff] = true
+    end
   end
   return target
 end

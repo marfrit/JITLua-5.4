@@ -1080,3 +1080,25 @@ target x86_64 (GC64) and arm64.
   prints the message shape (location, frame count, handler still runnable); it
   was red in mode A and mode B before the change. `docs/DIFFERENCES.md` keeps
   only the recursion depth itself, which is an implementation limit.
+- `math.min`/`math.max` with an integer next to a float (`math.max(x, 0)`
+  with a float `x`, a clamp `math.min(1, math.max(0, x))`) aborted every
+  trace that reached it. The 5.4 rule returns the winning argument with its
+  own subtype, which `IR_MIN`/`IR_MAX` on converted values cannot give, so
+  the recorder left mixed lists to the interpreter with a trace abort, and
+  the whole loop then ran interpreted. The recorder (`recff_math_minmax`)
+  now records PUC's comparisons (`lmathlib.c`: min takes the next argument
+  if it is less than the best, max if the best is less than it) as guards
+  for the outcome seen while recording and returns the winning argument as
+  it is; the guard for "not less" is the unordered comparison, so a NaN
+  keeps the earlier argument. A trace that meets the other outcome leaves
+  through the guard. Uniform lists keep `IR_MIN`/`IR_MAX`. Measured (median
+  of 7, interleaved, seconds: before the 5.4 min/max rule, before this
+  change, now), `s = s + math.max(i * 0.5 - 10, 0)`, 1e8 iterations, `-jon`:
+  x86_64 0.236 / 13.178 / 0.236, aarch64 0.051 / 2.412 / 0.051; the clamp
+  0.236 / 14.947 / 0.237 and 0.051 / 3.309 / 0.051. In the interpreter a
+  mixed list still goes from the assembler fast path to the C function
+  (which now compares plain numbers itself): 2e7 iterations of the clamp,
+  `-joff`, x86_64 2.201 / 2.990 / 2.725, aarch64 0.455 / 0.603 / 0.595, i.e.
+  1.24 and 1.31 times the time before the rule; an assembler path for mixed
+  lists in both backends would be needed to close that.
+  `tests/d54/math_05_minmax_mixed_jit.lua` (the marked loops must compile).

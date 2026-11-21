@@ -382,7 +382,7 @@ LUA_API int lua_isnumber(lua_State *L, int idx)
 LUA_API int lua_isstring(lua_State *L, int idx)
 {
   cTValue *o = index2adr(L, idx);
-  return (tvisstr(o) || tvisnumber(o));
+  return (tvisstr(o) || tvisnumber(o) || tvisi64(o));  /* ADR-001b box */
 }
 
 LUA_API int lua_isuserdata(lua_State *L, int idx)

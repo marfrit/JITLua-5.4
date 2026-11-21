@@ -1524,6 +1524,8 @@ retry_tailret:
       lj_record_stop(J, LJ_TRLINK_RETURN, 0);  /* Return to interpreter. */
       return;
     }
+    if (frame_contv(frame) == LJ_CONT_TBCERR)  /* 5.4 error-path __close. */
+      lj_trace_err(J, LJ_TRERR_NYIRETL);
     if ((J->framedepth -= 2) < 0)
       lj_trace_err(J, LJ_TRERR_NYIRETL);
     J->baseslot -= (BCReg)cbase;

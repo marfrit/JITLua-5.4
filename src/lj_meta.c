@@ -1223,6 +1223,69 @@ int lj_meta_tbccloseall_at(lua_State *L, TValue *level, TValue *err,
   return status;
 }
 
+/* 5.4 error path of a pcall/xpcall called from Lua (PUC ldo.c finishpcallk,
+** luaF_close with yy=1): the pending slots of the protected call are closed
+** from the VM, one handler call at a time, after the C stack of the error is
+** gone, so a handler can yield and an error in it is caught by the same
+** pcall. err_unwind leaves L->base at the protected function's frame (the
+** anchor: its FRAME_PCALL link is intact, its function slot holds the thread
+** as a dummy frame) and the error object at L->top-1, above the highest
+** pending slot; cont_tbcerr gets here again after each handler with the error
+** object at L->top-1 = o+1. Sets up the call of the next handler at or above
+** the anchor and returns its base, or puts the error object into the pcall's
+** result slot, sets L->base to the pcall frame and returns NULL. Layout for
+** the slot o being closed: o+1 error object, o+2/o+3 continuation, o+4
+** handler, o+5 frame link (the VM writes it: FRAME_CONT to the anchor),
+** o+6 value, o+7 error object. Everything still pending is below o.
+*/
+TValue * LJ_FASTCALL lj_meta_tbcerr(lua_State *L)
+{
+  TValue *level = L->base;
+  for (;;) {
+    int32_t *list = mref(L->tbclist, int32_t);
+    TValue *err = L->top - 1;
+    TValue *o;
+    cTValue *mo;
+    MSize nest;
+    if (L->tbcn == 0 || (o = restorestack(L, list[L->tbcn-1])) < level) {
+      TValue *pbase = frame_prevd(level-1) + 1;
+      copyTV(L, pbase, err);
+      L->top = pbase + 1;
+      L->base = pbase;
+      return NULL;
+    }
+    L->tbcn--;
+    if (err != o+1) copyTV(L, o+1, err);
+    L->top = o+2;
+    /* The handler is called from the pcall's nesting, as the C loop does
+    ** (lj_meta_tbccloseall_at): the pcall is counted out when the chain is
+    ** done, see vm_unwind_ff_tail. */
+    nest = L->ccallnest;
+    if (L->ccallbase < nest) nest--;
+    if (lj_err_ccallover_n(nest)) {
+      int errerr = (nest != LJ_MAX_CCALLS);
+      setstrV(L, o+1, lj_err_str(L, errerr ? LJ_ERR_ERRERR : LJ_ERR_CSTKOV));
+      continue;
+    }
+    {  /* The check can move the stack. */
+      ptrdiff_t lofs = savestack(L, level), oofs = savestack(L, o);
+      lj_state_checkstack(L, 6 + LUA_MINSTACK);
+      level = restorestack(L, lofs);
+      o = restorestack(L, oofs);
+    }
+    mo = lj_meta_lookup(L, o, MM_close);
+    (o+2)->u64 = LJ_CONT_TBCERR;
+    setframe_pc(o+3, &G(L)->bc_cfunc_ext);
+    copyTV(L, o+4, mo);
+    setnilV(o+5);
+    copyTV(L, o+6, o);
+    copyTV(L, o+7, o+1);
+    L->top = o+8;
+    L->base = level;
+    return o+6;
+  }
+}
+
 /* Close to-be-closed slots marked by lua_toclose when a C function returns.
 ** The VM calls this only on the slow path when L->tbcn != 0. Slots below the
 ** C function base belong to outer frames and stay pending. */

@@ -124,7 +124,10 @@ void LJ_FASTCALL lj_dispatch_update(global_State *g, int nolock)
   mode |= (g->hookmask & HOOK_PROFILE) ? (DISPMODE_PROF|DISPMODE_INS) : 0;
 #endif
   mode |= (g->hookmask & (LUA_MASKLINE|LUA_MASKCOUNT)) ? DISPMODE_INS : 0;
-  mode |= (g->hookmask & LUA_MASKCALL) ? DISPMODE_CALL : 0;
+  /* The return mask needs the call dispatch, too: lj_dispatch_call leaves
+  ** the note (L->hookff) the return event of an ASM fast function is fired
+  ** from, see lj_dispatch_ffret. */
+  mode |= (g->hookmask & (LUA_MASKCALL|LUA_MASKRET)) ? DISPMODE_CALL : 0;
   mode |= (g->hookmask & LUA_MASKRET) ? DISPMODE_RET : 0;
   if (oldmode != mode) {  /* Mode changed? */
     ASMFunction *disp = G2GG(g)->dispatch;
@@ -562,6 +565,59 @@ TValue * LJ_FASTCALL lj_dispatch_pret(lua_State *L, TValue *res, int n,
   return res;
 }
 
+/* Return hook of a C function that yielded (coroutine.yield, or a C
+** function ending in lua_yield). PUC finishes that call when the coroutine
+** is resumed (ldo.c resume -> luaD_poscall -> rethook), so the event fires
+** here, from vm_resume, with the values passed to resume as the transfer
+** values: they are at res..L->top, L->base is the yielding function's base
+** and its function slot is intact. A yield from a hook left a pseudo-frame
+** with the thread in that slot instead: that is no call to finish. Returns
+** res, which moves if the hook grew the stack.
+*/
+TValue * LJ_FASTCALL lj_dispatch_yret(lua_State *L, TValue *res)
+{
+  global_State *g = G(L);
+  setmref(L->hookff, NULL);  /* The note of the yield's call hook is stale. */
+  if ((g->hookmask & LUA_MASKRET) && !hook_active(g) &&
+      tvisfunc(L->base-1-LJ_FR2)) {
+    ERRNO_SAVE
+    ptrdiff_t resofs = savestack(L, res);
+    MSize n = (MSize)(L->top - res);
+    callhook(L, LUA_HOOKRET, -1, n ? (MSize)(res - L->base) + 1 : 0, n);
+    res = restorestack(L, resofs);
+    ERRNO_RESTORE
+  }
+  return res;
+}
+
+/* Return hook of a Lua function that ended in a tail call to a C function
+** (5.4: lvm.c OP_TAILCALL finishes the caller with luaD_poscall after the C
+** function returned). Called from cont_tailret with L->base set to the
+** caller, the cframe PC after its CALLT and the n results at res. PUC has
+** the results at the callee's slot, so they move down there first: that
+** is what ftransfer and debug.getlocal in the hook see. Returns res.
+*/
+TValue * LJ_FASTCALL lj_dispatch_tailret(lua_State *L, TValue *res, int n)
+{
+  global_State *g = G(L);
+  if ((g->hookmask & LUA_MASKRET) && !hook_active(g)) {
+    ERRNO_SAVE
+    const BCIns *pc = cframe_pc(cframe_raw(L->cframe));
+    TValue *dst = L->base + bc_a(pc[-1]);
+    ptrdiff_t resofs;
+    if (dst < res) {
+      memmove(dst, res, (size_t)n*sizeof(TValue));
+      res = dst;
+    }
+    resofs = savestack(L, res);
+    L->top = res + n;
+    callhook(L, LUA_HOOKRET, -1, n ? (MSize)(res - L->base) + 1 : 0, (MSize)n);
+    res = restorestack(L, resofs);
+    ERRNO_RESTORE
+  }
+  return res;
+}
+
 int LJ_FASTCALL lj_dispatch_cret(lua_State *L, int n)
 {
   /* n >= 0: a negative count is a yield, whose pending slots lua_yield
@@ -634,7 +690,7 @@ ASMFunction LJ_FASTCALL lj_dispatch_call(lua_State *L, const BCIns *pc)
 	       "unbalanced stack after hot instruction");
   }
 #endif
-  if ((g->hookmask & LUA_MASKCALL) && !hook_active(g)) {
+  if ((g->hookmask & (LUA_MASKCALL|LUA_MASKRET)) && !hook_active(g)) {
     int i;
     /* 5.4 "tail call" event: BC_CALLT marked the frame. C callees get a
     ** plain "call", their frame is never marked. */
@@ -643,10 +699,11 @@ ASMFunction LJ_FASTCALL lj_dispatch_call(lua_State *L, const BCIns *pc)
 				    (MSize)(L->top - L->base);
     /* An ASM fast function whose fallback handler returned FFH_RETRY is
     ** re-dispatched through its header: that is the same call, no second
-    ** event. Its return event comes from lj_dispatch_ffret() (hookff). */
+    ** event. Its return event comes from lj_dispatch_ffret() (hookff),
+    ** which needs this note with the return mask alone as well. */
     int isasmff = bc_op(pc[-1]) >= BC__MAX;
     setmref(L->hookff, isasmff ? fn : NULL);
-    if (!retry) {
+    if (!retry && (g->hookmask & LUA_MASKCALL)) {
       for (i = 0; i < missing; i++)  /* Add missing parameters. */
 	setnilV(L->top++);
       callhook(L, tail ? LUA_HOOKTAILCALL : LUA_HOOKCALL, -1, nparams ? 1 : 0,

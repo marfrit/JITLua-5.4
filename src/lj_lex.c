@@ -628,6 +628,7 @@ int lj_lex_setup(lua_State *L, LexState *ls)
   ls->vstack = NULL;
   ls->sizevstack = 0;
   ls->vtop = 0;
+  ls->nlabel = ls->ngoto = 0;
   ls->bcstack = NULL;
   ls->sizebcstack = 0;
   ls->tok = 0;

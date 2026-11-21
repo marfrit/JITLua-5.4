@@ -112,15 +112,36 @@ LJ_NOINLINE static void unwindstack(lua_State *L, TValue *top)
   lj_state_relimitstack(L);
 }
 
+#if LJ_TBCERR_CHAIN
+/* The same for an unwinding whose catching pcall closes the pending slots
+** from the VM (lj_meta_tbcerr): the slots at or above top stay registered,
+** and the error object goes above the highest of them. */
+static void unwindstack_keep(lua_State *L, TValue *top)
+{
+  lj_func_closeuv(L, top);
+  if (L->tbcn > 0) {
+    TValue *hi = restorestack(L, mref(L->tbclist, int32_t)[L->tbcn-1]) + 1;
+    if (hi > top) top = hi;
+  }
+  if (top < L->top-1) {
+    copyTV(L, top, L->top-1);
+    L->top = top+1;
+  }
+  lj_state_relimitstack(L);
+}
+#endif
+
 /* 5.4 to-be-closed variables: does an error starting at frame/cf reach a
 ** catching frame in this thread (pcall(), lua_pcall, lua_cpcall)? A dying
 ** coroutine keeps its pending variables for coroutine.close. Mirrors the
 ** frame walk of err_unwind() without side effects. Returns the C-call
 ** nesting (L->ccallnest) the catching frame leaves when it catches, or -1
 ** without a catcher: the frames entered from C on the way count out. */
-static int64_t tbc_catchlevel(lua_State *L, TValue *frame, void *cf)
+static int64_t tbc_catchlevel(lua_State *L, TValue *frame, void *cf,
+			      int *chain)
 {
   MSize nest = L->ccallnest;
+  *chain = 0;
   while (cf) {
     int32_t nres = cframe_nres(cframe_raw(cf));
     if (nres < 0 && frame < restorestack(L, -nres)) return (int64_t)nest;
@@ -139,6 +160,7 @@ static int64_t tbc_catchlevel(lua_State *L, TValue *frame, void *cf)
       /* fallthrough */
     case FRAME_VARG: frame = frame_prevd(frame); break;
     case FRAME_PCALL: case FRAME_PCALLH:
+      *chain = LJ_TBCERR_CHAIN;  /* The pcall closes them from the VM. */
       return (int64_t)(L->ccallbase < nest ? nest-1 : nest);
     }
   }
@@ -235,8 +257,11 @@ static void *err_unwind(lua_State *L, void *stopcf, int errcode)
     unwind_c:
 #if LJ_UNWIND_EXT
       if (errcode) {
-	int64_t level = tbc_catchlevel(L, frame_prevd(frame), cframe_prev(cf));
-	if (level >= 0) {
+	int chain;
+	int64_t level = tbc_catchlevel(L, frame_prevd(frame), cframe_prev(cf),
+				       &chain);
+	if (errcode == LUA_YIELD) chain = 0;
+	if (level >= 0 && !chain) {
 	  ptrdiff_t fofs = savestack(L, frame);
 	  /* 5.4: the __close handlers run at the level of the catching
 	  ** frame, although the C frames below it are still to be unwound. */
@@ -246,6 +271,12 @@ static void *err_unwind(lua_State *L, void *stopcf, int errcode)
 	}
 	L->base = frame_prevd(frame) + 1;
 	L->cframe = cframe_prev(cf);
+#if LJ_TBCERR_CHAIN
+	if (chain) {  /* A pcall below closes them from the VM: keep them. */
+	  unwindstack_keep(L, frame - LJ_FR2);
+	  return NULL;  /* Continue unwinding. */
+	}
+#endif
 	unwindstack(L, frame - LJ_FR2);
       } else if (cf != stopcf) {
 	cf = cframe_prev(cf);
@@ -271,8 +302,10 @@ static void *err_unwind(lua_State *L, void *stopcf, int errcode)
       if (errcode) {
 	ptrdiff_t fofs = savestack(L, frame);
 	/* 5.4: the __close handlers run at the catching level, then the
-	** protected call from C (lj_vm_pcall) counts out. */
-	tbc_closeunwound(L, frame + 1, cf, frame + 1,
+	** protected call from C (lj_vm_pcall) counts out. Their caller is the
+	** C function that made the protected call (PUC luaD_pcall restores
+	** L->ci before closing), not the frames being discarded. */
+	tbc_closeunwound(L, frame + 1, cf, frame_prevd(frame) + 1,
 			 L->ccallnest > 0 ? L->ccallnest - 1 : 0);
 	err_ccallout(L);
 	frame = restorestack(L, fofs);  /* Handlers may grow the stack. */
@@ -300,6 +333,22 @@ static void *err_unwind(lua_State *L, void *stopcf, int errcode)
 	setgcref(g->cur_L, obj2gco(L));
 	if (frame_typep(frame) == FRAME_PCALL)
 	  hook_leave(g);
+#if LJ_TBCERR_CHAIN
+	if (L->tbcn > 0 && restorestack(L,
+	      mref(L->tbclist, int32_t)[L->tbcn-1]) >= frame + 1) {
+	  /* 5.4: the pending __close handlers of the protected call run from
+	  ** the VM, after the C stack is unwound (PUC finishpcallk): the
+	  ** landing pad sees the dummy in the function slot and runs
+	  ** vm_tbcerr. The FRAME_PCALL link stays, so an error in a handler is
+	  ** caught here again; the dummy hides the dead frame from the debug
+	  ** levels, a handler's caller is the pcall. */
+	  setframe_gc(frame - LJ_FR2, obj2gco(L), LJ_TTHREAD);
+	  unwindstack_keep(L, frame + 1);
+	  L->base = frame + 1;
+	  L->cframe = cf;
+	  return (void *)((intptr_t)cf | CFRAME_UNWIND_FF);
+	}
+#endif
 	{
 	  ptrdiff_t fofs = savestack(L, frame);
 	  /* 5.4: the __close handlers run at the catching level. The pcall

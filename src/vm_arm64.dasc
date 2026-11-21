@@ -521,6 +521,14 @@ static void build_subroutines(BuildCtx *ctx)
   |   ldr GL, L->glref			// Setup pointer to global state.
   |->vm_unwind_ff_eh:			// Landing pad for external unwinder.
   |  bti_tailcall
+  |  // 5.4: a thread in the function slot is the anchor err_unwind left for
+  |  // the pending __close handlers of the protected call: run them first.
+  |  ldr BASE, L->base
+  |  ldr TMP0, [BASE, FRAME_FUNC]
+  |  asr ITYPE, TMP0, #47
+  |  cmn ITYPE, #-LJ_TTHREAD
+  |  beq >8
+  |->vm_unwind_ff_tail:		// Also the end of vm_tbcerr.
   |  ldr TMP2w, L->ccallnest		// Count out like vm_returnp.
   |  ldr TMP3w, L->ccallbase
   |  cmp TMP2w, TMP3w
@@ -545,6 +553,22 @@ static void build_subroutines(BuildCtx *ctx)
   |  sub RA, BASE, #8			// Results start at BASE-8.
   |    str TMP0, [BASE, #-8]		// Prepend false to error message.
   |  b ->vm_returnc
+  |
+  |8:
+  |   st_vmstate ST_INTERP
+  |  // Fallthrough.
+  |
+  |->vm_tbcerr:			// Error-path __close chain (5.4).
+  |  // L->base = anchor, error object at L->top-1.
+  |  mov CARG1, L
+  |  bl extern lj_meta_tbcerr		// (lua_State *L)
+  |  cbz CRET1, ->vm_unwind_ff_tail	// None left: pcall returns false, err.
+  |  ldr RB, L->base			// The anchor: old base for vmeta_call.
+  |  sub TMP1, CRET1, RB
+  |  add PC, TMP1, #FRAME_CONT		// Link to the anchor.
+  |  mov BASE, CRET1
+  |  mov NARGS8:RC, #16			// __close(value, err).
+  |  b ->vm_call_dispatch
   |
   |//-----------------------------------------------------------------------
   |//-- Grow stack for calls -----------------------------------------------
@@ -597,18 +621,28 @@ static void build_subroutines(BuildCtx *ctx)
   |
   |  // Resume after yield (like a return).
   |  str L, GL->cur_L
+  |    init_constants
+  |     strb wzr, L->status
+  |     st_vmstate ST_INTERP
+  |  ldrb TMP1w, GL->hookmask
+  |  tbnz TMP1w, #LUA_HOOKRET, >8
+  |7:
   |  mov RA, BASE
   |   ldp BASE, CARG1, L->base
-  |    init_constants
   |  ldr PC, [BASE, FRAME_PC]
-  |     strb wzr, L->status
   |   sub RC, CARG1, BASE
   |  ands CARG1, PC, #FRAME_TYPE
   |   add RC, RC, #8
-  |     st_vmstate ST_INTERP
   |   str RCw, SAVE_MULTRES
   |  beq ->BC_RET_Z
   |  b ->vm_return
+  |
+  |8:  // 5.4: return hook of the C function that yielded, at resume time.
+  |  mov CARG1, L
+  |  mov CARG2, BASE
+  |  bl extern lj_dispatch_yret		// (lua_State *L, TValue *res)
+  |  mov BASE, CRET1			// Results, moved if the stack grew.
+  |  b <7
   |
   |->vm_pcall:				// Setup protected C frame and enter VM.
   |  // (lua_State *L, TValue *base, int nres1, ptrdiff_t ef)
@@ -697,6 +731,8 @@ static void build_subroutines(BuildCtx *ctx)
   |.if FFI
   |    bls >1
   |.endif
+  |  cmp CARG1, #3			// Before the load: the anchor has no
+  |  beq ->cont_tbcerr			// function in its slot.
   |  ldr CARG3, LFUNC:CARG3->pc
   |  ldr KBASE, [CARG3, #PC2PROTO(k)]
   |  cmp CARG1, #2
@@ -714,11 +750,34 @@ static void build_subroutines(BuildCtx *ctx)
   |.endif
   |
   |->cont_tailret:			// Return from a tail-called C function.
-  |  // RB = caller base, RA = resultptr, RC = (nresults+1)*8.
+  |  // RB = caller base, RA = resultptr, RC = (nresults+1)*8, PC = after CALLT.
   |  bti_jump
   |  mov BASE, RB			// Restore the caller base.
+  |  ldrb TMP0w, GL->hookmask
+  |  tbnz TMP0w, #LUA_HOOKRET, >2
+  |1:
   |  ldr PC, [BASE, FRAME_PC]		// Caller's own return PC.
   |  b ->BC_RETM_Z			// Caller returns the results: any frame type.
+  |
+  |2:  // 5.4: return hook of the caller, after the C function returned.
+  |  str BASE, L->base
+  |  str PC, SAVE_PC			// The CALLT position, for the line.
+  |  mov CARG1, L
+  |  mov CARG2, RA
+  |  lsr CARG3w, RCw, #3
+  |  sub CARG3w, CARG3w, #1
+  |  bl extern lj_dispatch_tailret	// (lua_State *L, TValue *res, int n)
+  |  mov RA, CRET1			// Results, moved down.
+  |  ldr BASE, L->base
+  |  b <1
+  |
+  |->cont_tbcerr:			// Error-path __close returned (5.4).
+  |  // BASE = anchor, CARG4 = meta base = o+6; the error object is at o+1.
+  |  bti_jump
+  |  sub TMP0, CARG4, #32		// o+2.
+  |  str BASE, L->base
+  |  str TMP0, L->top
+  |  b ->vm_tbcerr
   |
   |->cont_cat:				// RA = resultptr, CARG4 = meta base
   |  bti_jump

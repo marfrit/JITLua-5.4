@@ -52,10 +52,12 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   - pcall and xpcall are refused at and above the bound; PUC lets them use
     the 20 extra levels while a "C stack overflow" is handled. The other
     calls from C can use them here, too.
-  - `__close` handlers that run while an error unwinds, fail and start the
-    next round of handlers are refused with "error in error handling" once
-    they nest too deep on the C stack (PUC unwinds the C stack first and
-    keeps going).
+  - `__close` handlers that run while an error unwinds to a protected call
+    made from C (`lua_pcall`), fail and start the next round of handlers are
+    refused with "error in error handling" once they nest too deep on the C
+    stack (PUC unwinds the C stack first and keeps going). Under a `pcall`
+    or `xpcall` called from Lua the handlers run after the C stack is
+    unwound, as in PUC.
   - FFI callbacks are not counted.
 - `PENDING` `collectgarbage()` (and `lua_gc`) called from a finalizer runs a
   nested collection, finalizers included; PUC ignores the call there. The
@@ -79,16 +81,6 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
 - `IMPL-DEFINED` Sparse-table border for runtime-built tables may differ: 5.4
   allows any border; LuaJIT's array-growth policy differs from PUC's alimit hint
   (`tbl_03_border_divergence`).
-- `PENDING` A return hook without a call hook (`debug.sethook(f, "r")`) gets
-  no return event for some of the fast functions implemented in assembler
-  (measured: `tostring`, `string.sub`; `type` and `math.abs` do report):
-  their return event is fired from a note the call event leaves, and no call
-  event is dispatched without the call mask. With `"cr"` the events equal
-  PUC's (`tests/d54/debug_07_tostring_hook.lua`).
-- `PENDING` Return hook of a function that ends in a tail call to a C
-  function: PUC calls the return hook for the Lua caller after the C function
-  returns; here the caller returns through the continuation without a hook
-  event, as it did when the frame was replaced.
 - `IMPL-DEFINED` When an object referenced only from a dead stack slot is
   collected. The stack of a running Lua function is scanned up to the top of
   its frame (inherited from LuaJIT), so a value left in the argument slot of
@@ -125,17 +117,16 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   vs 0.24 KB on x86_64 and aarch64). `tests/lib/gc-count-weak-repro.lua`.
 - `FORK` A stripped dump keeps no `linedefined`/`lastlinedefined` (both are 0
   after loading it); PUC's stripped dumps keep them (`db.lua` line 1002).
-- `PENDING` A yield inside a coroutine running under a `"clr"` hook loses the
-  coroutine's `return` hook event: PUC records
-  `call,line,call,return,line,return` for `coroutine.lua:341` and here the
-  trace is `call,line,call,line,return` (one event short), so the event count
-  check at `coroutine.lua:352` fails. The events at a normal function return
-  are unaffected; only the yield/resume boundary differs.
-- `IMPL-DEFINED` Inside a `__close` handler on an error path, debug level 2 is
-  the unwound Lua function; PUC shows the pcall C function
-  (`close_03/04`; documented divergence).
-- `IMPL-DEFINED` A yield from a `__close` handler crosses the C-level protected
-  call; PUC resumes it (`close_04`; documented/accepted divergence).
+- `PENDING` Debug levels inside an error-path `__close` handler in one shape
+  left: the error passes a C function (say a `table.sort` comparator) and is
+  caught by a protected call made from C (`lua_pcall`). The handlers of the
+  slots above that C function run inside the unwinder at the C function's
+  frame, so the Lua frames between it and the protected call are levels below
+  them; PUC shows the C function that made the protected call. Under
+  `pcall`/`xpcall` called from Lua, in `coroutine.close`, the error close of
+  `coroutine.wrap` and a protected call from C without a C function in
+  between the levels match PUC (`tests/d54/close_09_errpath_cont.lua`,
+  `tests/d54/close_10_errpath_levels.lua`).
 - `FORK` C functions that marked a slot with `lua_toclose` and then yield close
   that slot at yield time, not when the frame "returns" after the resume: with
   no C continuation frame there is no later point to run `__close`. PUC keeps
@@ -192,6 +183,41 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   with `LJ_ERR_XLIMM/XLIMF`), and `tests/d54/parse_02_limit_msgs.lua` prints
   the whole set; the depth at which a nesting shape is refused is the part that
   cannot match, because PUC measures it in C frames. `errors.lua:646` reads it.
+- `PENDING` `string.len`, `math.deg`, `math.rad` and `table.move` are Lua
+  functions here (inherited `LJLIB_LUA` definitions, which the JIT inlines):
+  `debug.getinfo(string.len).what` is `"Lua"` where PUC says `"C"`, hooks
+  see them as Lua frames (a call event with `what == "Lua"`, line events
+  inside them), and tracebacks list them as Lua functions. Turning them into
+  C functions needs recorder entries so the JIT keeps inlining them.
+- `PENDING` A function called through a constant integer index (`t[2]()`)
+  has no name in `debug.getinfo(level, "n")` (also inside a hook); PUC
+  5.4.9 calls it "integer index" (`ldebug.c` getobjname, `OP_GETI`).
+- `IMPL-DEFINED` How many collection cycles a program triggers. The 5.4 manual
+  leaves the pacing to the implementation, and this collector's pause, step
+  work and accounting differ (see the basic-step and GC policy rows). The
+  suite helper `tracegc.lua` writes one `.` to stderr per finished cycle, so
+  `locals.lua` prints a different number of dots than PUC (mode A row in
+  `tests/known-different.tsv`).
+- `IMPL-DEFINED` Constants per function: at most 65536 numbers and 65536
+  other constants (strings, nested functions, table templates) in one
+  function, "too many constants (limit is 65536) in main function"; PUC
+  allows 33554431 ("too many constants (limit is 33554431)", `lcode.c` addk,
+  `MAXARG_Ax`). The bytecode addresses a constant with a 16-bit operand
+  (`BCMAX_D`); PUC reaches its larger table through `OP_LOADKX` +
+  `OP_EXTRAARG`. Matching it would mean wider constant operands in the
+  bytecode format, both VMs, the recorder and the dump format.
+- `IMPL-DEFINED` Jump distance: a jump may span at most 32767 instructions;
+  longer ones fail to load with "control structure too long" (for example
+  32767 `break`s in one loop body, or 40000 backward `goto`s to one label).
+  PUC's signed jump operand has 25 bits. Same reason as the constants: the
+  16-bit jump operand of the bytecode format.
+- `PENDING` Local variable declarations: PUC allows 32767 declarations per
+  function ("too many local variables (limit is 32767)", `lparser.c`
+  registerlocalvar, `SHRT_MAX`; 200 of them active at a time). This parser
+  keeps every declared local, label and goto of the functions being parsed on
+  one variable stack of 65281 entries ("chunk has more than 65281 local
+  variables"): 70000 locals in closed blocks fail with a different message
+  here, and many labels or backward gotos count against the same stack.
 
 - `IMPL-DEFINED` The default pause/stepmul are LuaJIT's measured speed policy
   300/200, not PUC's 200/100 (a deliberate tuning decision taken 2026-11-19;
@@ -361,7 +387,9 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   PUC 5.4 rejects them (`lex_03_ffi_suffix`).
 - `EXTENSION` Inherited LuaJIT 3.0 syntax extensions (`doc/extensions.html`)
   are accepted where PUC 5.4.9 reports a syntax error, among them the short
-  function expression `a -> b` / `|x| -> x*x`. Code that probes for the
+  function expression `a -> b` / `|x| -> x*x` and the `continue` statement
+  (a soft keyword: `continue` before `end`, `else`, `until` or `;`). Code that
+  probes for the
   rejection sees the difference (`tests/d54/parse_arrow_shortfunc.lua`,
   mode A in `tests/known-different.tsv`).
 - `EXTENSION` LuaJIT's pattern-matching implementation and its string-buffer

@@ -477,6 +477,74 @@ target x86_64 (GC64) and arm64.
   the metamethod cleared it, so `tostring(obj)` had a call event and no return
   event. `lj_ffh_tostring` keeps the note across the call
   (`tests/d54/debug_07_tostring_hook.lua`).
+- The return event of `coroutine.yield` (and of any C function that ends in
+  `lua_yield`). PUC finishes that C call when the coroutine is resumed
+  (`ldo.c` `resume` -> `luaD_poscall` -> `rethook`), so the event fires at
+  resume time with the values passed to `resume` as the transfer values. The
+  yield never returned through a path with a hook here, so under a `"clr"`
+  hook the trace was one event short (`coroutine.lua:352/354`), and a
+  coroutine that finished after a yield seemed to lose its last return.
+  `vm_resume` (x64 and arm64) now calls `lj_dispatch_yret` on the
+  resume-after-yield path when the return mask is set; it fires the event for
+  the yielding frame, whose function slot is still intact, and skips the
+  pseudo-frame of a yield from a hook. A C hook that yields while it runs for
+  a C function now gets the C-call boundary error instead of a pseudo-frame
+  that could not be resumed (`tests/d54/coro_05_yield_return_hook.lua`).
+- Return events of assembler fast functions under the return mask alone
+  (`debug.sethook(f, "r")`). Such a function's results cover its function
+  slot by the time it returns, so `lj_dispatch_ffret` fires the event from a
+  note the call dispatch leaves (`L->hookff`); that note was only written
+  with the call mask set, and `tostring`, `string.sub`, `math.max`, `next`,
+  `pairs`/`ipairs` and about twenty more returned without an event. The call
+  dispatch now runs while either mask is set and always writes the note; the
+  call event stays behind the call mask
+  (`tests/d54/debug_08_rethook_ff.lua`).
+- The return event of a Lua function that ends in a tail call to a C
+  function. The caller's frame is kept below an `LJ_CONT_TAILRET`
+  continuation, and `cont_tailret` returned it without going through the
+  return dispatch, so only the C function's return was reported; PUC finishes
+  the caller with `luaD_poscall` after the C call (`lvm.c` `OP_TAILCALL`).
+  `cont_tailret` (x64 and arm64) calls `lj_dispatch_tailret` when the return
+  mask is set; it moves the results to the callee's slot, where PUC has them
+  (the transfer values match), and fires the event with the line of the tail
+  call (`tests/d54/debug_09_tailcall_c_rethook.lua`).
+- `__close` handlers on the error path of a `pcall`/`xpcall` called from Lua
+  (`locals.lua:955-980`, `coroutine.lua:238`, `locals.lua:463`). They ran
+  from a C loop inside the unwinder (`lj_meta_tbccloseall_at` under
+  `lj_vm_pcall`), with the C frames of the throw below them: a yield in one
+  failed with "attempt to yield across a C-call boundary", and the discarded
+  Lua function was debug level 2 instead of `pcall`. Now `err_unwind` leaves
+  the pending slots registered, closes the upvalues, puts the error object
+  above the highest pending slot and turns the protected function's frame
+  into an anchor (its `FRAME_PCALL` link stays, the thread is its dummy
+  function); the landing pad `vm_unwind_ff_eh` sees the anchor and runs
+  `vm_tbcerr`, which calls `lj_meta_tbcerr` for one handler at a time as an
+  ordinary VM call behind an `LJ_CONT_TBCERR` continuation linked to the
+  anchor, as PUC's `finishpcallk` does with `luaF_close(..., yy=1)`. A
+  handler can yield; an error in it is caught by the same pcall and replaces
+  the error object for the remaining ones; xpcall's message handler applies
+  to it, as in PUC; the anchor is a dummy frame for the debug levels. The
+  pcall is counted out and its return hook fires after the last handler.
+  `lua_pcall` from C, `coroutine.close` and the wrap error path keep the C
+  loop, which PUC runs without yields as well
+  (`tests/d54/close_09_errpath_cont.lua`; both backends).
+- The label and goto limit of the parser. PUC keeps the visible labels and the
+  pending gotos (forward `goto`s and `break`s until their label) in two lists
+  of at most 32767 entries (`lparser.c` newlabelentry) and fails past that
+  with "too many labels/gotos (limit is 32767)", a runtime error without a
+  source position; the end of a loop adds its "break" label for a moment.
+  This parser had no such limit (only the shared variable stack). Two counters
+  in `LexState` follow PUC's lists, with the same message
+  (`tests/d54/parse_03_label_limit.lua`).
+- Debug levels inside `__close` handlers run by `coroutine.close`, by the
+  error close of `coroutine.wrap`, by `lua_closethread` and by a protected
+  call from C. The closed thread's frames, or the frames discarded by the
+  error, were levels below the handler; PUC resets the CallInfo chain first
+  (`lua_closethread`, `luaD_pcall`), so the handler's caller is the C
+  function that made the protected call, or there is none. The closers set
+  the thread's base to the bottom of its stack before the handlers run, and
+  the unwinder hands a protected call from C the caller's base
+  (`tests/d54/close_10_errpath_levels.lua`).
 - `__tostring` must return a string (5.4 `luaL_tolstring`). The
   conversion paths `tostring()`, `print()`, `string.format("%s")`, the C API
   `luaL_tolstring` and the standalone message handler now enforce it: a string

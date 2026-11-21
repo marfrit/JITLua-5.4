@@ -1128,3 +1128,17 @@ target x86_64 (GC64) and arm64.
   0.623 / 0.829 / 0.666 and 0.108 / 0.152 / 0.110.
   `tests/d54/tbl_13_push_pop_jit.lua` (the marked loops must compile; red
   before: stitched traces).
+- `==` and `~=` on two different tables or userdata without `__eq`, in the
+  interpreter. With the 5.4 selection (the first operand's handler, else the
+  second one's) `BC_ISEQV`/`BC_ISNEV` called `lj_meta_equal` whenever the
+  first operand had no handler, also for two plain tables. Both backends
+  now check the second operand's metatable and its negative-cache bit
+  inline and call the helper only when one of the two can have `__eq`.
+  Measured (median of 7, interleaved, seconds: 933cfe09, before this change,
+  now), 3e7 comparisons, `-joff`: two plain tables x86_64 0.460 / 0.655 /
+  0.480, aarch64 0.144 / 0.245 / 0.140; two instances of one class 0.562 /
+  0.899 / 0.607 and 0.218 / 0.291 / 0.217. Compiled code was not affected
+  (x86_64 0.120 / 0.120 / 0.119; aarch64 0.038 / 0.052 / 0.055 for 1.5e8
+  iterations of a loop whose IR is the same before and after: the guards
+  are hoisted). `tests/d54/meta_11_eq_second_cache.lua` covers handlers that
+  appear and disappear on either metatable.

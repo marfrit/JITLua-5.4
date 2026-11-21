@@ -67,7 +67,8 @@ static int io_isfile(lua_State *L, cTValue *o)
   mt = tabref(udataV(o)->metatable);
   if (mt == NULL)
     return 0;
-  fmt = lj_tab_getstr(tabV(registry(L)), lj_str_newlit(L, LUA_FILEHANDLE));
+  fmt = lj_tab_getstr(tabV(registry(L)),
+		      strref(G(L)->gcroot[GCROOT_IO_FILEKEY]));
   return fmt != NULL && tvistab(fmt) && tabV(fmt) == mt;
 }
 
@@ -770,6 +771,9 @@ LUALIB_API int luaopen_io(lua_State *L)
   lua_setfield(L, -2, "__name");
   copyTV(L, L->top, L->top-1); L->top++;
   lua_setfield(L, LUA_REGISTRYINDEX, LUA_FILEHANDLE);
+  /* The registry key, kept interned for io_isfile. */
+  setgcref(G(L)->gcroot[GCROOT_IO_FILEKEY],
+	   obj2gco(lj_str_newlit(L, LUA_FILEHANDLE)));
   LJ_LIB_REG(L, LUA_IOLIBNAME, io);
   setgcref(G(L)->gcroot[GCROOT_IO_INPUT], io_std_new(L, stdin, "stdin"));
   setgcref(G(L)->gcroot[GCROOT_IO_OUTPUT], io_std_new(L, stdout, "stdout"));

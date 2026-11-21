@@ -630,6 +630,7 @@ typedef enum {
   GCROOT_IO_INPUT,	/* Userdata for default I/O input file. */
   GCROOT_IO_OUTPUT,	/* Userdata for default I/O output file. */
   GCROOT_ENVSTR,	/* Interned "_ENV" string for the 5.4 env special case. */
+  GCROOT_IO_FILEKEY,	/* Interned "FILE*", the io handle metatable key. */
 #if LJ_HASFFI
   GCROOT_FFI_FIN,	/* FFI finalizer table. */
 #endif

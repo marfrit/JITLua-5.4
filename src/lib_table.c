@@ -201,7 +201,7 @@ LJLIB_CF(table_remove)
     /* Generic path (PUC tremove): element access through the API so
     ** __index/__newindex are honoured; #t via __len. */
     lua_Integer size = luaL_len(L, 1);
-    lua_Integer pos = (L->top > L->base + 1) ? luaL_checkinteger(L, 2) : size;
+    lua_Integer pos = luaL_optinteger(L, 2, size);  /* PUC: nil is absent */
     if (pos != size &&
 	((lj_tab_Unsigned)pos - 1u > (lj_tab_Unsigned)size))
       lj_err_arg(L, 2, LJ_ERR_TABINSPOS);
@@ -215,7 +215,7 @@ LJLIB_CF(table_remove)
     return 1;
   }
   lua_Integer len = luaL_len(L, 1);
-  lua_Integer pos = (L->top > L->base + 1) ? luaL_checkinteger(L, 2) : len;
+  lua_Integer pos = luaL_optinteger(L, 2, len);  /* PUC: nil is absent */
   /* 5.4 tremove: a given pos is validated as (unsigned)pos - 1 <= (unsigned)
   ** size, so pos = size + 1 is allowed (nothing to shift, t[pos] is nil) and
   ** pos 0 or a negative pos with a non-empty table is "position out of

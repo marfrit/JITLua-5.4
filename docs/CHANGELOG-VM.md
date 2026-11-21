@@ -15,8 +15,8 @@ target x86_64 (GC64) and arm64.
   mismatch` in the assertion build. Penlight's `tablex.readonly` proxies
   carry `__ipairs`; its `tests/test-tablex.lua` failed in about one run in
   ten under `-jon`, whenever a trace reached that call (arm64 assertion
-  build 11 of 200, 23 of 60 with `-Ohotexit=1`). Stock LuaJIT 2.1 honours
-  `__ipairs` in both places and is not affected (0 of 700 runs). The
+  build 11 of 200, 23 of 60 with `-Ohotexit=1`). Stock LuaJIT 2.1 did not
+  show it (0 of 700 runs). The
   recorder now takes the metamethod path of `ipairs` for cdata only, as the
   VM does (`recff_xpairs`). `tests/d54/iter_04_ipairs_no_mm_jit.lua`.
 - JIT: a side trace that started at the FORL exit of an integer loop crashed
@@ -54,9 +54,14 @@ target x86_64 (GC64) and arm64.
   converts to its `FILE *` like the library's own handles, and to NULL once
   it is closed. It converted to the address of the `luaL_Stream` block, so
   `ffi.C.fputs(s, handle)` wrote through a wrong pointer. Compiled FFI calls
-  leave such a handle to the interpreter and guard any other userdata
-  against the file metatable (`lj_cconv.c`, `lj_crecord.c`).
-  `tests/capi/ffistream.c`.
+  leave such a handle to the interpreter. A trace that converts any other
+  userdata is specialized to its kind and its metatable; for a userdata
+  with a metatable it also guards that `registry["FILE*"]` is still the
+  entry seen while recording, so the trace is left when the io library is
+  opened later or the entry is replaced and that metatable becomes the file
+  metatable. A userdata whose metatable is that entry is not compiled
+  (`lj_cconv.c`, `lj_crecord.c`). `tests/capi/ffistream.c`,
+  `tests/capi/ffilateio.c`.
 - Integer `for` loops with an int32 initial value and step and a limit
   beyond int32 (`for i = 1, math.huge`, `1, 1e10`, `1, math.maxinteger`,
   the descending mirrors) run on the int32 path while the index fits and are

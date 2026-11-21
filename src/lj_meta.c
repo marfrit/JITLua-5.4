@@ -1295,9 +1295,15 @@ int LJ_FASTCALL lj_meta_for(lua_State *L, TValue *o)
 ** lj_meta_for would leave in the slots, without raising, writing the slots
 ** or deciding the skip. LJ_FOR_RETRY with out[] holding the int32 values of
 ** a small integer loop or the floats of a float loop (entered or skipped:
-** the recorder decides from them), LJ_FOR_WIDE for everything the recorder
-** leaves to the interpreter: a wide loop, a limit outside the integer range,
-** step zero, a value that is no number. */
+** the recorder decides from them). LJ_FOR_CLIP with out[] holding the
+** clipped form of a loop that lj_meta_for starts clipped: an int32 start and
+** step with a limit beyond int32 on the side the loop runs to (an integer,
+** or a float, also one outside the integer range), and a start that is not
+** past the clip value. LJ_FOR_WIDE for everything the recorder leaves to the
+** interpreter: a wide loop (a start or step outside int32, a start past the
+** clip value), a skipped loop with such a limit, a numeric string as such a
+** limit, a real limit equal to the clip value, step zero, a value that is no
+** number. */
 int lj_meta_forkind(lua_State *L, cTValue *o, TValue *out)
 {
   int64_t init, step, limit;

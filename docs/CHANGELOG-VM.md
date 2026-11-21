@@ -786,6 +786,13 @@ target x86_64 (GC64) and arm64.
   instead of "number has no integer representation". A float argument of
   those conversions and a missing argument now leave the call to the
   interpreter (`tests/d54/fmt_06_jit_int_args.lua`).
+- `lua_len` (and `luaL_len`) of a userdata without `__len` raises "attempt
+  to get length of a FILE* value" (the name from `__name`), as PUC's
+  `luaV_objlen` does; it returned the userdata's block size, so
+  `table.unpack(io.stdout)` gave 24 nils. `lua_rawlen` keeps the block size,
+  as in PUC; the other `luaL_len` callers (the table library) already
+  refused a userdata without the table-like metamethods
+  (`tests/d54/tbl_12_len_userdata.lua`).
 
 ## Known JIT/performance rows (not semantic divergences)
 

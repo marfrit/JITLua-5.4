@@ -779,6 +779,13 @@ target x86_64 (GC64) and arm64.
   value (a number)", and a `__tostring` returning one raised "'__tostring'
   must return a string" in `luaL_tolstring` (`print`)
   (`tests/d54/i64_09_isstring_box.lua`).
+- `string.format` in compiled code raises what the interpreter raises for
+  the integer conversions: the recorder converted a float argument of
+  `%d %i %u %o %x %X` with the truncating call, so a loop compiled for 1.0
+  returned 0, -9223372036854775808 and the like for 0.5, inf, nan or 2^63
+  instead of "number has no integer representation". A float argument of
+  those conversions and a missing argument now leave the call to the
+  interpreter (`tests/d54/fmt_06_jit_int_args.lua`).
 
 ## Known JIT/performance rows (not semantic divergences)
 

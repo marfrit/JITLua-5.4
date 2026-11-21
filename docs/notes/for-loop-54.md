@@ -1,11 +1,12 @@
 # Numeric `for` with Lua 5.4 semantics (design, 2026-11-21)
 
-Status: design, not implemented. Replaces the `tests/known-bad.tsv` row for
-`tests/d54/for_01_int64_control.lua` once done.
+Status: implemented 2026-11-21. Replaces the `tests/known-bad.tsv` row for
+`tests/d54/for_01_int64_control.lua`; the rules are checked by
+`tests/d54/for_02_54_rules.lua`.
 
-## What differs today
+## What differed before the change
 
-`lj_meta_for` (`src/lj_meta.c`) keeps LuaJIT's dual-number rule: all three
+`lj_meta_for` (`src/lj_meta.c`) kept LuaJIT's dual-number rule: all three
 control values int32 -> integer loop, otherwise all three become floats.
 PUC 5.4.9 (`lvm.c` `forprep`/`forlimit`/`OP_FORLOOP`) decides on the
 *initial value and the step only*. Measured on x86_64, `-joff` and `-jon`
@@ -41,8 +42,9 @@ The first two are common idioms, so this is not an edge case.
 2. Otherwise a float loop: all three converted with `tonumber` (strings
    allowed), error order limit, step, initial value; step 0.0 -> the same
    error; skip test; then `idx += step` while `idx <= limit` (or `>=`).
-3. Error texts: `'for' initial value must be a number`, `... limit ...`,
-   `... step ...` (`luaG_forerror`), `'for' step is zero`.
+3. Error texts as PUC's `luaG_forerror` and `luaG_runerror`: `bad 'for'
+   <what> (number expected, got <type>)` for initial value, limit and step,
+   and `'for' step is zero`.
 
 ## Design
 
@@ -64,7 +66,10 @@ Changes:
    PUC's state (current index, remaining count, step) in a private mutable
    object in `FOR_IDX` (one allocation per loop start, none per iteration)
    and the control variable in `FOR_EXT` in canonical form (int32, widened
-   47-bit inline, or the interned box).
+   47-bit inline, or the interned box). The object also carries the loop body
+   address: a patched JFORL has no jump target of its own (its field holds the
+   trace number), and a wide loop must not enter a trace recorded for another
+   loop kind.
 2. FORI/JFORI (interpreter, both backends): step 0 -> `->vmeta_for`, in the
    int32 path and in the FP path. This runs once per loop start.
 3. FORL/IFORL (interpreter): the FP path (label 9) must recognise the wide

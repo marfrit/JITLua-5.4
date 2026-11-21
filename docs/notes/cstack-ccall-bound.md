@@ -123,7 +123,11 @@ One counter, C code only, no assembly and no JIT change.
   pcall/xpcall frames count out in `lj_vm_unwind_ff`, as before.
 - **`__close` handlers during an unwinding** get the nesting of the catching
   frame (`tbc_catchlevel`), like PUC, which has longjmp'ed to the catcher
-  before it calls them. Here they run from `err_unwind`, with every C frame
+  before it calls them. Under a `pcall`/`xpcall` called from Lua they run
+  from the VM after the landing pad (`vm_tbcerr`, `lj_meta_tbcerr`), with no
+  C frame of the throw left, and the pcall is counted out only when the
+  last handler is done; nothing below applies to them. Under a protected
+  call from C they run from `err_unwind`, with every C frame
   of the throw still on the C stack below them. With the catcher's count
   alone, a handler that recurses to the bound, fails and thereby starts the
   handlers of its own frames would add up to 200 C levels per round, without

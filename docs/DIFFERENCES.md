@@ -49,10 +49,12 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   - pcall and xpcall are refused at and above the bound; PUC lets them use
     the 20 extra levels while a "C stack overflow" is handled. The other
     calls from C can use them here, too.
-  - `__close` handlers that run while an error unwinds, fail and start the
-    next round of handlers are refused with "error in error handling" once
-    they nest too deep on the C stack (PUC unwinds the C stack first and
-    keeps going).
+  - `__close` handlers that run while an error unwinds to a protected call
+    made from C (`lua_pcall`), fail and start the next round of handlers are
+    refused with "error in error handling" once they nest too deep on the C
+    stack (PUC unwinds the C stack first and keeps going). Under a `pcall`
+    or `xpcall` called from Lua the handlers run after the C stack is
+    unwound, as in PUC.
   - FFI callbacks are not counted.
 - `PENDING` `collectgarbage()` (and `lua_gc`) called from a finalizer runs a
   nested collection, finalizers included; PUC ignores the call there. The
@@ -143,11 +145,12 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   vs 0.24 KB on x86_64 and aarch64). `tests/lib/gc-count-weak-repro.lua`.
 - `FORK` A stripped dump keeps no `linedefined`/`lastlinedefined` (both are 0
   after loading it); PUC's stripped dumps keep them (`db.lua` line 1002).
-- `IMPL-DEFINED` Inside a `__close` handler on an error path, debug level 2 is
-  the unwound Lua function; PUC shows the pcall C function
-  (`close_03/04`; documented divergence).
-- `IMPL-DEFINED` A yield from a `__close` handler crosses the C-level protected
-  call; PUC resumes it (`close_04`; documented/accepted divergence).
+- `PENDING` Inside a `__close` handler run by `coroutine.close`, by the error
+  close of `coroutine.wrap` or by a protected call from C (`lua_pcall`), the
+  frames being closed are still debug levels below the handler; PUC resets
+  its CallInfo chain first, so level 3 is nothing or the calling C function.
+  Under `pcall`/`xpcall` called from Lua the levels match PUC
+  (`tests/d54/close_09_errpath_cont.lua`).
 - `FORK` C functions that marked a slot with `lua_toclose` and then yield close
   that slot at yield time, not when the frame "returns" after the resume: with
   no C continuation frame there is no later point to run `__close`. PUC keeps

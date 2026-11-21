@@ -441,6 +441,26 @@ target x86_64 (GC64) and arm64.
   mask is set; it moves the results to the callee's slot, where PUC has them
   (the transfer values match), and fires the event with the line of the tail
   call (`tests/d54/debug_09_tailcall_c_rethook.lua`).
+- `__close` handlers on the error path of a `pcall`/`xpcall` called from Lua
+  (`locals.lua:955-980`, `coroutine.lua:238`, `locals.lua:463`). They ran
+  from a C loop inside the unwinder (`lj_meta_tbccloseall_at` under
+  `lj_vm_pcall`), with the C frames of the throw below them: a yield in one
+  failed with "attempt to yield across a C-call boundary", and the discarded
+  Lua function was debug level 2 instead of `pcall`. Now `err_unwind` leaves
+  the pending slots registered, closes the upvalues, puts the error object
+  above the highest pending slot and turns the protected function's frame
+  into an anchor (its `FRAME_PCALL` link stays, the thread is its dummy
+  function); the landing pad `vm_unwind_ff_eh` sees the anchor and runs
+  `vm_tbcerr`, which calls `lj_meta_tbcerr` for one handler at a time as an
+  ordinary VM call behind an `LJ_CONT_TBCERR` continuation linked to the
+  anchor, as PUC's `finishpcallk` does with `luaF_close(..., yy=1)`. A
+  handler can yield; an error in it is caught by the same pcall and replaces
+  the error object for the remaining ones; xpcall's message handler applies
+  to it, as in PUC; the anchor is a dummy frame for the debug levels. The
+  pcall is counted out and its return hook fires after the last handler.
+  `lua_pcall` from C, `coroutine.close` and the wrap error path keep the C
+  loop, which PUC runs without yields as well
+  (`tests/d54/close_09_errpath_cont.lua`; both backends).
 - `__tostring` must return a string (5.4 `luaL_tolstring`). The
   conversion paths `tostring()`, `print()`, `string.format("%s")`, the C API
   `luaL_tolstring` and the standalone message handler now enforce it: a string

@@ -46,6 +46,17 @@ typedef struct IOFileUD {
 
 #define IOFILE_FLAG_CLOSE	4	/* Close after io.lines() iterator. */
 
+/* An io handle is either this library's IOFileUD (udtype UDTYPE_IO_FILE) or
+** a luaL_Stream made by a C module: a plain userdata block of at least
+** sizeof(luaL_Stream) with the LUA_FILEHANDLE metatable, its 'f' and
+** 'closef' set by the module (lauxlib.h; PUC liolib.c newprefile). Only the
+** luaL_Stream prefix exists in the second kind. Its closed state is PUC's
+** closef == NULL, and closing it calls closef (PUC aux_close). */
+#define io_ud(iof)	((GCudata *)(iof) - 1)
+#define io_isown(iof)	(io_ud(iof)->udtype == UDTYPE_IO_FILE)
+#define io_isclosed(iof) \
+  (io_isown(iof) ? (iof)->fp == NULL : (iof)->closef == NULL)
+
 static int lj_cf_io_method_close(lua_State *L);  /* luaL_Stream.closef */
 
 #define IOSTDF_UD(L, id)	(&gcref(G(L)->gcroot[(id)])->ud)
@@ -62,7 +73,9 @@ static int io_isfile(lua_State *L, cTValue *o)
 {
   GCtab *mt;
   cTValue *fmt;
-  if (!(tvisudata(o) && udataV(o)->udtype == UDTYPE_IO_FILE))
+  if (!(tvisudata(o) && (udataV(o)->udtype == UDTYPE_IO_FILE ||
+			 (udataV(o)->udtype == UDTYPE_USERDATA &&
+			  udataV(o)->len >= sizeof(luaL_Stream)))))
     return 0;
   mt = tabref(udataV(o)->metatable);
   if (mt == NULL)
@@ -83,7 +96,7 @@ static IOFileUD *io_tofilep(lua_State *L)
 static IOFileUD *io_tofile(lua_State *L)
 {
   IOFileUD *iof = io_tofilep(L);
-  if (iof->fp == NULL)
+  if (io_isclosed(iof))
     lj_err_caller(L, LJ_ERR_IOCLFL);
   return iof;
 }
@@ -91,7 +104,7 @@ static IOFileUD *io_tofile(lua_State *L)
 static IOFileUD *io_stdfile(lua_State *L, ptrdiff_t id)
 {
   IOFileUD *iof = IOSTDF_IOF(L, id);
-  if (iof->fp == NULL)
+  if (io_isclosed(iof))
     luaL_error(L, "default %s file is closed",
 	       id == GCROOT_IO_INPUT ? "input" : "output");
   return iof;
@@ -160,6 +173,13 @@ static IOFileUD *io_file_open(lua_State *L, const char *mode)
 static int io_file_close(lua_State *L, IOFileUD *iof)
 {
   int ok;
+  if (!io_isown(iof)) {
+    /* PUC aux_close: mark the stream closed, then call its closef with the
+    ** handle as argument 1 (every caller has it at L->base). */
+    lua_CFunction cf = iof->closef;
+    iof->closef = NULL;
+    return cf(L);
+  }
   if ((iof->type & IOFILE_TYPE_MASK) == IOFILE_TYPE_FILE) {
     ok = (fclose(iof->fp) == 0);
   } else if ((iof->type & IOFILE_TYPE_MASK) == IOFILE_TYPE_PIPE) {
@@ -416,7 +436,7 @@ static int io_file_iter(lua_State *L)
   GCfunc *fn = curr_func(L);
   IOFileUD *iof = uddata(udataV(&fn->c.upvalue[0]));
   int n = fn->c.nupvalues - 1;
-  if (iof->fp == NULL)  /* 5.4 io.lines helper wording */
+  if (io_isclosed(iof))  /* 5.4 io.lines helper wording */
     luaL_error(L, "file is already closed");
   L->top = L->base;
   if (n) {  /* Copy upvalues with options to stack. */
@@ -426,7 +446,7 @@ static int io_file_iter(lua_State *L)
   }
   n = io_file_read(L, iof, 0);
   if (n < 1) {  /* EOF: 5.4 closes an io.lines file, so a later call errors. */
-    if (iof->type & IOFILE_FLAG_CLOSE)
+    if (io_isown(iof) && (iof->type & IOFILE_FLAG_CLOSE))
       io_file_close(L, iof);
     return 0;
   }
@@ -434,7 +454,7 @@ static int io_file_iter(lua_State *L)
     return n;
   if (n > 1)  /* error result: nil, message, errno */
     lj_err_callermsg(L, strVdata(L->top-n+1));
-  if (iof->type & IOFILE_FLAG_CLOSE)
+  if (io_isown(iof) && (iof->type & IOFILE_FLAG_CLOSE))
     io_file_close(L, iof);  /* Return values are ignored. */
   return 0;
 }
@@ -534,10 +554,20 @@ LJLIB_CF(io_method_lines)
   return io_file_lines(L);
 }
 
+/* PUC f_gc: close an open handle, but not a standard one (its closef is
+** io_noclose) and not one whose file never opened (f == NULL). */
+static int io_gcopen(IOFileUD *iof)
+{
+  if (io_isown(iof))
+    return iof->fp != NULL &&
+	   (iof->type & IOFILE_TYPE_MASK) != IOFILE_TYPE_STDF;
+  return iof->closef != NULL && iof->fp != NULL;
+}
+
 LJLIB_CF(io_method___gc)
 {
   IOFileUD *iof = io_tofilep(L);
-  if (iof->fp != NULL && (iof->type & IOFILE_TYPE_MASK) != IOFILE_TYPE_STDF)
+  if (io_gcopen(iof))
     io_file_close(L, iof);
   return 0;
 }
@@ -547,7 +577,7 @@ LJLIB_CF(io_method___gc)
 LJLIB_CF(io_method___close)
 {
   IOFileUD *iof = io_tofilep(L);
-  if (iof->fp != NULL && (iof->type & IOFILE_TYPE_MASK) != IOFILE_TYPE_STDF)
+  if (io_gcopen(iof))
     io_file_close(L, iof);
   return 0;
 }
@@ -555,7 +585,7 @@ LJLIB_CF(io_method___close)
 LJLIB_CF(io_method___tostring)
 {
   IOFileUD *iof = io_tofilep(L);
-  if (iof->fp != NULL)
+  if (!io_isclosed(iof))
     lua_pushfstring(L, "file (%p)", iof->fp);
   else
     lua_pushliteral(L, "file (closed)");
@@ -718,7 +748,7 @@ LJLIB_CF(io_type)
   cTValue *o = lj_lib_checkany(L, 1);
   if (!io_isfile(L, o))  /* PUC io_type: luaL_testudata */
     setnilV(L->top++);
-  else if (((IOFileUD *)uddata(udataV(o)))->fp != NULL)
+  else if (!io_isclosed((IOFileUD *)uddata(udataV(o))))
     lua_pushliteral(L, "file");
   else
     lua_pushliteral(L, "closed file");

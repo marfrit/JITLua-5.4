@@ -994,6 +994,19 @@ target x86_64 (GC64) and arm64.
   (metamethod 'eq')" (`ldebug.c` `luaG_callerror`). `lj_meta_equal` raises
   that error when the handler is no function and has no `__call`.
   `tests/d54/meta_10_eq_notcallable.lua` (mode A; mode B at all opt levels).
+- A `luaL_Stream` made by a C module is an io file, as in PUC: a userdata of
+  at least `sizeof(luaL_Stream)` with the `LUA_FILEHANDLE` metatable whose
+  `f` and `closef` the module sets (lauxlib.h, liolib.c `newprefile`). The
+  io library works from the `luaL_Stream` prefix: `io.type`, every method,
+  `io.input`/`io.output` and the default-file functions, `__tostring`, and
+  `io.close`/`__gc`/`__close`, which call `closef` with the handle as
+  argument 1 after marking the stream closed (`closef == NULL`, PUC
+  `aux_close`). The type flags of this library's own handles are read only
+  from its own blocks (`io_isown` in `src/lib_io.c`). Compiled code runs
+  `f:write`/`f:flush` and the default-file `io.write`/`io.flush` only for
+  the library's own handles; a C stream leaves the trace on the udtype guard
+  (`tests/capi/lstream.c`, run by `tests/capi/run.sh` against both
+  libraries; the outputs must be identical).
 
 ## Known JIT/performance rows (not semantic divergences)
 

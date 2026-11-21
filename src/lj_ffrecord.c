@@ -1968,7 +1968,14 @@ static TRef recff_io_fp(jit_State *J, RecordFFData *rd, TRef *udp, int32_t id)
 {
   TRef tr, ud, fp;
   if (id) {  /* io.func(): the default file, unchecked like PUC getiofile */
+    /* It may be a luaL_Stream made by a C module (io.output(stream)), whose
+    ** closed state is closef == NULL: only this library's own handles are
+    ** compiled, the guard sends a C stream back to the interpreter. */
+    if (gcref(J2G(J)->gcroot[id])->ud.udtype != UDTYPE_IO_FILE)
+      lj_trace_err(J, LJ_TRERR_BADTYPE);
     ud = lj_ir_ggfload(J, IRT_UDATA, GG_OFS(g.gcroot[id]));
+    tr = emitir(IRT(IR_FLOAD, IRT_U8), ud, IRFL_UDATA_UDTYPE);
+    emitir(IRTGI(IR_EQ), tr, lj_ir_kint(J, UDTYPE_IO_FILE));
   } else {  /* fp:method() */
     GCtab *reg = tabV(registry(J->L)), *mt;
     GCstr *key = lj_str_newlit(J->L, "FILE*");
@@ -1982,7 +1989,8 @@ static TRef recff_io_fp(jit_State *J, RecordFFData *rd, TRef *udp, int32_t id)
     emitir(IRTGI(IR_EQ), tr, lj_ir_kint(J, UDTYPE_IO_FILE));
     /* 5.4 tofile (luaL_checkudata): the handle's metatable must be the
     ** current registry["FILE*"]. Guard the metatable and the registry
-    ** entry; anything else is left to the interpreter, which raises. */
+    ** entry; anything else, and a luaL_Stream made by a C module (the
+    ** udtype guard above), is left to the interpreter. */
     u = udataV(&rd->argv[0]);
     mt = tabref(u->metatable);
     fmt = lj_tab_getstr(reg, key);

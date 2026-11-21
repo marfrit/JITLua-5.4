@@ -106,6 +106,26 @@ if [ -x "$REPLJIT" ] && [ -x "$ROOT/tests/ref/bin/lua54ref" ]; then
   diff "$OUT/repl_puc.out" "$OUT/repl.out"
   echo "== repl: identical to the PUC 5.4.9 reference =="
 fi
+# A luaL_Stream made by a C module (lauxlib.h, liolib.c newprefile) is an io
+# file like the library's own handles. Same source against both libraries;
+# the PUC output is the oracle and the two must be identical.
+$CC $CFLAGS -I"$SRC" "$ROOT/tests/capi/lstream.c" -o "$OUT/lstream" \
+  "$LIB" $LDFLAGS -lm -ldl
+echo "== lstream (JITLua-5.4) =="
+LSTREAM_RC=0
+timeout 60 "$OUT/lstream" >"$OUT/lstream.out" || LSTREAM_RC=$?
+cat "$OUT/lstream.out"
+if [ -f "$PUC_SRC/liblua.a" ] && [ -f "$PUC_SRC/lua.h" ]; then
+  $CC $CFLAGS -I"$PUC_SRC" "$ROOT/tests/capi/lstream.c" \
+    -o "$OUT/lstream_puc" "$PUC_SRC/liblua.a" \
+    $LDFLAGS -lm -ldl -lpthread
+  timeout 60 "$OUT/lstream_puc" >"$OUT/lstream_puc.out"
+  diff "$OUT/lstream_puc.out" "$OUT/lstream.out"
+  echo "== lstream: identical to the PUC 5.4.9 reference =="
+else
+  echo "== lstream (PUC side skipped: reference source missing, run tests/ref/fetch-ref.sh) =="
+fi
+[ "$LSTREAM_RC" = 0 ]
 
 # Public-header probe for the module-facing macros (no <limits.h> include in
 # the probe itself) and the real third-party module that exposed the gap.

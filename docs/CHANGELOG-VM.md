@@ -745,6 +745,22 @@ target x86_64 (GC64) and arm64.
   `luaL_checkinteger`; the recorder now traces `%c` only for int32
   arguments, since its float conversion neither checked nor cut the value
   (`tests/d54/fmt_05_error_order.lua`).
+- Operand names of long field chains no longer recurse. PUC's `isEnv`
+  (ldebug.c) names the indexed table with `basicgetobjname` (locals,
+  upvalues, constants, moves; no table reads), and `rname` names a
+  register key the same way. `lj_debug_slotname` used the full search for
+  both, one recursion per `TGETS` link, so the error of
+  `local x = t.a.a ... a.c()` with 100000 links overflowed the C stack
+  (segmentation fault on both arches), and `debug_condwrite` rescanned the
+  jumps from the first instruction at every link. The search now has a
+  basic mode for the table and the key of `TGETS`/`TGETV`, and the last
+  writer of a slot and its jump filter come from one forward pass
+  (`debug_findsetreg`, PUC `findsetreg`/`filterpc`) instead of a backward
+  walk plus a separate jump scan; every name stays as it was
+  (`err_16_operand_names.lua`, `debug_06_names.lua`). A chain of
+  100000 links is named in about the time PUC needs; a chain of `MOV`s
+  still costs one pass per move, as in PUC
+  (`tests/d54/debug_12_slotname_chain.lua`).
 
 ## Known JIT/performance rows (not semantic divergences)
 

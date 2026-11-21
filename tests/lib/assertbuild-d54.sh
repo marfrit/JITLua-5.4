@@ -26,4 +26,4 @@ cp -r src dynasm Makefile etc "$AB/"
     >"$OUT-assertbuild.log" 2>&1 ) || { tail -30 "$OUT-assertbuild.log"; exit 1; }
 "$AB/src/luajit" -v | head -1
 LUAJIT="$AB/src/luajit" tests/harness.sh --strict --mode B \
-  --corpus tests/d54 --timeout 120 --jit-args="-Ohotexit=1"
+  --corpus tests/d54 --timeout 120 --jit-args="-Ohotexit=1" ${HARNESS_EXTRA:-}

@@ -1,0 +1,12 @@
+# Tests that only the full gate runs (tests/gate.sh --tier full). One
+# repo-relative path per line. The quick and touch tiers pass each line to the
+# harness as --exclude. Threshold: more than about 2.5 s summed over modes A, B
+# and R on a fast aarch64 box (strict --mode all timing run); on x86_64 the same
+# files take several times longer.
+tests/d54/parse_03_label_limit.lua
+tests/corpus/puc54/gc.lua
+tests/d54/tbl_04_array_limit.lua
+tests/d54/parse_05_jump_chains.lua
+tests/d54/err_17_stkov_close_relimit.lua
+tests/corpus/puc54/constructs.lua
+tests/d54/parse_04_local_limits.lua

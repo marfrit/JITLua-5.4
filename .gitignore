@@ -32,3 +32,4 @@ __pycache__/
 # operator-local agent rules and working notes: never committed
 CLAUDE.local.md
 docs/notes/WORKING-*.md
+.gate-changed

@@ -226,6 +226,22 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   `tests/corpus/puc54/gengc.lua` (its assert at line 122) in
   `tests/known-different.tsv`.
 
+- `IMPL-DEFINED` GC pace of a compiled loop whose allocations the JIT removes.
+  A constructor that never escapes is sunk into the trace snapshots and an
+  unused string or table is dropped, so the compiled loop allocates nothing,
+  while PUC allocates every one. So that the collector still moves (a loop that
+  waits for a finalizer must end, `tests/d54/gc_13_dropped_alloc_pace.lua`;
+  a trace that read a weak table keeps its allocations), the loop's GC check
+  lowers the GC threshold by 8 bytes per dropped allocation and pass (`asm_gc_vdebt`,
+  `src/lj_asm.c`; x86_64 and arm64). The collector therefore runs fewer cycles
+  than PUC's for the same loop: over a 19 MB live heap such a loop reaches the
+  finalizer after about 4.5 million passes. `collectgarbage("count")` does not
+  include the charge. The manual does not say how often the collector runs;
+  charging the full object size, or allocating, would give up most of the
+  sinking gain (a vector-add loop with a sunk table: 50 ms base, 160 ms with
+  the 8-byte charge, 300 ms at 32 bytes, 3.9 s with real allocations; x86_64,
+  `-jon`).
+
 ### Known JIT/performance rows (not semantic divergences)
 
 - `IMPL-DEFINED` `heavy.lua` runs under a 4 GiB `RLIMIT_AS` cap in the

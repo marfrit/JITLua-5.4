@@ -89,6 +89,8 @@ typedef struct LexState {
   BCInsLine *bcstack;	/* Stack for bytecode instructions/line numbers. */
   MSize sizebcstack;	/* Size of bytecode stack. */
   uint32_t level;	/* Syntactical nesting level. */
+  MSize nlabel;		/* 5.4: visible labels (PUC dyd->label). */
+  MSize ngoto;		/* 5.4: pending forward gotos and breaks (dyd->gt). */
   int endmark;		/* Trust bytecode end marker, even if not at EOF. */
   int fr2;		/* Generate bytecode for LJ_FR2 mode. */
   VarIndex vhash[LJ_VINDEX_HSIZE];	/* Variable hash chain anchors. */

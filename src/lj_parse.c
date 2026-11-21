@@ -1440,6 +1440,20 @@ static MSize gola_new(LexState *ls, GCstr *name, uint8_t info, BCPos pc)
   return vtop;
 }
 
+/* 5.4: PUC keeps the visible labels and the pending gotos (forward gotos and
+** breaks, until their label is seen) in two lists of at most SHRT_MAX
+** entries each (lparser.c newlabelentry) and fails past that with a runtime
+** error that carries no source position. The variable stack here holds them
+** with the locals; these counters follow PUC's two lists. */
+#define LJ_MAX_GOLA		32767
+
+static void gola_count(LexState *ls, MSize *n)
+{
+  if (*n >= LJ_MAX_GOLA)
+    lj_err_msgv(ls->L, LJ_ERR_XLABELS, LJ_MAX_GOLA);
+  (*n)++;
+}
+
 #define gola_isgoto(v)		((v)->info & VSTACK_GOTO)
 #define gola_islabel(v)		((v)->info & VSTACK_LABEL)
 #define gola_isgotolabel(v)	((v)->info & (VSTACK_GOTO|VSTACK_LABEL))
@@ -1492,6 +1506,7 @@ static void gola_resolve(LexState *ls, FuncScope *bl, MSize idx)
 		       strdata(name));
 	}
       }
+      if (strref(vg->name) != NAME_CONT) ls->ngoto--;  /* Was pending. */
       gola_patch(ls, vg, vl);
     }
 }
@@ -1509,6 +1524,7 @@ static void gola_fixup(LexState *ls, FuncScope *bl)
       if (gola_islabel(v)) {
 	VarInfo *vg;
 	setgcrefnull(v->name);  /* Invalidate label that goes out of scope. */
+	if (name != NAME_BREAK && name != NAME_CONT) ls->nlabel--;
 	for (vg = v+1; vg < ve; vg++)  /* Resolve pending backward gotos. */
 	  if (strref(vg->name) == name && gola_isgoto(vg)) {
 	    if ((bl->flags&(FSCOPE_UPVAL|FSCOPE_TBC)) && vg->slot > v->slot)
@@ -1590,6 +1606,8 @@ static void fscope_end(FuncState *fs)
   if ((bl->flags & (FSCOPE_UPVAL|FSCOPE_NOCLOSE)) == FSCOPE_UPVAL)
     bcemit_AJ(fs, BC_UCLO, bl->nactvar, 0);
   lj_assertFS((bl->flags & (FSCOPE_LOOP|FSCOPE_CONT)) != (FSCOPE_LOOP|FSCOPE_CONT), "dangling continue");
+  if ((bl->flags & FSCOPE_LOOP) && ls->nlabel >= LJ_MAX_GOLA)
+    lj_err_msgv(ls->L, LJ_ERR_XLABELS, LJ_MAX_GOLA);  /* PUC's "break". */
   if ((bl->flags & (FSCOPE_LOOP|FSCOPE_BREAK)) == (FSCOPE_LOOP|FSCOPE_BREAK)) {
     MSize idx;
     bl->flags &= ~FSCOPE_BREAK;
@@ -2989,6 +3007,7 @@ static void parse_return(LexState *ls, int eflags)
 /* Parse 'break' statement. */
 static void parse_break(LexState *ls)
 {
+  gola_count(ls, &ls->ngoto);
   ls->fs->bl->flags |= FSCOPE_BREAK;
   gola_new(ls, NAME_BREAK, VSTACK_GOTO, bcemit_jmp(ls->fs));
 }
@@ -3008,6 +3027,8 @@ static void parse_goto(LexState *ls)
   VarInfo *vl = gola_findlabel(ls, name);
   if (vl)  /* Treat backwards goto within same scope like a loop. */
     bcemit_AJ(fs, BC_LOOP, vl->slot, -1);  /* No BC range check. */
+  else
+    gola_count(ls, &ls->ngoto);  /* Forward: pending until the label. */
   fs->bl->flags |= FSCOPE_GOLA;
   gola_new(ls, name, VSTACK_GOTO, bcemit_jmp(fs));
 }
@@ -3027,6 +3048,7 @@ static void parse_label(LexState *ls)
     if (vl)
       lj_lex_error(ls, 0, LJ_ERR_XLDUP, strdata(name), (int)vl->line);
   }
+  gola_count(ls, &ls->nlabel);
   idx = gola_new(ls, name, VSTACK_LABEL, fs->pc);
   lex_check(ls, TK_label);
   /* Recursively parse trailing statements: labels and ';'. */

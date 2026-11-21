@@ -641,6 +641,11 @@ typedef struct GCState {
   uint8_t state;	/* GC state. */
   uint8_t gcmode;  /* 5.4 GC mode: 0 incremental, 1 generational */
   uint8_t closing;  /* lua_close in progress: no new finalizers (PUC GCSTPCLS). */
+  uint8_t finalizing;  /* a __gc metamethod is running (PUC GCSTPGC): every
+			** collectgarbage option fails/nil during it. */
+  uint8_t stopped;  /* collector stopped by the user (PUC GCSTPUSR):
+		    ** isrunning is false, but "collect" and a step still
+		    ** do their work, as in 5.4 lapi.c. */
 #if LJ_64
   uint8_t lightudnum;	/* Number of lightuserdata segments - 1. */
 #else

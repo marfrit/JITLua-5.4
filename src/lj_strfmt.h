@@ -16,6 +16,8 @@ typedef struct FormatState {
   const uint8_t *e;	/* End of format string. */
   const char *str;	/* Returned literal string. */
   MSize len;		/* Size of literal string. */
+  const uint8_t *spec;	/* Current '%...' specification (or NULL). */
+  MSize speclen;	/* Size of 'spec', conversion included. */
 } FormatState;
 
 /* Format types (max. 16). */
@@ -46,6 +48,19 @@ typedef enum FormatType {
 #define STRFMT_SH_PREC	24
 
 #define STRFMT_TYPE(sf)		((FormatType)((sf) & 15))
+
+/* Error kinds, in bits that no flag, width or precision uses. The parser says
+** which 5.4 rule ('lstrlib.c' checkformat) was broken, so the caller can
+** raise PUC's wording instead of LuaJIT's "invalid option". */
+#define STRFMT_EK_INVAL	0x0000
+#define STRFMT_EK_CONV	0x4000
+#define STRFMT_EK_LONG	0x8000
+#define STRFMT_EK_QMOD	0xc000
+#define STRFMT_EKIND(sf)	((sf) & 0xc000)
+#define STRFMT_ERR_INVAL	(STRFMT_ERR | STRFMT_EK_INVAL)
+#define STRFMT_ERR_CONV	(STRFMT_ERR | STRFMT_EK_CONV)
+#define STRFMT_ERR_LONG	(STRFMT_ERR | STRFMT_EK_LONG)
+#define STRFMT_ERR_QMOD	(STRFMT_ERR | STRFMT_EK_QMOD)
 #define STRFMT_WIDTH(sf)	(((sf) >> STRFMT_SH_WIDTH) & 255u)
 #define STRFMT_PREC(sf)		((((sf) >> STRFMT_SH_PREC) & 255u) - 1u)
 #define STRFMT_FP(sf)		(((sf) >> 4) & 3)

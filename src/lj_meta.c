@@ -614,16 +614,18 @@ TValue * LJ_FASTCALL lj_meta_len(lua_State *L, cTValue *o)
 /* Helper for equality comparisons. __eq metamethod. */
 TValue *lj_meta_equal(lua_State *L, GCobj *o1, GCobj *o2, int ne)
 {
-  /* Field metatable must be at same offset for GCtab and GCudata! */
-  cTValue *mo = lj_meta_fast(L, tabref(o1->gch.metatable), MM_eq);
+  /* 5.4 (lobject.c luaV_equalobj): the __eq handler of the first operand is
+  ** used; only if it has none, the second one's. The call keeps the source
+  ** order. LuaJIT used the 5.1 rule instead: both operands had to carry the
+  ** same __eq, so `set == plain` never called the metamethod.
+  ** Field metatable must be at same offset for GCtab and GCudata! */
+  GCtab *mt1 = tabref(o1->gch.metatable), *mt2 = tabref(o2->gch.metatable);
+  cTValue *mo = lj_meta_fast(L, mt1, MM_eq);
+  if (mo == NULL && mt1 != mt2)
+    mo = lj_meta_fast(L, mt2, MM_eq);
   if (mo) {
     TValue *top;
     uint32_t it;
-    if (tabref(o1->gch.metatable) != tabref(o2->gch.metatable)) {
-      cTValue *mo2 = lj_meta_fast(L, tabref(o2->gch.metatable), MM_eq);
-      if (mo2 == NULL || !lj_obj_equal(mo, mo2))
-	return (TValue *)(intptr_t)ne;
-    }
     top = curr_top(L);
     setcont(top++, ne ? lj_cont_condf : lj_cont_condt);
     if (LJ_FR2) setnilV(top++);

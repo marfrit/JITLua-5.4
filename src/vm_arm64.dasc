@@ -2764,16 +2764,24 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  // Field metatable must be at same offset for GCtab and GCudata!
     |  and TAB:CARG2, CARG1, #LJ_GCVMASK
     |  ldr TAB:TMP2, TAB:CARG2->metatable
+    // 5.4 lobject.c luaV_equalobj: the first operand's __eq is used, and only
+    // if it has none, the second one's. Without a handler on the first the C
+    // helper decides (it asks the second and keeps the negative cache), so the
+    // old "not equal" shortcut is gone.
     if (vk) {
-      |  cbz TAB:TMP2, <1		// No metatable?
-      |  ldrb TMP1w, TAB:TMP2->nomm
       |   mov CARG4, #0			// ne = 0
-      |  tbnz TMP1w, #MM_eq, <1		// 'no __eq' flag set: done.
-    } else {
-      |  cbz TAB:TMP2, ->BC_ISEQV_Z	// No metatable?
+      |  cbz TAB:TMP2, >6		// No metatable: let the helper decide.
       |  ldrb TMP1w, TAB:TMP2->nomm
+      |  tbnz TMP1w, #MM_eq, >6		// 'no __eq' on the first: helper decides.
+      |  b ->vmeta_equal		// __eq present: call it.
+      |6:
+    } else {
       |   mov CARG4, #1			// ne = 1.
-      |  tbnz TMP1w, #MM_eq, ->BC_ISEQV_Z	// 'no __eq' flag set: done.
+      |  cbz TAB:TMP2, >6		// No metatable: let the helper decide.
+      |  ldrb TMP1w, TAB:TMP2->nomm
+      |  tbnz TMP1w, #MM_eq, >6		// 'no __eq' on the first: helper decides.
+      |  b ->vmeta_equal		// __eq present: call it.
+      |6:
     }
     |  b ->vmeta_equal
     |

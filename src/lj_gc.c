@@ -936,6 +936,7 @@ static void gc_call_finalizer(global_State *g, lua_State *L,
   /* Save and restore lots of state around the __gc callback. */
   uint8_t oldh = hook_save(g);
   GCSize oldt = g->gc.threshold;
+  uint8_t oldfinizing = g->gc.finalizing;
   int errcode;
   lua_State *VL = vmthread(g);
   MSize oldfin = g->finbase;
@@ -945,6 +946,7 @@ static void gc_call_finalizer(global_State *g, lua_State *L,
   hook_entergc(g);  /* Disable hooks and new traces during __gc. */
   if (LJ_HASPROFILE && (oldh & HOOK_PROFILE)) lj_dispatch_update(g, 0);
   g->gc.threshold = LJ_MAX_MEM;  /* Prevent GC steps. */
+  g->gc.finalizing = 1;  /* 5.4 GCSTPGC: lua_gc() fails in every __gc */
   top = VL->top;
   copyTV(VL, top++, mo);
   if (LJ_FR2) setnilV(top++);
@@ -967,6 +969,7 @@ static void gc_call_finalizer(global_State *g, lua_State *L,
   VL->ccallnest = oldnest;
   VL->ccallbase = oldnbase;
   g->finbase = oldfin;
+  g->gc.finalizing = oldfinizing;
   setgcref(g->cur_L, obj2gco(L));
   hook_restore(g, oldh);
   if (LJ_HASPROFILE && (oldh & HOOK_PROFILE)) lj_dispatch_update(g, 0);

@@ -4,6 +4,7 @@
 */
 
 #include <stdio.h>
+#include <string.h>
 
 #define lj_strfmt_c
 #define LUA_CORE
@@ -33,6 +34,44 @@ static const uint8_t strfmt_map[('x'-'A')+1] = {
   0,STRFMT_O,STRFMT_P,STRFMT_Q,0,STRFMT_S,0,STRFMT_U,0,0,STRFMT_X
 };
 
+/* 5.4 lstrlib.c: the characters getformat() folds into one specification
+** (flags, width, precision) and the characters it accepts as conversions.
+** LuaJIT took a wider range of flag characters and accepted '%F' and '%I'. */
+static int strfmt_specchar(uint32_t ch)
+{
+  return ch == '-' || ch == '+' || ch == '#' || ch == '0' || ch == ' ' ||
+	 (ch >= '1' && ch <= '9') || ch == '.';
+}
+
+static int strfmt_convchar(uint32_t ch)
+{
+  switch ((char)ch) {
+  case 'c': case 'd': case 'i': case 'u': case 'o': case 'x': case 'X':
+  case 'a': case 'A': case 'e': case 'E': case 'g': case 'G': case 'f':
+  case 'p': case 'q': case 's':
+    return 1;
+  default:
+    return 0;
+  }
+}
+
+/* Flags lstrlib.c's checkformat() allows for a conversion, and whether a
+** precision may follow. NULL means "no flags, no width, no precision" ('q'). */
+static const char *strfmt_flags54(uint32_t ch, int *precok)
+{
+  switch ((char)ch) {
+  case 'c': *precok = 0; return "-";
+  case 'd': case 'i': *precok = 1; return "-+0 ";
+  case 'u': *precok = 1; return "-0";
+  case 'o': case 'x': case 'X': *precok = 1; return "-#0";
+  case 'a': case 'A': case 'e': case 'E': case 'f': case 'g': case 'G':
+    *precok = 1; return "-+#0 ";
+  case 'p': *precok = 0; return "-";
+  case 's': *precok = 1; return "-";
+  default: *precok = 0; return NULL;  /* 'q' */
+  }
+}
+
 SFormat LJ_FASTCALL lj_strfmt_parse(FormatState *fs)
 {
   const uint8_t *p = fs->p, *e = fs->e;
@@ -45,47 +84,111 @@ SFormat LJ_FASTCALL lj_strfmt_parse(FormatState *fs)
       } else {
 	SFormat sf = 0;
 	uint32_t c;
+	const uint8_t *q, *s;
+	const char *fl;
+	int precok, hasmod;
 	if (p != (const uint8_t *)fs->str)
 	  break;
-	for (p++; (uint32_t)*p - ' ' <= (uint32_t)('0' - ' '); p++) {
-	  /* Parse flags. */
-	  if (*p == '-') sf |= STRFMT_F_LEFT;
-	  else if (*p == '+') sf |= STRFMT_F_PLUS;
-	  else if (*p == '0') sf |= STRFMT_F_ZERO;
-	  else if (*p == ' ') sf |= STRFMT_F_SPACE;
-	  else if (*p == '#') sf |= STRFMT_F_ALT;
-	  else break;
+	/* 5.4 lstrlib.c getformat(): the span of flags, width and precision,
+	** then exactly one conversion character. A span of 21 characters or
+	** more is rejected before anything else (MAX_FORMAT - 10 == 22, the
+	** '%' included). */
+	s = p+1;
+	for (q = s; q < e && strfmt_specchar((uint32_t)*q); q++) ;
+	if ((MSize)(q - s) >= 21) {  /* 'invalid format (too long)' */
+	  fs->len = (MSize)(q - (const uint8_t *)fs->str);
+	  fs->p = fs->e;
+	  return STRFMT_ERR_LONG;
 	}
-	if ((uint32_t)*p - '0' < 10) {  /* Parse width. */
-	  uint32_t width = (uint32_t)*p++ - '0';
-	  if ((uint32_t)*p - '0' < 10)
-	    width = (uint32_t)*p++ - '0' + width*10;
-	  sf |= (width << STRFMT_SH_WIDTH);
+	if (q >= e) {  /* the format ends before its conversion character */
+	  fs->len = (MSize)(e - (const uint8_t *)fs->str);
+	  fs->p = fs->e;
+	  return STRFMT_ERR_INVAL;
 	}
-	if (*p == '.') {  /* Parse precision. */
-	  uint32_t prec = 0;
-	  p++;
-	  if ((uint32_t)*p - '0' < 10) {
-	    prec = (uint32_t)*p++ - '0';
-	    if ((uint32_t)*p - '0' < 10)
-	      prec = (uint32_t)*p++ - '0' + prec*10;
+	/* The conversion must be one of PUC's ('%F' and '%I' are rejected). */
+	if (!strfmt_convchar((uint32_t)*q)) {
+	  fs->len = (MSize)(q+1 - (const uint8_t *)fs->str);
+	  fs->p = fs->e;
+	  return STRFMT_ERR_CONV;
+	}
+	fl = strfmt_flags54((uint32_t)*q, &precok);
+	hasmod = q > s;
+	if (fl == NULL) {  /* '%q': no modifiers at all */
+	  if (hasmod) {
+	    fs->len = (MSize)(q+1 - (const uint8_t *)fs->str);
+	    fs->p = fs->e;
+	    return STRFMT_ERR_QMOD;
 	  }
-	  sf |= ((prec+1) << STRFMT_SH_PREC);
+	  fs->p = q+1;
+	  c = (uint32_t)*q - 'A';
+	  return (STRFMT_Q | ((c & 0x20) ? 0 : STRFMT_F_UPPER));
 	}
-	/* Parse conversion. */
-	c = (uint32_t)*p - 'A';
-	if (LJ_LIKELY(c <= (uint32_t)('x' - 'A'))) {
-	  uint32_t sx = strfmt_map[c];
-	  if (sx) {
-	    fs->p = p+1;
-	    return (sf | sx | ((c & 0x20) ? 0 : STRFMT_F_UPPER));
+	/* checkformat(): the flags of this conversion, then a width that must
+	** not start with '0' (PUC treats a leading '0' as a flag, so this only
+	** fires when '0' is not allowed for the conversion), at most two digits,
+	** a precision only where the conversion allows one, and the conversion
+	** character right after the specification. */
+	{
+	  const uint8_t *t = s;
+	  uint32_t width = 0, prec = 0;
+	  /* lstrlib.c checks a %s specification only after the zeros check, so
+	  ** that check is deferred to the caller (lj_strfmt_putarg). The fields
+	  ** are parsed leniently then; a valid specification parses the same. */
+	  int defer = *q == 's' && hasmod;
+	  fs->spec = (const uint8_t *)fs->str;
+	  fs->speclen = (MSize)(q+1 - (const uint8_t *)fs->str);
+	  while (t < q && strchr(fl, (int)*t) != NULL) {
+	    if (*t == '-') sf |= STRFMT_F_LEFT;
+	    else if (*t == '+') sf |= STRFMT_F_PLUS;
+	    else if (*t == '#') sf |= STRFMT_F_ALT;
+	    else if (*t == ' ') sf |= STRFMT_F_SPACE;
+	    else if (*t == '0') sf |= STRFMT_F_ZERO;
+	    t++;
 	  }
+	  if (t < q && *t == '0') {  /* width starting with '0' */
+	    if (!defer) {
+	      fs->len = (MSize)(q+1 - (const uint8_t *)fs->str);
+	      fs->p = fs->e;
+	      return STRFMT_ERR_INVAL;
+	    }
+	    goto fmt54_done;
+	  }
+	  if (t < q && (uint32_t)*t - '0' < 10) {  /* Parse width (two digits). */
+	    width = (uint32_t)*t++ - '0';
+	    if (t < q && (uint32_t)*t - '0' < 10)
+	      width = (uint32_t)*t++ - '0' + width*10;
+	    sf |= (width << STRFMT_SH_WIDTH);
+	  }
+	  if (t < q && *t == '.') {  /* Parse precision (two digits). */
+	    if (!precok) {
+	      if (!defer) {
+		fs->len = (MSize)(q+1 - (const uint8_t *)fs->str);
+		fs->p = fs->e;
+		return STRFMT_ERR_INVAL;
+	      }
+	      goto fmt54_done;
+	    }
+	    t++;
+	    if (t < q && (uint32_t)*t - '0' < 10) {
+	      prec = (uint32_t)*t++ - '0';
+	      if (t < q && (uint32_t)*t - '0' < 10)
+		prec = (uint32_t)*t++ - '0' + prec*10;
+	    }
+	    sf |= ((prec+1) << STRFMT_SH_PREC);
+	  }
+	  if (t != q) {  /* something between precision and conversion */
+	    if (!defer) {
+	      fs->len = (MSize)(q+1 - (const uint8_t *)fs->str);
+	      fs->p = fs->e;
+	      return STRFMT_ERR_INVAL;
+	    }
+	  }
+	fmt54_done:
+	  ;
 	}
-	/* Return error location. */
-	if (*p >= 32) p++;
-	fs->len = (MSize)(p - (const uint8_t *)fs->str);
-	fs->p = fs->e;
-	return STRFMT_ERR;
+	c = (uint32_t)*q - 'A';
+	fs->p = q+1;
+	return (sf | strfmt_map[c] | ((c & 0x20) ? 0 : STRFMT_F_UPPER));
       }
     }
   }
@@ -402,6 +505,55 @@ SBuf *lj_strfmt_putfnum_uint(SBuf *sb, SFormat sf, lua_Number n)
   return lj_strfmt_putfxint(sb, sf, lj_num2u64(n));
 }
 
+/* Raise PUC's 5.4 message for a rejected conversion specification. */
+static void strfmt_err54(lua_State *L, SFormat sf, FormatState *fs)
+{
+  switch (STRFMT_EKIND(sf)) {
+  case STRFMT_EK_CONV:
+    lj_err_callerv(L, LJ_ERR_STRFMT,
+		   strdata(lj_str_new(L, fs->str, fs->len)));
+    break;
+  case STRFMT_EK_LONG:
+    lj_err_caller(L, LJ_ERR_STRFMTL);
+    break;
+  case STRFMT_EK_QMOD:
+    lj_err_callerv(L, LJ_ERR_STRFMTQ, "'%q'");
+    break;
+  default:  /* STRFMT_EK_INVAL */
+    lj_err_callerv(L, LJ_ERR_STRFMTS,
+		   strdata(lj_str_new(L, fs->str, fs->len)));
+    break;
+  }
+}
+
+/* lstrlib.c checkformat() for a deferred %s specification: flags '-' only, a
+** width that must not start with '0', an optional two-digit precision, then
+** the conversion character right after. Raises PUC's message. */
+static void strfmt_checkformat54(lua_State *L, const uint8_t *spec, MSize len)
+{
+  const uint8_t *s = spec+1, *e = spec+len-1;  /* e is the conversion char. */
+  int bad = 0;
+  while (s < e && *s == '-') s++;
+  if (s < e && *s == '0') {
+    bad = 1;
+  } else {
+    if (s < e && (uint32_t)*s - '0' < 10) {
+      s++;
+      if (s < e && (uint32_t)*s - '0' < 10) s++;
+    }
+    if (s < e && *s == '.') {
+      s++;
+      if (s < e && (uint32_t)*s - '0' < 10) {
+	s++;
+	if (s < e && (uint32_t)*s - '0' < 10) s++;
+      }
+    }
+    bad = s != e;
+  }
+  if (bad)
+    lj_err_callerv(L, LJ_ERR_STRFMTS, strdata(lj_str_new(L, (const char *)spec, len)));
+}
+
 /* Format stack arguments to buffer. */
 /* True unless the string metatable is known to have no __tostring. */
 static LJ_AINLINE int strfmt_strmm(lua_State *L)
@@ -420,13 +572,12 @@ int lj_strfmt_putarg(lua_State *L, SBuf *sb, int arg, int retry)
   while ((sf = lj_strfmt_parse(&fs)) != STRFMT_EOF) {
     if (sf == STRFMT_LIT) {
       lj_buf_putmem(sb, fs.str, fs.len);
-    } else if (sf == STRFMT_ERR) {
-      lj_err_callerv(L, LJ_ERR_STRFMT,
-		     strdata(lj_str_new(L, fs.str, fs.len)));
+    } else if (STRFMT_TYPE(sf) == STRFMT_ERR) {
+      strfmt_err54(L, sf, &fs);
     } else {
       TValue *o = &L->base[arg++];
       if (arg > narg)
-	lj_err_arg(L, arg, LJ_ERR_NOVAL);
+	lj_err_arg(L, arg, LJ_ERR_NOVALF);
       switch (STRFMT_TYPE(sf)) {
       case STRFMT_INT:
 	/* 5.4 (luaL_checkinteger): a numeric string is converted first, an
@@ -564,6 +715,19 @@ int lj_strfmt_putarg(lua_State *L, SBuf *sb, int arg, int retry)
 	  len = str->len;
 	  s = strdata(str);
 	}
+	if (fs.speclen > 2 && !(sf & STRFMT_T_QUOTED)) {
+	  /* 5.4 lstrlib.c: a %s with modifiers (the specification is longer than
+	  ** "%s": the deferred check) requires the string to have no zeros, and
+	  ** a string of 100 bytes or more without a precision is appended as it
+	  ** is, without formatting. */
+	  if (len != (MSize)strlen(s))
+	    lj_err_arg(L, arg, LJ_ERR_STRFMTZ);
+	  strfmt_checkformat54(L, fs.spec, fs.speclen);  /* after the zeros check */
+	  if (((sf >> STRFMT_SH_PREC) & 255u) == 0 && len >= 100) {
+	    sb = lj_buf_putmem(sb, s, len);
+	    break;
+	  }
+	}
 	if ((sf & STRFMT_T_QUOTED))
 	  strfmt_putquotedlen(sb, s, len);  /* No formatting. */
 	else
@@ -573,9 +737,20 @@ int lj_strfmt_putarg(lua_State *L, SBuf *sb, int arg, int retry)
       case STRFMT_CHAR:
 	lj_strfmt_putfchar(sb, sf, lj_lib_checkint(L, arg));
 	break;
-      case STRFMT_PTR:  /* No formatting. */
-	lj_strfmt_putptr(sb, lj_obj_ptr(G(L), o));
+      case STRFMT_PTR: {
+	/* 5.4 lstrlib.c: a value without a pointer is formatted as the string
+	** "(null)" (the specifier is rewritten to 's'), under the same width and
+	** '-' flag; a pointer is printed like "%p" of C under that width. */
+	const void *pp = lj_obj_ptr(G(L), o);
+	if (pp == NULL) {
+	  sb = strfmt_putfstrlen(sb, sf, "(null)", 6);
+	} else {
+	  char buf[STRFMT_MAXBUF_PTR];
+	  MSize len = (MSize)(lj_strfmt_wptr(buf, pp) - buf);
+	  sb = strfmt_putfstrlen(sb, sf, buf, len);
+	}
 	break;
+	}
       default:
 	lj_assertL(0, "bad string format type");
 	break;

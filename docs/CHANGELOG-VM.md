@@ -24,6 +24,67 @@ target x86_64 (GC64) and arm64.
   use a metatable's `__name` (`luaL_newmetatable` sets it; io handles report
   "FILE*" through their udtype) (`err_11_typename.lua`). The
   `table.remove` head is regenerated (`src/host/buildvm_libbc.h`).
+- `table.concat` range arguments (Lua 5.4): start and end were read as int32,
+  so `table.concat(t, "", math.maxinteger, math.maxinteger)` clamped and the
+  "invalid value (%s) at index %d" message named 2147483647 instead of the
+  5.4 integer, and a table keyed outside int32 was not found. Both bounds are
+  exact 5.4 integers now (`luaL_optinteger`; a non-integral float raises
+  "number has no integer representation"), the int32 fast path stays for the
+  common case, and the general path walks int64 keys via `lj_i64_tvstore`.
+  The index in the error message is a `lua_Integer` (`%s` placeholder).
+  PUC's suite checks the message in `strings.lua:15` via 392/394;
+  `tests/d54/str_04_concat_int64.lua` covers both extremes, an int32-crossing
+  lexicographic range, fractional bounds and element formatting.
+- `string.format` conversion rules (Lua 5.4): the format parser accepted
+  specifications PUC rejects and printed others differently. Fixed after
+  lstrlib.c's `getformat`/`checkformat`: the allowed flags per conversion, a
+  width that must not start with `0` where `0` is no flag, a precision only
+  where the conversion allows one, at most two digits for width and precision,
+  a specification of 21 characters or more answered as "invalid format (too
+  long)", `%q` refuses every modifier ("specifier '%q' cannot have modifiers"),
+  `%F`/`%I`/`%t` are "invalid conversion '<spec>' to 'format'", a missing
+  argument says "no value" (was "value expected"), and a `%s` with modifiers
+  raises "string contains zeros" before it is formatted and appends a string
+  of 100 bytes or more without a precision as it is. A value without a pointer
+  is `%p`-formatted as "(null)", a real pointer under the same width, and the
+  `'-'` flag and width apply to both (the specifier is rewritten to `s` in
+  lstrlib.c). PUC's suite checks the rules in `strings.lua:160-194` and
+  `strings.lua:15` via 371-385; `tests/d54/fmt_03_format_rules.lua` and
+  `tests/d54/fmt_04_ptr.lua` cover every rejected and accepted specification.
+- The x86_64 `__eq` fast path once more reaches the int64 box comparison:
+  the new helper branch label reused the number `6` of the "RA/RD hold both
+  TValue words" label, so an interned int64 userdata went into the
+  metatable read and crashed (`math.maxinteger == math.maxinteger`).
+- `collectgarbage("isrunning")` and the user stop flag: the answer was derived
+  from the GC threshold, and an explicit `collectgarbage("step")` reset that
+  threshold, so after `collectgarbage("stop")` the collector ran again and
+  `isrunning` said true; `"collect"` did the same. 5.4 keeps `GCSTPUSR`
+  (lapi.c): a step clears the flag only for the duration of the step and
+  restores it (threshold included), `luaC_fullgc` ignores it, and `isrunning`
+  reports the flag. `GCState.stopped` holds it now.
+  PUC's suite checks this in `gc.lua:209`;
+  `tests/d54/gc_06_stopped_flag.lua` covers stop, step, collect and restart.
+- `collectgarbage` inside a `__gc` metamethod: 5.4 stops the collector
+  internally while a finalizer runs (`lapi.c`, `GCSTPGC`) and returns -1 for
+  every option; `luaB_collectgarbage` turns that into fail, i.e. nil. Here
+  every option answered normally (a full collection, memory figures, the mode
+  name). The finalizer call now sets `gc.finalizing` for the duration, and
+  `lua_gc` returns -1 while it is set; the base library pushes nil for count
+  and for the -1 result. PUC's suite checks it in `gc.lua:699`;
+  `tests/d54/gc_07_finalizer_collectgarbage.lua` covers all eight options.
+- `__eq` selection (Lua 5.4): equality used the 5.1 rule, i.e. both operands
+  had to carry the same `__eq` handler, so comparing a plain table or userdata
+  against one with a handler never called the metamethod and
+  `set == {3,5,1}` was false. 5.4 (`lobject.c luaV_equalobj`) uses the first
+  operand's handler, and only if it has none the second one's, passing the
+  operands in source order. The C helper `lj_meta_equal` now implements that,
+  and the assembler fast paths of x86_64 and arm64 no longer take their "not
+  equal" shortcut when the first operand lacks a handler: they fall through to
+  the helper, which also owns the negative cache. The x86 and arm backends send
+  every such comparison to the helper (no inline second-operand check there).
+  PUC's suite checks this in `events.lua:299`; `tests/d54/meta_06_eq_54.lua`
+  covers one-sided handlers, the first-handler rule, call order, the handler
+  result as truth value, and the `Set` case from events.lua.
 - String to number conversion (Lua 5.4 numeral rules), one conversion for the
   interpreter, the library and compiled code. Four defects, all in the two
   functions every such conversion goes through (`lj_strscan_scan`, and

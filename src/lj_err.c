@@ -1229,9 +1229,9 @@ const char *lj_err_typename(lua_State *L, cTValue *o)
 {
   GCtab *mt = NULL;
   if (tvisi64(o)) return "number";  /* ADR-001b: never report "userdata" */
-  /* LuaJIT's io handles are plain udata with a udtype, not PUC's
-  ** luaL_newmetatable("FILE*") object: report the same type name. */
-  if (tvisudata(o) && udataV(o)->udtype == UDTYPE_IO_FILE) return "FILE*";
+  /* An io handle is named by the __name of its metatable ("FILE*" for the
+  ** standard one, set by luaopen_io) like any userdata, as in PUC: a handle
+  ** made while registry["FILE*"] is nil or another table has that name. */
   if (tvistab(o)) mt = tabref(tabV(o)->metatable);
   else if (tvisudata(o)) mt = tabref(udataV(o)->metatable);
   if (mt) {

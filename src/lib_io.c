@@ -109,15 +109,17 @@ static IOFileUD *io_file_new(lua_State *L)
   GCudata *ud;
   GCtab *mt;
   /* 5.4: the metatable is the registered LUA_FILEHANDLE one, with the
-  ** methods under __index only, so rawget(mt, "write") is nil. */
+  ** methods under __index only, so rawget(mt, "write") is nil. A program
+  ** can replace or remove that registry entry: PUC (luaL_setmetatable)
+  ** then sets whatever table is there, or no metatable for nil. */
   lua_getfield(L, LUA_REGISTRYINDEX, LUA_FILEHANDLE);
-  mt = tabV(L->top-1);
+  mt = tvistab(L->top-1) ? tabV(L->top-1) : NULL;
   L->top--;
   iof = (IOFileUD *)lua_newuserdatauv(L, sizeof(IOFileUD), 0);  /* PUC: no user values. */
   ud = udataV(L->top-1);
   ud->udtype = UDTYPE_IO_FILE;
   /* NOBARRIER: The GCudata is new (marked white). */
-  setgcref(ud->metatable, obj2gco(mt));
+  if (mt) setgcref(ud->metatable, obj2gco(mt));
   iof->fp = NULL;
   iof->closef = NULL;
   iof->type = IOFILE_TYPE_FILE;

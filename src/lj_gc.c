@@ -1510,7 +1510,8 @@ static void gc_jit_cleardead(global_State *g, lua_State *L, TraceNo traceno)
       ** Below them, a slot written in the body whose old value is read
       ** neither in the body nor after it is dead there too (the trace drops
       ** the store, so nothing else would overwrite it). */
-      int dead = s >= nlive || (wr[s] && !rd[s] && !ra[s]);
+      int dead = (sop >= BC_LOOP && sop <= BC_JLOOP && s >= nlive) ||
+	 (wr[s] && !rd[s] && !ra[s]);
       if (dead)
 	for (uv = gcref(L->openupval); uv != NULL; uv = gcnext(uv))
 	  if (uvval(gco2uv(uv)) == L->base + s) { dead = 0; break; }

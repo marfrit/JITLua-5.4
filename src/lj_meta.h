@@ -24,7 +24,8 @@ LJ_FUNC int lj_meta_tailcall(lua_State *L, cTValue *tv);
 /* Return values of lj_meta_for. */
 #define LJ_FOR_RETRY	0	/* slots prepared, re-execute FORI/JFORI */
 #define LJ_FOR_SKIP	1	/* PUC forprep skipped the loop: jump past it */
-#define LJ_FOR_WIDE	2	/* wide integer loop prepared: enter the body */
+#define LJ_FOR_WIDE	2	/* loop entered from C (wide, clipped, or a limit
+				** equal to the clip value): enter the body */
 
 /* C helpers for some instructions, called from assembler VM. */
 LJ_FUNCA cTValue *lj_meta_tget(lua_State *L, cTValue *o, cTValue *k);
@@ -60,6 +61,10 @@ LJ_FUNCA TValue *lj_meta_call(lua_State *L, TValue *func, TValue *top);
 LJ_FUNCA int LJ_FASTCALL lj_meta_for(lua_State *L, TValue *o);
 LJ_FUNCA const BCIns * LJ_FASTCALL lj_meta_forl(lua_State *L, TValue *o);
 LJ_FUNC int lj_meta_forkind(lua_State *L, cTValue *o, TValue *out);
+LJ_FUNCA const BCIns * LJ_FASTCALL lj_meta_forclip(lua_State *L, TValue *o);
+LJ_FUNC int lj_meta_forview(lua_State *L, TValue *o, MSize k, TValue *dst);
+LJ_FUNC void lj_meta_forunclip(lua_State *L, TValue *o);
+LJ_FUNC void lj_meta_forclipfree(global_State *g, lua_State *L);
 /* 5.4 to-be-closed variables. */
 LJ_FUNCA void LJ_FASTCALL lj_meta_tbcmark(lua_State *L, TValue *o);
 LJ_FUNCA TValue *lj_meta_tbcclose(lua_State *L, TValue *level, MSize multres);

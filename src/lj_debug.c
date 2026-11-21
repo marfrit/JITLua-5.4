@@ -17,6 +17,7 @@
 #include "lj_ff.h"
 #include "lj_bc.h"
 #include "lj_strfmt.h"
+#include "lj_meta.h"
 #if LJ_HASJIT
 #include "lj_jit.h"
 #endif
@@ -193,9 +194,12 @@ static const char *debug_varname(const GCproto *pt, BCPos pc, BCReg slot)
   return NULL;
 }
 
-/* Get name of local variable from 1-based slot number and function/frame. */
+/* Get name of local variable from 1-based slot number and function/frame.
+** *forbase gets the FOR_IDX slot of a numeric for loop whose hidden state
+** the variable is, NULL otherwise. */
 static TValue *debug_localname(lua_State *L, const lua_Debug *ar,
-			       const char **name, BCReg slot1)
+			       const char **name, BCReg slot1,
+			       TValue **forbase)
 {
   uint32_t offset = (uint32_t)ar->i_ci & 0xffff;
   uint32_t size = (uint32_t)ar->i_ci >> 16;
@@ -204,6 +208,7 @@ static TValue *debug_localname(lua_State *L, const lua_Debug *ar,
   GCfunc *fn = frame_func(frame);
   BCPos pc = debug_framepc(L, fn, nextframe);
   if (!nextframe) nextframe = L->top+LJ_FR2;
+  *forbase = NULL;
   if ((int)slot1 < 0) {  /* Negative slot number is for varargs. */
     if (pc != NO_BCPOS) {
       GCproto *pt = funcproto(fn);
@@ -245,6 +250,8 @@ static TValue *debug_localname(lua_State *L, const lua_Debug *ar,
 	if (len == 4) {  /* generic for: reorder to close-last */
 	  BCReg idx = slot1 - start;
 	  slot1 = start + ((idx + 1) & 3);
+	} else if (len == 3) {  /* numeric for: index, limit, step */
+	  *forbase = frame+start;
 	}
       }
     }
@@ -633,9 +640,13 @@ LUA_API const char *lua_getlocal(lua_State *L, const lua_Debug *ar, int n)
 {
   const char *name = NULL;
   if (ar) {
-    TValue *o = debug_localname(L, ar, &name, (BCReg)n);
+    TValue *forbase;
+    TValue *o = debug_localname(L, ar, &name, (BCReg)n, &forbase);
     if (name) {
-      copyTV(L, L->top, o);
+      /* A loop with a clipped limit shows its wide form (lj_meta.c). */
+      if (!(forbase &&
+	    lj_meta_forview(L, forbase, (MSize)(o - forbase), L->top)))
+	copyTV(L, L->top, o);
       incr_top(L);
     }
   } else if (tvisfunc(L->top-1) && isluafunc(funcV(L->top-1))) {
@@ -647,9 +658,16 @@ LUA_API const char *lua_getlocal(lua_State *L, const lua_Debug *ar, int n)
 LUA_API const char *lua_setlocal(lua_State *L, const lua_Debug *ar, int n)
 {
   const char *name = NULL;
-  TValue *o = debug_localname(L, ar, &name, (BCReg)n);
-  if (name)
+  TValue *forbase;
+  TValue *o = debug_localname(L, ar, &name, (BCReg)n, &forbase);
+  if (name) {
+    if (forbase) {  /* A clipped loop takes its wide form first. */
+      ptrdiff_t ofs = savestack(L, o);
+      lj_meta_forunclip(L, forbase);
+      o = restorestack(L, ofs);
+    }
     copyTV(L, o, L->top-1);
+  }
   L->top--;
   return name;
 }

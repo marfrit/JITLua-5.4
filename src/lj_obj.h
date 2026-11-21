@@ -796,6 +796,14 @@ struct lua_State {
   /* ccallnest at the last throw: the nesting the C stack really has while
   ** the frames of that throw are unwound (see tbc_closeunwound). */
   MSize ccallthrow;
+  /* 5.4 numeric for loops run on the int32 path with a clipped limit (see
+  ** lj_meta.c): the real limit of each such loop, keyed by the stack offset
+  ** of its FOR_IDX slot, ascending. No GC objects; offsets survive stack
+  ** reallocation. Entries of loops that were left early stay until a loop
+  ** at or below their slot starts (they are never consulted before). */
+  MRef forclip;		/* ForClip[] */
+  MSize forclipn;	/* Number of entries. */
+  MSize forclipsize;	/* Allocated size of forclip. */
 };
 
 #define G(L)			(mref(L->glref, global_State))

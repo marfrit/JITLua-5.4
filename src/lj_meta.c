@@ -884,7 +884,27 @@ TValue *lj_meta_call(lua_State *L, TValue *func, TValue *top)
 ** slots is a pointer the VM follows, so values written there through the
 ** debug library cannot corrupt anything: lj_meta_forl takes the slots as
 ** they are (see there). FORL takes the body address from its own
-** instruction (a JFORL's from the trace's start instruction). */
+** instruction (a JFORL's from the trace's start instruction).
+**
+** Clipped limits. An integer loop whose initial value and step fit int32 and
+** whose limit lies beyond int32 (`for i = 1, math.huge`, `1, 1e10`,
+** `1, math.maxinteger`) runs as a small loop while its index fits: FOR_STOP
+** holds the clip value C = INT32_MAX - step (INT32_MIN - step for a negative
+** step), so the int32 add of the next index cannot overflow while the index
+** is at most C and a trace can be recorded for the loop; the real limit is
+** kept in the thread's forclip list under the stack offset of FOR_IDX. The
+** int32 FORL paths leave such a loop once the index passes C; on that edge,
+** and only when FOR_STOP equals C for the step, they call lj_meta_forclip,
+** which continues the loop as a wide loop if the list has an entry for the
+** slot. The list is exact because every loop start whose limit equals C goes
+** through lj_meta_for (the FORI/JFORI fast paths check for it, a recorded
+** FORI exits to the interpreter for it), which pushes the entry of a clipped
+** loop or drops a stale one; entries of loops that are gone are dropped when
+** a loop at or below their slot starts. A trace leaves an integer loop at the
+** FORL with the index before the increment, so the interpreter takes that
+** edge. The debug library sees a clipped loop in the wide form (index as a
+** float, the real limit), and writing one of its slots turns it into that
+** form first (lj_meta_forview, lj_meta_forunclip). */
 
 static int for_isint(cTValue *o)
 {
@@ -1007,6 +1027,154 @@ static void for_setidx(lua_State *L, TValue *o, int64_t idx, int small)
   }
 }
 
+/* -- Clipped limits ---------------------------------------------------- */
+
+typedef struct ForClip {
+  int64_t limit;	/* Converted limit, outside int32. */
+  int32_t ofs;		/* savestack of FOR_IDX. */
+} ForClip;
+
+/* The clip value of a step: the largest index (smallest for a negative step)
+** whose int32 add of the step cannot overflow. */
+static LJ_AINLINE int32_t for_clipv(int32_t step)
+{
+  return step > 0 ? (int32_t)((int64_t)0x7fffffff - step) :
+		    (int32_t)((int64_t)-0x7fffffff - 1 - step);
+}
+
+/* Drop the entries at offset ofs and above: those loops are gone. */
+static void forclip_drop(lua_State *L, int32_t ofs)
+{
+  ForClip *fc = mref(L->forclip, ForClip);
+  MSize n = L->forclipn;
+  while (n > 0 && fc[n-1].ofs >= ofs) n--;
+  L->forclipn = n;
+}
+
+static void forclip_push(lua_State *L, int32_t ofs, int64_t limit)
+{
+  ForClip *fc;
+  forclip_drop(L, ofs);
+  fc = mref(L->forclip, ForClip);
+  if (LJ_UNLIKELY(L->forclipn >= L->forclipsize)) {
+    MSize nsz = L->forclipsize ? L->forclipsize * 2 : 4;
+    fc = (ForClip *)lj_mem_realloc(L, fc, L->forclipsize * sizeof(ForClip),
+				   nsz * sizeof(ForClip));
+    setmref(L->forclip, fc);
+    L->forclipsize = nsz;
+  }
+  fc[L->forclipn].limit = limit;
+  fc[L->forclipn].ofs = ofs;
+  L->forclipn++;
+}
+
+/* The entry of the loop at offset ofs, or NULL. Entries above it are left
+** alone: the debug library may ask while inner loops run. */
+static ForClip *forclip_find(lua_State *L, int32_t ofs)
+{
+  ForClip *fc = mref(L->forclip, ForClip);
+  MSize n = L->forclipn;
+  while (n > 0 && fc[n-1].ofs > ofs) n--;
+  return (n > 0 && fc[n-1].ofs == ofs) ? &fc[n-1] : NULL;
+}
+
+void lj_meta_forclipfree(global_State *g, lua_State *L)
+{
+  if (L->forclipsize) {
+    lj_mem_free(g, mref(L->forclip, void), L->forclipsize * sizeof(ForClip));
+    setmref(L->forclip, NULL);
+    L->forclipn = L->forclipsize = 0;
+  }
+}
+
+/* A running loop in the clipped form: three int32 slots, FOR_STOP equal to
+** the clip value of the step, and an entry for the slot. */
+static ForClip *for_clipped(lua_State *L, TValue *o)
+{
+  int i;
+  for (i = FORL_IDX; i <= FORL_STEP; i++)
+    if (!tvisint(&o[i]) || tvisi47w(&o[i])) return NULL;
+  if (intV(&o[FORL_STEP]) == 0 ||
+      intV(&o[FORL_STOP]) != for_clipv(intV(&o[FORL_STEP])))
+    return NULL;
+  return forclip_find(L, (int32_t)savestack(L, o));
+}
+
+/* The int32 FORL path left a loop (FOR_IDX and FOR_EXT hold the int32 index
+** that passed FOR_STOP, computed without overflow) whose FOR_STOP equals the
+** clip value of its step. A clipped loop continues as a wide loop from that
+** index (it fits int32 and does not pass the real limit, which lies beyond
+** int32): the slots get the wide form and the body PC is returned. Anything
+** else leaves the loop (NULL). Only the low words of FOR_STOP and FOR_STEP
+** are read, as the int32 path reads them. */
+const BCIns * LJ_FASTCALL lj_meta_forclip(lua_State *L, TValue *o)
+{
+  const BCIns *pc = cframe_pc(cframe_raw(L->cframe));  /* After the FORL. */
+  BCIns ins = pc[-1];
+  int32_t ofs = (int32_t)savestack(L, o);
+  ForClip *fc = forclip_find(L, ofs);
+  int64_t idx, limit, step;
+  forclip_drop(L, ofs);  /* The entry is used up, the ones above are gone. */
+  if (!fc) return NULL;
+  limit = fc->limit;
+#if LJ_HASJIT
+  if (bc_op(ins) == BC_JFORL)  /* Its jump field holds the trace number. */
+    ins = traceref(L2J(L), bc_d(ins))->startins;
+#endif
+  lj_assertL(bc_op(ins) == BC_FORL || bc_op(ins) == BC_IFORL,
+	     "bad FORL instruction %d", bc_op(ins));
+  idx = (int64_t)intV(o);
+  step = (int64_t)o[FORL_STEP].i;
+  if (step == 0 || (step > 0 ? idx > limit : idx < limit)) return NULL;
+  lj_i64_toTValue(L, o+FORL_STOP, limit);  /* May box. */
+  o = restorestack(L, ofs);
+  for_setidx(L, o, idx, for_fits32(limit));
+  lj_gc_check_fixtop(L);
+  return pc + bc_j(ins);
+}
+
+/* debug.getlocal of slot k (FORL_IDX..FORL_STEP) of the numeric loop at o:
+** a clipped loop shows its wide form (the int32 index as a float, the real
+** limit), the form the loop had before the clipping existed. Returns 1 after
+** writing *dst (a slot the GC sees: the limit may box), 0 otherwise. */
+int lj_meta_forview(lua_State *L, TValue *o, MSize k, TValue *dst)
+{
+  ForClip *fc = for_clipped(L, o);
+  if (!fc) return 0;
+  if (k == FORL_IDX)
+    setnumV(dst, (lua_Number)intV(o));
+  else if (k == FORL_STOP)
+    lj_i64_toTValue(L, dst, fc->limit);
+  else
+    copyTV(L, dst, o+k);
+  return 1;
+}
+
+/* debug.setlocal of a slot of the numeric loop at o, before the write: a
+** clipped loop takes the wide form, so the write acts on the loop the debug
+** view shows; any other entry for the slot is stale and goes, so a limit
+** written there is never taken for a clipped one. FOR_EXT is the control
+** variable and is left alone. */
+void lj_meta_forunclip(lua_State *L, TValue *o)
+{
+  int32_t ofs = (int32_t)savestack(L, o);
+  ForClip *fc = forclip_find(L, ofs);
+  if (fc) {
+    ForClip *list = mref(L->forclip, ForClip);
+    int64_t limit = fc->limit;
+    int clipped = (for_clipped(L, o) != NULL);
+    MSize i = (MSize)(fc - list);
+    memmove(fc, fc+1, (L->forclipn - i - 1) * sizeof(ForClip));
+    L->forclipn--;
+    if (clipped) {
+      int32_t idx = intV(o);
+      lj_i64_toTValue(L, o+FORL_STOP, limit);  /* May box. */
+      o = restorestack(L, ofs);
+      setnumV(o, (lua_Number)idx);  /* See for_setidx. */
+    }
+  }
+}
+
 int LJ_FASTCALL lj_meta_for(lua_State *L, TValue *o)
 {
   int64_t init, step;
@@ -1021,7 +1189,24 @@ int LJ_FASTCALL lj_meta_for(lua_State *L, TValue *o)
       setintV(o, (int32_t)init);
       setintV(o+1, (int32_t)limit);
       setintV(o+2, (int32_t)step);
-      return LJ_FOR_RETRY;
+      if ((int32_t)limit != for_clipv((int32_t)step))
+	return LJ_FOR_RETRY;
+      /* A real limit equal to the clip value: drop a stale entry of the
+      ** slot, then enter here (the FORI fast path would come back). */
+      forclip_drop(L, (int32_t)savestack(L, o));
+      setintV(o+FORL_EXT, (int32_t)init);
+      return LJ_FOR_WIDE;
+    } else if (for_fits32(init) && for_fits32(step) &&
+	       (step > 0 ? init <= for_clipv((int32_t)step) :
+			   init >= for_clipv((int32_t)step))) {
+      /* The limit lies beyond int32 (the loop is not skipped): run on the
+      ** int32 path up to the clip value, keep the real limit aside. */
+      forclip_push(L, (int32_t)savestack(L, o), limit);
+      setintV(o, (int32_t)init);
+      setintV(o+1, for_clipv((int32_t)step));
+      setintV(o+2, (int32_t)step);
+      setintV(o+FORL_EXT, (int32_t)init);
+      return LJ_FOR_WIDE;
     } else {
       /* Wide integer loop: the step slot already holds the canonical step.
       ** Boxing may allocate: pay for it like any allocation of the VM, with
@@ -1061,7 +1246,8 @@ int lj_meta_forkind(lua_State *L, cTValue *o, TValue *out)
   if (for_isint(o) && for_isint(o+2) && for_toint(o, &init, 0) &&
       for_toint(o+2, &step, 0)) {
     if (step == 0 || !for_tointeger(L, o+1, &limit, step < 0) ||
-	!(for_fits32(init) && for_fits32(step) && for_fits32(limit)))
+	!(for_fits32(init) && for_fits32(step) && for_fits32(limit)) ||
+	(int32_t)limit == for_clipv((int32_t)step))  /* Clipped or alike. */
       return LJ_FOR_WIDE;
     setintV(out, (int32_t)init);
     setintV(out+1, (int32_t)limit);

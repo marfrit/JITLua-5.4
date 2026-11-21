@@ -1387,6 +1387,23 @@ static void build_subroutines(BuildCtx *ctx)
   |1:
   |  ins_next
   |
+  |->vmeta_forclip:
+  |  // The int32 FORL path left a loop whose limit is the clip value of its
+  |  // step: lj_meta_forclip continues a clipped loop as a wide loop (body
+  |  // PC), or returns NULL to leave it (docs/notes/for-loop-54.md).
+  |  mov L:RB, SAVE_L
+  |  mov L:RB->base, BASE
+  |  mov CARG2, RA			// Caveat: CARG2 == BASE
+  |  mov L:CARG1, L:RB			// Caveat: CARG1 == RA
+  |  mov SAVE_PC, PC
+  |  call extern lj_meta_forclip	// (lua_State *L, TValue *base) -> PC/NULL
+  |  mov BASE, L:RB->base
+  |  test RC, RC
+  |  jz >1
+  |  mov PC, RC
+  |1:
+  |  ins_next
+  |
   |//-----------------------------------------------------------------------
   |//-- Fast functions -----------------------------------------------------
   |//-----------------------------------------------------------------------
@@ -5155,6 +5172,11 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
 	|  mov ITYPE, FOR_STEP
 	|  test ITYPEd, ITYPEd; js >5
 	|  jz ->vmeta_for		// step zero: lj_meta_for raises 'for' step is zero
+	|  // A limit equal to the clip value INT32_MAX - step starts the loop in
+	|  // C, which keeps the clipped-limit list exact (lj_meta_for).
+	|  lea ITYPEd, [TMPR+ITYPE]
+	|  cmp ITYPEd, 0x7fffffff
+	|  je ->vmeta_for
       } else {
 	// No type assertion for FOR_STOP/FOR_STEP here: debug.setlocal can
 	// write any value into them, and this path reads their low words
@@ -5179,12 +5201,13 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
 	|1:
 	|6:
       } else if (op == BC_IFORL) {
-	|  jg >7
+	|  jg >8
 	|6:
 	|  branchPC RD
 	|1:
       } else {
 	|  jle =>BC_JLOOP
+	|  jmp >8
 	|1:
 	|6:
       }
@@ -5195,6 +5218,10 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
       if (!vk) {
 	|  sar ITYPE, 47;
 	|  cmp ITYPEd, LJ_TISNUM; jne ->vmeta_for
+	|  mov ITYPEd, dword FOR_STEP	// Clip value INT32_MIN - step: see above.
+	|  add ITYPEd, TMPRd
+	|  cmp ITYPEd, 0x80000000
+	|  je ->vmeta_for
       } else {
 	|  add RBd, ITYPEd; jo <1
 	|  setint RB
@@ -5209,11 +5236,30 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
 	|  movzx RDd, PC_RD
 	|  jge =>BC_JLOOP
       } else if (op == BC_IFORL) {
-	|  jl <7
+	|  jl >4
       } else {
 	|  jge =>BC_JLOOP
+	|  jmp >4
       }
       |  jmp <6
+      if (vk) {
+	// The loop is left (the index passed the limit without an int32
+	// overflow). Only a limit equal to the clip value of the step can be
+	// a clipped one: lj_meta_forclip decides. RD is free on this edge,
+	// ITYPE is not the step any more (setint).
+	|8:
+	|  mov RDd, dword FOR_STEP
+	|  add RDd, TMPRd
+	|  cmp RDd, 0x7fffffff		// limit == INT32_MAX - step
+	|  je ->vmeta_forclip
+	|  jmp <7
+	|4:
+	|  mov RDd, dword FOR_STEP
+	|  add RDd, TMPRd
+	|  cmp RDd, 0x80000000		// limit == INT32_MIN - step
+	|  je ->vmeta_forclip
+	|  jmp <7
+      }
       |9:  // Fallback to FP variant.
       if (!vk) {
 	|  jae ->vmeta_for

@@ -4,7 +4,10 @@
 ** A luaL_Stream block (lauxlib.h) made here is passed to C functions that
 ** take a FILE *: from the interpreter, from compiled loops, and at a call
 ** site that saw the library's own handles or another userdata first. A
-** closed stream converts to NULL. The chunk checks itself and the program
+** closed stream converts to NULL. A userdata whose metatable becomes the
+** file metatable after a trace was recorded with it (registry["FILE*"]
+** replaced) is a stream from then on, in that trace too; one too short for
+** a luaL_Stream stays its payload address. The chunk checks itself and the program
 ** exits non-zero on a mismatch; it runs with the JIT on and off.
 */
 #include <stdio.h>
@@ -39,8 +42,16 @@ static int mkplain(lua_State *L)
   return 2;
 }
 
+/* A userdata too short for a luaL_Stream, and its payload address. */
+static int mkshort(lua_State *L)
+{
+  void *p = lua_newuserdatauv(L, 1, 0);
+  lua_pushlightuserdata(L, p);
+  return 2;
+}
+
 static const char chunk[] =
-  "local mk, mkplain = ...\n"
+  "local mk, mkplain, mkshort = ...\n"
   "local ffi = require('ffi')\n"
   "ffi.cdef[[typedef struct FILE FILE; int fputc(int c, FILE *f);\n"
   "  int fputs(const char *s, FILE *f); int fflush(FILE *f);]]\n"
@@ -70,6 +81,24 @@ static const char chunk[] =
   "for i = 1, 400 do local p = ffi.cast(vp, uds[i])\n"
   "  if p == pa then n = n + 1 elseif p == fp then m = m + 1 end end\n"
   "assert(n == 250 and m == 150, 'plain userdata first: ' .. n .. ' ' .. m)\n"
+  "local function cnt(ud, want) local c = 0\n"
+  "  for i = 1, 300 do if ffi.cast(vp, ud) == want then c = c + 1 end end\n"
+  "  return c end\n"
+  "local pm, pmaddr = mkplain()\n"
+  "local M = {}\n"
+  "debug.setmetatable(pm, M)\n"
+  "assert(cnt(pm, ffi.cast(vp, pmaddr)) == 300, 'userdata with a metatable')\n"
+  "local sh, shaddr = mkshort()\n"
+  "debug.setmetatable(sh, M)\n"
+  "local reg = debug.getregistry()\n"
+  "local fmt = reg['FILE*']\n"
+  "reg['FILE*'] = M\n"
+  "local c1 = cnt(pm, ffi.cast(vp, nil))\n"
+  "local c2 = cnt(sh, ffi.cast(vp, shaddr))\n"
+  "reg['FILE*'] = fmt\n"
+  "assert(c1 == 300, 'file metatable replaced after the trace: ' .. c1)\n"
+  "assert(c2 == 300, 'short userdata with the file metatable: ' .. c2)\n"
+  "assert(cnt(pm, ffi.cast(vp, pmaddr)) == 300, 'file metatable restored')\n"
   "s:close()\n"
   "assert(ffi.cast(vp, s) == nil, 'closed stream')\n"
   "own:close()\n"
@@ -89,7 +118,8 @@ static int run(lua_State *L, int jitoff)
   }
   lua_pushcfunction(L, mkstream);
   lua_pushcfunction(L, mkplain);
-  if (lua_pcall(L, 2, 0, 0) != LUA_OK) {
+  lua_pushcfunction(L, mkshort);
+  if (lua_pcall(L, 3, 0, 0) != LUA_OK) {
     printf("error: %s\n", lua_tostring(L, -1));
     return 1;
   }

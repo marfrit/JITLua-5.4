@@ -136,6 +136,13 @@ $CC $CFLAGS -I"$SRC" "$ROOT/tests/capi/ffistream.c" -o "$OUT/ffistream" \
 echo "== ffistream (JITLua-5.4) =="
 timeout 60 "$OUT/ffistream"
 
+# The io library opened after a trace converted a userdata (ffilateio.c): a
+# file handle made afterwards converts to its FILE * in that trace as well.
+$CC $CFLAGS -I"$SRC" "$ROOT/tests/capi/ffilateio.c" -o "$OUT/ffilateio" \
+  "$LIB" $LDFLAGS -lm -ldl
+echo "== ffilateio (JITLua-5.4) =="
+timeout 60 "$OUT/ffilateio"
+
 # Public-header probe for the module-facing macros (no <limits.h> include in
 # the probe itself) and the real third-party module that exposed the gap.
 # MODLUAJIT is the host interpreter used to load the modules; it defaults to

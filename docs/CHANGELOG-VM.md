@@ -432,6 +432,15 @@ target x86_64 (GC64) and arm64.
   dispatch now runs while either mask is set and always writes the note; the
   call event stays behind the call mask
   (`tests/d54/debug_08_rethook_ff.lua`).
+- The return event of a Lua function that ends in a tail call to a C
+  function. The caller's frame is kept below an `LJ_CONT_TAILRET`
+  continuation, and `cont_tailret` returned it without going through the
+  return dispatch, so only the C function's return was reported; PUC finishes
+  the caller with `luaD_poscall` after the C call (`lvm.c` `OP_TAILCALL`).
+  `cont_tailret` (x64 and arm64) calls `lj_dispatch_tailret` when the return
+  mask is set; it moves the results to the callee's slot, where PUC has them
+  (the transfer values match), and fires the event with the line of the tail
+  call (`tests/d54/debug_09_tailcall_c_rethook.lua`).
 - `__tostring` must return a string (5.4 `luaL_tolstring`). The
   conversion paths `tostring()`, `print()`, `string.format("%s")`, the C API
   `luaL_tolstring` and the standalone message handler now enforce it: a string

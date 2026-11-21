@@ -108,10 +108,6 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
 - `IMPL-DEFINED` Sparse-table border for runtime-built tables may differ: 5.4
   allows any border; LuaJIT's array-growth policy differs from PUC's alimit hint
   (`tbl_03_border_divergence`).
-- `PENDING` Return hook of a function that ends in a tail call to a C
-  function: PUC calls the return hook for the Lua caller after the C function
-  returns; here the caller returns through the continuation without a hook
-  event, as it did when the frame was replaced.
 - `IMPL-DEFINED` When an object referenced only from a dead stack slot is
   collected. The stack of a running Lua function is scanned up to the top of
   its frame (inherited from LuaJIT), so a value left in the argument slot of

@@ -619,6 +619,23 @@ target x86_64 (GC64) and arm64.
   `LexState.vlocal`) between the two upvalue fixups, since the 16-bit slot
   of the prototype cannot hold the stack index
   (`tests/d54/parse_04_local_limits.lua`).
+- `string.len`, `math.deg` and `math.rad` are fast functions in assembler
+  with a C fallback now, C functions as in PUC: `debug.getinfo` says
+  `what = "C"`, source `=[C]`, hooks see a C frame without line events,
+  and the argument errors are `luaL_checklstring`/`luaL_checknumber`'s
+  ("got no value"; numbers and numeric strings converted; `math.deg` on a
+  table with `__mul` fails instead of calling it). They were inherited Lua
+  definitions (`LJLIB_LUA`, removed from `buildvm_libbc.h`, regenerated).
+  The recorder emits `FLOAD str.len` after `lj_ir_tostr` and `MUL` by the
+  doubles of PUC's `180.0/PI` and `PI/180.0` after `lj_ir_tonum`, so the
+  JIT still inlines them. `table.move` already was a C function; the
+  5.1 `table.foreach*`/`getn` Lua definitions exist only with
+  `LJ_51COMPAT` (`tests/d54/debug_11_cfunc_builtins.lua`). Loop over one
+  call, median of 7, base vs head in one box job per arch: `-jon` equal
+  (x86_64 len/deg/rad 0.189/0.354/0.354 s for 2e8 calls; arm64
+  0.076/0.103/0.103 s), `-joff` faster (2e7 calls, x86_64 1.105 -> 0.688,
+  2.011 -> 1.152, 2.426 -> 1.672 s; arm64 0.287 -> 0.208, 0.415 -> 0.211,
+  0.286 -> 0.227 s).
 
 ## Known JIT/performance rows (not semantic divergences)
 

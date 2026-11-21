@@ -173,12 +173,6 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   with `LJ_ERR_XLIMM/XLIMF`), and `tests/d54/parse_02_limit_msgs.lua` prints
   the whole set; the depth at which a nesting shape is refused is the part that
   cannot match, because PUC measures it in C frames. `errors.lua:646` reads it.
-- `PENDING` `string.len`, `math.deg`, `math.rad` and `table.move` are Lua
-  functions here (inherited `LJLIB_LUA` definitions, which the JIT inlines):
-  `debug.getinfo(string.len).what` is `"Lua"` where PUC says `"C"`, hooks
-  see them as Lua frames (a call event with `what == "Lua"`, line events
-  inside them), and tracebacks list them as Lua functions. Turning them into
-  C functions needs recorder entries so the JIT keeps inlining them.
 - `IMPL-DEFINED` How many collection cycles a program triggers. The 5.4 manual
   leaves the pacing to the implementation, and this collector's pause, step
   work and accounting differ (see the basic-step and GC policy rows). The

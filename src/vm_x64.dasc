@@ -782,14 +782,29 @@ static void build_subroutines(BuildCtx *ctx)
   |.endif
   |
   |->cont_tailret:			// Return from a tail-called C function.
-  |  // BASE = caller base, RC = result, RB = meta base.
+  |  // BASE = caller base, RC = result, RB = meta base, PC = after CALLT.
   |  // cont_dispatch clobbered RD (RC == RD), so reload nresults+1
   |  // from MULTRES, which the C/ff return path left there.
   |  endbr
+  |  test byte [DISPATCH+DISPATCH_GL(hookmask)], LUA_MASKRET
+  |  jnz >2
+  |1:
   |  mov RA, RC
   |  sub RA, BASE			// RA = resultofs (bytes).
   |  mov RDd, MULTRES
   |  jmp ->BC_RETC_Z			// Make the caller return the C results.
+  |
+  |2:  // 5.4: return hook of the caller, after the C function returned.
+  |  mov L:RB, SAVE_L
+  |  mov L:RB->base, BASE
+  |  mov SAVE_PC, PC			// The CALLT position, for the line.
+  |  mov CARG2, RC			// Before CARG3 (= BASE on SysV).
+  |  mov CARG3d, MULTRES
+  |  sub CARG3d, 1
+  |  mov CARG1, L:RB
+  |  call extern lj_dispatch_tailret	// (lua_State *L, TValue *res, int n)
+  |  mov BASE, L:RB->base		// Results in RC, moved down.
+  |  jmp <1
   |
   |->cont_cat:				// BASE = base, RC = result, RB = mbase
   |  endbr

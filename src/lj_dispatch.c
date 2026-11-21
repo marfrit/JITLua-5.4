@@ -590,6 +590,34 @@ TValue * LJ_FASTCALL lj_dispatch_yret(lua_State *L, TValue *res)
   return res;
 }
 
+/* Return hook of a Lua function that ended in a tail call to a C function
+** (5.4: lvm.c OP_TAILCALL finishes the caller with luaD_poscall after the C
+** function returned). Called from cont_tailret with L->base set to the
+** caller, the cframe PC after its CALLT and the n results at res. PUC has
+** the results at the callee's slot, so they move down there first: that
+** is what ftransfer and debug.getlocal in the hook see. Returns res.
+*/
+TValue * LJ_FASTCALL lj_dispatch_tailret(lua_State *L, TValue *res, int n)
+{
+  global_State *g = G(L);
+  if ((g->hookmask & LUA_MASKRET) && !hook_active(g)) {
+    ERRNO_SAVE
+    const BCIns *pc = cframe_pc(cframe_raw(L->cframe));
+    TValue *dst = L->base + bc_a(pc[-1]);
+    ptrdiff_t resofs;
+    if (dst < res) {
+      memmove(dst, res, (size_t)n*sizeof(TValue));
+      res = dst;
+    }
+    resofs = savestack(L, res);
+    L->top = res + n;
+    callhook(L, LUA_HOOKRET, -1, n ? (MSize)(res - L->base) + 1 : 0, (MSize)n);
+    res = restorestack(L, resofs);
+    ERRNO_RESTORE
+  }
+  return res;
+}
+
 int LJ_FASTCALL lj_dispatch_cret(lua_State *L, int n)
 {
   /* n >= 0: a negative count is a yield, whose pending slots lua_yield

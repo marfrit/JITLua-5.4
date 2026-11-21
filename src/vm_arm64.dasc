@@ -724,11 +724,26 @@ static void build_subroutines(BuildCtx *ctx)
   |.endif
   |
   |->cont_tailret:			// Return from a tail-called C function.
-  |  // RB = caller base, RA = resultptr, RC = (nresults+1)*8.
+  |  // RB = caller base, RA = resultptr, RC = (nresults+1)*8, PC = after CALLT.
   |  bti_jump
   |  mov BASE, RB			// Restore the caller base.
+  |  ldrb TMP0w, GL->hookmask
+  |  tbnz TMP0w, #LUA_HOOKRET, >2
+  |1:
   |  ldr PC, [BASE, FRAME_PC]		// Caller's own return PC.
   |  b ->BC_RETM_Z			// Caller returns the results: any frame type.
+  |
+  |2:  // 5.4: return hook of the caller, after the C function returned.
+  |  str BASE, L->base
+  |  str PC, SAVE_PC			// The CALLT position, for the line.
+  |  mov CARG1, L
+  |  mov CARG2, RA
+  |  lsr CARG3w, RCw, #3
+  |  sub CARG3w, CARG3w, #1
+  |  bl extern lj_dispatch_tailret	// (lua_State *L, TValue *res, int n)
+  |  mov RA, CRET1			// Results, moved down.
+  |  ldr BASE, L->base
+  |  b <1
   |
   |->cont_cat:				// RA = resultptr, CARG4 = meta base
   |  bti_jump

@@ -984,7 +984,11 @@ const char *lj_strfmt_pushvf(lua_State *L, const char *fmt, va_list argp)
       if (p+1 < end && (p[1] == 'I' || p[1] == 'U')) { spec = p[1]; break; }
       p += (p+1 < end) ? 2 : 1;  /* Skips '%%' as well. */
     }
-    lj_strfmt_init(&fs, seg, (MSize)(p - seg));
+    /* Not lj_strfmt_init: a piece ends at the '%' of the cut, not at a NUL.
+    ** The parser stays below fs.e except for the character after a '%',
+    ** and the scan above never ends a piece on an unpaired '%'. */
+    fs.p = (const uint8_t *)seg;
+    fs.e = (const uint8_t *)p;
     seg = spec ? p+2 : end;
     while ((sf = lj_strfmt_parse(&fs)) != STRFMT_EOF) {
       switch (STRFMT_TYPE(sf)) {

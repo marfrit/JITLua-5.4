@@ -1023,19 +1023,13 @@ int lj_meta_tbccloseall(lua_State *L, TValue *level, TValue *err)
 int lj_meta_tbccloseall_at(lua_State *L, TValue *level, TValue *err,
 			   MSize nest, MSize slack)
 {
-  /* level may point into the Lua stack, which the calls below can
-  ** reallocate: keep it as an offset. The error object is copied out of the
-  ** stack: the call frames of the handlers are placed right above the slot
-  ** being closed (as in PUC, where luaD_seterrorobj puts the error object at
-  ** level+1 and the call above it), so the slot that held it may be part of
-  ** a discarded frame and is not reliably there any more. */
+  /* level and err may point into the Lua stack, which the calls below can
+  ** reallocate: keep them as offsets. */
   global_State *g = G(L);
   ptrdiff_t lofs = savestack(L, level);
   int errinstack = (err >= tvref(L->stack) && err < tvref(L->maxstack));
   ptrdiff_t eofs = errinstack ? savestack(L, err) : 0;
-  TValue errv;
   int status = LUA_OK;
-  copyTV(L, &errv, err);
   /* Every handler call is a call from C and takes one level of the C-call
   ** bound (PUC callclosemethod -> luaD_call); a thread that is closed from
   ** outside got the closer's count from the call site. Only a pending
@@ -1057,22 +1051,20 @@ int lj_meta_tbccloseall_at(lua_State *L, TValue *level, TValue *err,
       ** handlers of an unwinding that is nested too deep on the C stack
       ** (see tbc_closeunwound in lj_err.c). */
       int errerr = (nest != LJ_MAX_CCALLS);
-      setstrV(L, &errv, lj_err_str(L, errerr ? LJ_ERR_ERRERR : LJ_ERR_CSTKOV));
+      if (errinstack) err = restorestack(L, eofs);
+      setstrV(L, err, lj_err_str(L, errerr ? LJ_ERR_ERRERR : LJ_ERR_CSTKOV));
       status = errerr ? LUA_ERRERR : LUA_ERRRUN;
       continue;
     }
-    /* The handler call goes directly above the slot being closed. Closing
-    ** runs from the highest pending slot down, so every slot that still has
-    ** a handler to run stays below L->top and keeps being marked by the GC
-    ** (PUC luaF_close does the same, one level at a time). */
     lj_state_checkstack(L, LUA_MINSTACK);
     o = restorestack(L, list[L->tbcn]);  /* Re-derive after a possible realloc. */
+    if (errinstack) err = restorestack(L, eofs);
     mo = lj_meta_lookup(L, o, MM_close);
-    top = o + 1;
+    top = L->top;
     copyTV(L, top, mo);
     if (LJ_FR2) setnilV(top+1);
     copyTV(L, top+1+LJ_FR2, o);
-    copyTV(L, top+2+LJ_FR2, &errv);
+    copyTV(L, top+2+LJ_FR2, err);
     L->top = top+3+LJ_FR2;
     {
       MSize onest = L->ccallnest, othrow = L->ccallthrow;
@@ -1085,18 +1077,11 @@ int lj_meta_tbccloseall_at(lua_State *L, TValue *level, TValue *err,
       g->ccallslack = oslack;
     }
     if (st != LUA_OK) {  /* The error of a __close replaces the error. */
-      copyTV(L, &errv, L->top-1);
+      if (errinstack) err = restorestack(L, eofs);
+      copyTV(L, err, L->top-1);
       L->top--;
       status = st;
     }
-  }
-  /* Hand the (possibly replaced) error object back where the caller expects
-  ** it. The call frames moved L->top, so the top goes back above that slot:
-  ** the unwinder takes the message from L->top-1. */
-  if (errinstack) {
-    err = restorestack(L, eofs);
-    copyTV(L, err, &errv);
-    if (L->top < err+1) L->top = err+1;
   }
   return status;
 }

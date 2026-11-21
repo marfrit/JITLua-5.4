@@ -42,7 +42,7 @@ reads the figures; it does not change any source.
 | k-nucleotide | 23.1 | 24.3 | 36.0 | 0.95 | 1.5 |
 | regex-dna | 13.6 | 14.3 | 28.6 | 0.95 | 2.0 |
 
-No benchmark is more than 10 % slower than stock.
+In this run no arm64 benchmark is more than 10 % slower than stock.
 
 ### x86_64
 

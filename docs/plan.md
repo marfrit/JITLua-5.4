@@ -26,8 +26,12 @@ Verification, identical on both architectures (README.md has the full list):
   (217 tests, 608 jobs). Every XFAIL is a row in
   `tests/known-different.tsv` and in DIFFERENCES.md.
 - `tests/known-bad.tsv`: no open defect.
-- Classic benchmarks: no workload more than 10 % slower than stock LuaJIT 2.1
-  (`docs/perf-report-1.0.0.md`).
+- Classic benchmarks against stock LuaJIT 2.1 (`docs/perf-report-1.0.0.md`):
+  within 10 % on both architectures except two readings of workloads that run
+  for 10 ms or less, neither confirmed by a second measurement: x86_64
+  `fasta` 0.84 in the 2026-11-21 run (1.039 in the interleaved run of
+  2026-11-20; open work, item 7 below) and arm64 `nbody` 0.731 in the
+  2026-11-20 run (0.982 measured alone on that host).
 
 ## Deviation from MISSION, 2026-11-21
 
@@ -46,7 +50,7 @@ feeds 1.0.x. The decision and its reasoning are recorded in MISSION.md.
 | 2 — IR int domain | mode B green for numeric, bits, metamethods | `[x]` |
 | 3 — optimizer and backends | harness green at opt levels 0–3, all backends | `[~]` x86_64 and arm64 only; the 10M-program fuzz count of the gate is not part of 1.0.0 |
 | 4 — GC and strings | GC stress green, ASan clean | `[~]` weak tables, `__gc`, 5.4 `collectgarbage` interface; one incremental collector, no real generational collector (`docs/gc-newgen-plan.md` Stage 3) |
-| 5 — standard libraries | PUC suite green in mode A, mode B green | `[x]` all PUC suite files run except `all`, `api`, `code`; FFI re-validated |
+| 5 — standard libraries | PUC suite green in mode A, mode B green | `[x]` all PUC suite files run except `all`, `api`, `code` (they need the suite's internal test library) and `heavy.lua`, which is left out of the default and `--strict` corpus and runs on request (`--include-heavy`, tests/README.md); FFI re-validated |
 | 6 — hardening and release | zero open failures, 30-day fuzz, perf report | `[~]` perf report and docs done; fuzz campaign moves to 1.0.x |
 
 Release documents: `docs/LUA54.md` (overview), `docs/DIFFERENCES.md`,
@@ -100,6 +104,15 @@ Release documents: `docs/LUA54.md` (overview), `docs/DIFFERENCES.md`,
 
 ## ADR-001 — value model (the critical architectural decision)
 
+**Status: superseded by ADR-001b** (`docs/adr-001b-boxed-i64.md`), which is
+what the tree implements. `TValue` stays 8 bytes: an integer in int32 range
+is stored inline as before, an integer of up to 47 bits inline under its own
+tag on GC64, any other integer as an interned, boxed int64 (`UDTYPE_I64BOX`,
+`lj_i64.c`); the IR has `IRT_I64`. There is no `LJ_TVSZ`, no `LJ_TISNUM64`
+and no 16-byte slot anywhere in `src/`. The text below is the plan of
+2026-11 as it was written, kept as the record of the decision; its "chosen"
+design (ADR-001a) was not built.
+
 **Finding (verified in-tree):** LuaJIT 2.1's dual-number mode stores integers as
 **`int32_t`** (`lj_obj.h`: `TValue.i`, `intV`, `setintV`; `setint64V` demotes to
 int32 or double). `TValue` is **8 bytes** with NaN-boxed tags:
@@ -118,12 +131,12 @@ Options considered:
 | option | exact int64 | invasiveness | verdict |
 |---|---|---|---|
 | keep 8-byte TValue, ints ≤2^53 only | no | none | rejected: breaks 5.4 |
-| box large ints in a GC object | yes | high (value semantics everywhere) | rejected |
+| box large ints in a GC object | yes | high (value semantics everywhere) | rejected then; implemented as ADR-001b |
 | split value/tag arrays (PUC-style) | yes | very high (rewrites all type dispatch) | rejected |
-| **16-byte TValue: NaN-boxed low word + int64 in high word, new tag `LJ_TISNUM64`** | yes | high but mechanical | **chosen** |
+| **16-byte TValue: NaN-boxed low word + int64 in high word, new tag `LJ_TISNUM64`** | yes | high but mechanical | **chosen** then; superseded, not built |
 | 16-byte TValue, PUC-style split tag | yes | very high | fallback only |
 
-**Chosen design (ADR-001a):**
+**Design chosen at the time (ADR-001a, not built):**
 * `TValue` becomes 16 bytes (`LJ_TVSZ 16`, `LJ_TVSH 4`). Low 8 bytes keep today's
   NaN-boxed encoding for *all* existing types (nil/bool/str/func/tab/…/double).
 * New internal tag `LJ_TISNUM64` in the low word; the full `int64_t` lives in the

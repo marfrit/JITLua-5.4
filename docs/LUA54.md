@@ -20,7 +20,9 @@ fork with the JIT off (mode A), the JIT on against off at optimization levels
 0 to 3 (mode B) and a dump/reload round-trip (mode R). The PUC 5.4.9 test
 suite runs as part of the corpus; three of its files (`all`, `api`, `code`)
 exist only for the suite's internal test library `T` and do not run
-(README, [tests/t-guarded.tsv](../tests/t-guarded.tsv)).
+(README, [tests/t-guarded.tsv](../tests/t-guarded.tsv)), and `heavy.lua`
+is left out of the default and `--strict` corpus because of its memory use;
+it runs on request (`--include-heavy`, [tests/README.md](../tests/README.md)).
 
 ### Language
 

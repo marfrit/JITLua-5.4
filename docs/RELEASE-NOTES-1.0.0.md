@@ -23,12 +23,14 @@ supported by Mike Pall (see [README.md](../README.md)).
   517 PASS / 0 FAIL / 4 XFAIL; full corpus (PUC 5.4.9 test suite plus
   `tests/d54`) with `--strict` 592 PASS / 0 FAIL / 16 XFAIL / 3 SKIP /
   0 TIMEOUT. No open row in `tests/known-bad.tsv`.
-- Performance: against stock LuaJIT 2.1, no classic benchmark was more than
-  10 % slower in the interleaved run of 2026-11-20; the one reading below
-  that line in the 2026-11-21 run (x86_64 fasta, 0.84) is a 10 ms benchmark
-  within noise and is to be re-measured. Against PUC Lua 5.4.9 the fork is
-  faster on every classic workload on both architectures, except that
-  scimark on x86_64 is equal. Figures and method:
+- Performance: against stock LuaJIT 2.1 the classic benchmarks are within
+  10 % on both architectures, except two readings of workloads that run for
+  10 ms or less and that a second measurement did not confirm: arm64 nbody
+  at 0.731 in the interleaved run of 2026-11-20 (0.982 measured alone) and
+  x86_64 fasta at 0.84 in the 2026-11-21 run (1.039 on 2026-11-20; to be
+  re-measured). Against PUC Lua 5.4.9 the fork is faster on every classic
+  workload on both architectures, except scimark on x86_64, where PUC is
+  2.6 % faster (28808.5 ms against 29588.0 ms). Figures and method:
   [perf-report-1.0.0.md](perf-report-1.0.0.md).
 
 ## Compatibility statement

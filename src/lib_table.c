@@ -144,6 +144,15 @@ LJLIB_CF(table_insert)		LJLIB_REC(.)
   GCtab *t = tab_checktab(L, 1, TAB_RW | TAB_L);
   lua_Integer pos, e;
   int nargs = (int)(L->top - L->base);
+  if (!t && nargs == 2 && tvistab(L->base)) {
+    /* A push reads no element (PUC tinsert: luaL_len, then one lua_seti of
+    ** a new key), so a metatable with __index alone, as a class instance
+    ** has it, keeps the raw path; only __newindex and __len change it. */
+    GCtab *pt = tabV(L->base);
+    GCtab *pmt = tabref(pt->metatable);
+    if (!lj_meta_fast(L, pmt, MM_newindex) && !lj_meta_fast(L, pmt, MM_len))
+      t = pt;
+  }
   if (t)
     e = (lua_Integer)lj_tab_len(t) + 1;  /* Plain table: no __len, no wrap. */
   else
@@ -194,8 +203,27 @@ LJLIB_CF(table_insert)		LJLIB_REC(.)
   return 0;
 }
 
-LJLIB_CF(table_remove)
+LJLIB_CF(table_remove)		LJLIB_REC(.)
 {
+  /* The common call first: pop the last element of a table. Only __len
+  ** changes what that means: with a length above zero the border element
+  ** exists, so PUC's lua_geti and lua_seti are raw accesses even when the
+  ** metatable has __index or __newindex. */
+  if (L->base < L->top && tvistab(L->base) &&
+      (L->base+1 >= L->top || tvisnil(L->base+1))) {
+    GCtab *pt = tabV(L->base);
+    GCtab *pmt = tabref(pt->metatable);
+    if (!(pmt != NULL && lj_meta_fast(L, pmt, MM_len))) {
+      MSize plen = lj_tab_len(pt);
+      cTValue *po = plen > 0 ? lj_tab_getint(pt, (int32_t)plen) : NULL;
+      if (po != NULL && !tvisnil(po)) {
+	copyTV(L, L->top, po);
+	setnilV((TValue *)po);
+	L->top++;
+	return 1;
+      }
+    }
+  }
   GCtab *t = tab_checktab(L, 1, TAB_RW | TAB_L);
   if (!t) {
     /* Generic path (PUC tremove): element access through the API so

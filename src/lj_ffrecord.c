@@ -1850,9 +1850,12 @@ static void LJ_FASTCALL recff_table_insert(jit_State *J, RecordFFData *rd)
   ix.val = J->base[1];
   rd->nres = 0;
   if (tref_istab(ix.tab) && ix.val) {
-    if (recff_tab_hasmm(J, rd, 1|2|4)) {
-      /* 5.4: the raw ALEN/idx fast path would bypass __index/__newindex/
-      ** __len; let the interpreter (now metamethod-aware) run instead. */
+    /* 5.4: the raw ALEN/idx fast path would bypass __newindex/__len, and
+    ** an insert in the middle reads through __index as well; the interpreter
+    ** (metamethod-aware) runs those. A push never reads an element (PUC
+    ** tinsert: luaL_len, then one lua_seti), so __index alone, the metatable
+    ** of a class instance, keeps the fast path. */
+    if (recff_tab_hasmm(J, rd, J->base[2] ? (1|2|4) : (2|4))) {
       recff_nyiu(J, rd);
       return;
     }
@@ -1869,6 +1872,39 @@ static void LJ_FASTCALL recff_table_insert(jit_State *J, RecordFFData *rd)
       return;
     }
   }  /* else: Interpreter will throw. */
+}
+
+static void LJ_FASTCALL recff_table_remove(jit_State *J, RecordFFData *rd)
+{
+  TRef tab = J->base[0];
+  if (tref_istab(tab) && (!J->base[1] || tref_isnil(J->base[1])) &&
+      !recff_tab_hasmm(J, rd, 4)) {
+    /* Simple pop: v = t[#t]; t[#t] = nil. With a length above zero the
+    ** border element exists, so PUC's lua_geti and lua_seti (ltablib.c
+    ** tremove) are raw whatever __index and __newindex say; only __len
+    ** selects another path (guarded above). An empty table reads and
+    ** clears t[0] through the metamethods: left to the interpreter. */
+    TRef trlen = emitir(IRTI(IR_ALEN), tab, TREF_NIL);
+    GCtab *t = tabV(&rd->argv[0]);
+    MSize len = lj_tab_len(t);
+    emitir(IRTGI(len ? IR_NE : IR_EQ), trlen, lj_ir_kint(J, 0));
+    if (len) {
+      RecordIndex ix;
+      ix.tab = tab;
+      ix.key = trlen;
+      settabV(J->L, &ix.tabv, t);
+      setintV(&ix.keyv, (int32_t)len);
+      ix.idxchain = 0;
+      ix.val = 0;
+      J->base[0] = lj_record_idx(J, &ix);  /* Load previous value. */
+      /* Assumes ix.key/ix.tab is not modified for raw lj_record_idx(). */
+      ix.val = TREF_NIL;
+      lj_record_idx(J, &ix);  /* Remove value. */
+      rd->nres = 1;
+      return;
+    }
+  }
+  recff_nyi(J, rd);  /* A position, an empty table, __len: interpreter. */
 }
 
 static void LJ_FASTCALL recff_table_concat(jit_State *J, RecordFFData *rd)

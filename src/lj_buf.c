@@ -242,7 +242,8 @@ SBuf *lj_buf_putstr_rep(SBuf *sb, GCstr *s, int32_t rep)
 /* Append one table.concat element in 5.4 lstrlib.c's conversion rules
 ** (strings as they are, integers and floats formatted). Returns 0 for a
 ** value that cannot be concatenated; *pw is the new write pointer. */
-int lj_buf_puttab_elem(SBuf *sb, cTValue *o, MSize seplen, char **pw)
+static LJ_AINLINE int buf_puttab_elem(SBuf *sb, cTValue *o, MSize seplen,
+				      char **pw)
 {
   char *w;
   if (tvisstr(o)) {
@@ -269,7 +270,7 @@ SBuf *lj_buf_puttab(SBuf *sb, GCtab *t, GCstr *sep, int32_t i, int32_t e)
     for (;;) {
       cTValue *o = lj_tab_getint(t, i);
       char *w;
-      if (!o || !lj_buf_puttab_elem(sb, o, seplen, &w)) {
+      if (!o || !buf_puttab_elem(sb, o, seplen, &w)) {
 	sb->w = (char *)(intptr_t)i;  /* Store failing index. */
 	return NULL;
       }
@@ -298,7 +299,7 @@ SBuf *lj_buf_puttab64(lua_State *L, SBuf *sb, GCtab *t, GCstr *sep,
       char *w;
       lj_i64_tvstore(L, &k, i);
       o = lj_tab_get(L, t, &k);
-      if (!o || !lj_buf_puttab_elem(sb, o, seplen, &w)) {
+      if (!o || !buf_puttab_elem(sb, o, seplen, &w)) {
 	*failp = i;
 	return NULL;
       }

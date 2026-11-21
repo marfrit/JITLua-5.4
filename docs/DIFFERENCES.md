@@ -33,6 +33,36 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
 ## Against PUC Lua 5.4.9
 
 ### Language and VM
+- `IMPL-DEFINED` The C-call bound ("C stack overflow" at 200 nested C
+  calls, PUC `LUAI_MAXCCALLS`) counts the same calls as PUC wherever a call
+  really passes through C: pcall/xpcall, coroutine resume and close, and
+  every call from a C function or the C API into the VM. PUC also counts
+  calls that are C calls only in its own implementation. They differ here:
+  - A metamethod or `__close` handler called by the interpreter or by
+    compiled code is not a C call. A recursion through one (an `__index`
+    function that indexes again) ends in "C stack overflow" after about 200
+    levels in PUC and in the ordinary "stack overflow" at the Lua stack limit
+    here. For the same reason a `__close` handler at the last level below the
+    bound runs here, while PUC refuses it.
+  - pcall and xpcall are refused at and above the bound; PUC lets them use
+    the 20 extra levels while a "C stack overflow" is handled. The other
+    calls from C can use them here, too.
+  - `__close` handlers that run while an error unwinds, fail and start the
+    next round of handlers are refused with "error in error handling" once
+    they nest too deep on the C stack (PUC unwinds the C stack first and
+    keeps going).
+  - FFI callbacks are not counted.
+- `PENDING` `collectgarbage()` (and `lua_gc`) called from a finalizer runs a
+  nested collection, finalizers included; PUC ignores the call there. The
+  nesting ends at the C-call bound.
+- `IMPL-DEFINED` Stack-overflow depth: PUC grows to `LUAI_MAXSTACK`
+  (1000000 slots, plus the error stack) before failing, this tree caps at
+  `LJ_STACK_MAX` (plus `LJ_STACK_ERREX` for the handler), so a recursive
+  function dies far earlier here, and the JIT-on and JIT-off arms differ by
+  a frame or two. The PUC suite file `cstack.lua` prints the depth (its
+  "final count" lines), so its modes cannot match; the
+  message it asserts on line 29 ("error in error handling") is fixed
+  (`tests/d54/err_11_errerr_msg.lua`). Rows in `tests/known-different.tsv`.
 - `PENDING` An integer argument that has no integer value is truncated or
   saturated instead of raising "number has no integer representation":
   `("hello"):sub(1.5)` is `"hello"`, `string.char(65.5)` is `"A"`, and a

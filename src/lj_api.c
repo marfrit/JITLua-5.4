@@ -32,6 +32,23 @@
 
 /* -- Common helper functions --------------------------------------------- */
 
+/* Call from C into the VM. 5.4: every such call takes one level of the
+** C-call bound (PUC ldo.c ccall, nCcalls / LUAI_MAXCCALLS), the same count
+** the pcall/xpcall fast functions and the coroutine resumes use. That bounds
+** every recursion that passes through C: a library callback (string.gsub,
+** table.sort, a load reader), a metamethod or __close handler called through
+** the API, lua_call from a C module. The interpreter and the compiled code
+** never come here. An error unwinding the call takes the level off again
+** (err_unwind), a normal return restores the count. */
+static void api_vm_call(lua_State *L, TValue *base, int nres1)
+{
+  MSize nest = L->ccallnest;
+  if (lj_err_ccallover(L)) lj_err_ccall(L);
+  L->ccallnest = nest + 1;
+  lj_vm_call(L, base, nres1);
+  L->ccallnest = nest;
+}
+
 #define lj_checkapi_slot(idx) \
   lj_checkapi((idx) <= (L->top - L->base), "stack slot %d out of range", (idx))
 
@@ -399,7 +416,7 @@ LUA_API int lua_equal(lua_State *L, int idx1, int idx2)
       return (int)(uintptr_t)base;
     } else {
       L->top = base+2;
-      lj_vm_call(L, base, 1+1);
+      api_vm_call(L, base, 1+1);
       L->top -= 2+LJ_FR2;
       return tvistruecond(L->top+1+LJ_FR2);
     }
@@ -432,7 +449,7 @@ LUA_API int lua_lessthan(lua_State *L, int idx1, int idx2)
       return (int)(uintptr_t)base;
     } else {
       L->top = base+2;
-      lj_vm_call(L, base, 1+1);
+      api_vm_call(L, base, 1+1);
       L->top -= 2+LJ_FR2;
       return tvistruecond(L->top+1+LJ_FR2);
     }
@@ -490,7 +507,7 @@ LUA_API int lua_geti(lua_State *L, int idx, lua_Integer n)
     v = lj_meta_tget(L, t, &key);
     if (v == NULL) {
       L->top += 2;
-      lj_vm_call(L, L->top-2, 1+1);
+      api_vm_call(L, L->top-2, 1+1);
       L->top -= 2+LJ_FR2;
       v = L->top+1+LJ_FR2;
     }
@@ -534,7 +551,7 @@ LUA_API void lua_seti(lua_State *L, int idx, lua_Integer n)
       TValue *base = L->top;
       copyTV(L, base+2, base-3-2*LJ_FR2);
       L->top = base+3;
-      lj_vm_call(L, base, 0+1);
+      api_vm_call(L, base, 0+1);
       L->top -= 2+LJ_FR2;
     }
     return;
@@ -599,7 +616,7 @@ LUA_API int lua_compare(lua_State *L, int idx1, int idx2, int op)
     if ((uintptr_t)base <= 1)
       return (int)(uintptr_t)base;
     L->top = base+2;
-    lj_vm_call(L, base, 1+1);
+    api_vm_call(L, base, 1+1);
     L->top -= 2+LJ_FR2;
     return tvistruecond(L->top+1+LJ_FR2);
   }
@@ -647,7 +664,7 @@ LUA_API void lua_arith(lua_State *L, int op)
     L->top = ra+1;
   } else {  /* metamethod call, like lua_compare */
     L->top = base+2;
-    lj_vm_call(L, base, 1+1);
+    api_vm_call(L, base, 1+1);
     L->top -= 2+LJ_FR2;
     ra = restorestack(L, raofs);
     copyTV(L, ra, L->top+1+LJ_FR2);
@@ -1144,7 +1161,7 @@ LUA_API void lua_concat(lua_State *L, int n)
       }
       n -= (int)(L->top - (top - 2*LJ_FR2));
       L->top = top+2;
-      lj_vm_call(L, top, 1+1);
+      api_vm_call(L, top, 1+1);
       L->top -= 1+LJ_FR2;
       copyTV(L, L->top-1, L->top+LJ_FR2);
     } while (--n > 0);
@@ -1254,7 +1271,7 @@ LUA_API int lua_gettable(lua_State *L, int idx)
   cTValue *v = lj_meta_tget(L, t, L->top-1);
   if (v == NULL) {
     L->top += 2;
-    lj_vm_call(L, L->top-2, 1+1);
+    api_vm_call(L, L->top-2, 1+1);
     L->top -= 2+LJ_FR2;
     v = L->top+1+LJ_FR2;
   }
@@ -1286,7 +1303,7 @@ LUA_API int lua_getfield(lua_State *L, int idx, const char *k)
   v = lj_meta_tget(L, t, &key);
   if (v == NULL) {
     L->top += 2;
-    lj_vm_call(L, L->top-2, 1+1);
+    api_vm_call(L, L->top-2, 1+1);
     L->top -= 2+LJ_FR2;
     v = L->top+1+LJ_FR2;
   }
@@ -1484,7 +1501,7 @@ LUA_API void lua_settable(lua_State *L, int idx)
     TValue *base = L->top;
     copyTV(L, base+2, base-3-2*LJ_FR2);
     L->top = base+3;
-    lj_vm_call(L, base, 0+1);
+    api_vm_call(L, base, 0+1);
     L->top -= 3+LJ_FR2;
   }
 }
@@ -1504,7 +1521,7 @@ LUA_API void lua_setfield(lua_State *L, int idx, const char *k)
     TValue *base = L->top;
     copyTV(L, base+2, base-3-2*LJ_FR2);
     L->top = base+3;
-    lj_vm_call(L, base, 0+1);
+    api_vm_call(L, base, 0+1);
     L->top -= 2+LJ_FR2;
   }
 }
@@ -1715,7 +1732,7 @@ LUA_API void lua_call(lua_State *L, int nargs, int nresults)
   lj_checkapi(L->status == LUA_OK || L->status == LUA_ERRERR,
 	      "thread called in wrong state %d", L->status);
   lj_checkapi_slot(nargs+1);
-  lj_vm_call(L, api_call_base(L, nargs), nresults+1);
+  api_vm_call(L, api_call_base(L, nargs), nresults+1);
 }
 
 /* Lua 5.4 continuation variants. LuaJIT has no C-level continuation frames,
@@ -1727,11 +1744,45 @@ LUA_API void lua_callk(lua_State *L, int nargs, int nresults,
   lua_call(L, nargs, nresults);
 }
 
+/* lua_pcall at the C-call bound: the call is not made. PUC raises the
+** error inside the protected call, so the caller gets it as the result, the
+** message handler included. */
+static int api_pcall_refused(lua_State *L, int nargs, ptrdiff_t ef)
+{
+  int errerr = (L->ccallnest >= LJ_MAX_CCALLSERR);
+  TValue *o = L->top - (nargs+1);  /* The function and its arguments go. */
+  setstrV(L, o, lj_err_str(L, errerr ? LJ_ERR_ERRERR : LJ_ERR_CSTKOV));
+  L->top = o+1;
+  if (errerr)
+    return LUA_ERRERR;
+  if (ef) {
+    cTValue *errfunc = restorestack(L, ef);
+    if (tvisfunc(errfunc)) {
+      TValue *top = L->top;
+      MSize nest = L->ccallnest;
+      int status;
+      copyTV(L, top+LJ_FR2, top-1);
+      copyTV(L, top-1, errfunc);
+      if (LJ_FR2) setnilV(top++);
+      L->top = top+1;
+      L->ccallnest = nest + 1;
+      status = lj_vm_pcall(L, top, 1+1, 0);  /* |errfunc|msg| -> |msg| */
+      L->ccallnest = nest;
+      if (status == LUA_OK)
+	return LUA_ERRRUN;
+    }
+    setstrV(L, L->top-1, lj_err_str(L, LJ_ERR_ERRERR));
+    return LUA_ERRERR;
+  }
+  return LUA_ERRRUN;
+}
+
 LUA_API int lua_pcall(lua_State *L, int nargs, int nresults, int errfunc)
 {
   global_State *g = G(L);
   uint8_t oldh = hook_save(g);
   ptrdiff_t ef;
+  MSize nest;
   int status;
   lj_checkapi(L->status == LUA_OK || L->status == LUA_ERRERR,
 	      "thread called in wrong state %d", L->status);
@@ -1742,7 +1793,12 @@ LUA_API int lua_pcall(lua_State *L, int nargs, int nresults, int errfunc)
     cTValue *o = index2adr_stack(L, errfunc);
     ef = savestack(L, o);
   }
+  if (lj_err_ccallover(L))
+    return api_pcall_refused(L, nargs, ef);
+  nest = L->ccallnest;
+  L->ccallnest = nest + 1;
   status = lj_vm_pcall(L, api_call_base(L, nargs), nresults+1, ef);
+  L->ccallnest = nest;
   if (status) hook_restore(g, oldh);
   return status;
 }
@@ -1778,14 +1834,28 @@ static TValue *cpcall(lua_State *L, lua_CFunction func, void *ud)
   return top-1;  /* Now call the newly allocated C function. */
 }
 
+static TValue *cpccallerr(lua_State *L, lua_CFunction dummy, void *ud)
+{
+  UNUSED(dummy); UNUSED(ud);
+  lj_err_ccall(L);
+  return NULL;
+}
+
 LUA_API int lua_cpcall(lua_State *L, lua_CFunction func, void *ud)
 {
   global_State *g = G(L);
   uint8_t oldh = hook_save(g);
+  MSize nest = L->ccallnest;
   int status;
   lj_checkapi(L->status == LUA_OK || L->status == LUA_ERRERR,
 	      "thread called in wrong state %d", L->status);
-  status = lj_vm_cpcall(L, func, ud, cpcall);
+  if (lj_err_ccallover(L)) {  /* The error is the result of the call. */
+    status = lj_vm_cpcall(L, NULL, NULL, cpccallerr);
+  } else {  /* Counts like lua_pcall. */
+    L->ccallnest = nest + 1;
+    status = lj_vm_cpcall(L, func, ud, cpcall);
+    L->ccallnest = nest;
+  }
   if (status) hook_restore(g, oldh);
   return status;
 }
@@ -1797,7 +1867,7 @@ LUALIB_API int luaL_callmeta(lua_State *L, int idx, const char *field)
     if (LJ_FR2) setnilV(top++);
     copyTV(L, top++, index2adr(L, idx));
     L->top = top;
-    lj_vm_call(L, top-1, 1+1);
+    api_vm_call(L, top-1, 1+1);
     return 1;
   }
   return 0;
@@ -1914,7 +1984,7 @@ LUA_API int lua_resume(lua_State *L, lua_State *from, int nargs, int *nres)
 ** put the thread back to its fresh suspended state. The PUC 'from' argument
 ** feeds the C-call counter: the closed thread's __close handlers run with the
 ** closer's nesting plus one (PUC sets nCcalls to from's count, and the C call
-** into the handler it does not need to count here adds the other level). */
+** into each handler adds the other level, see lj_meta_tbccloseall). */
 LUA_API int lua_closethread(lua_State *L, lua_State *from)
 {
   int status = L->status, st;
@@ -1927,8 +1997,8 @@ LUA_API int lua_closethread(lua_State *L, lua_State *from)
   else
     setnilV(eslot);
   L->status = LUA_OK;
-  /* Closer's nesting + 1. */
-  L->ccallnest = L->ccallbase = from ? from->ccallnest + 1 : 1;
+  /* Closer's nesting; lj_meta_tbccloseall counts the handler calls. */
+  L->ccallnest = L->ccallbase = from ? from->ccallnest : 0;
   st = lj_meta_tbccloseall(L, tvref(L->stack), eslot);
   /* The reset thread has no frames: nothing is nested. */
   L->ccallnest = L->ccallbase = 0;

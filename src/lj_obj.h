@@ -717,6 +717,9 @@ typedef struct global_State {
   MRef ctype_state;	/* Pointer to C type state. */
   PRNGState prng;	/* Global PRNG state. */
   GCRef gcroot[GCROOT_MAX];  /* GC roots. */
+  /* 5.4 C-call bound: levels the C stack is deeper than ccallnest of the
+  ** running thread says, while __close handlers run during an unwinding. */
+  MSize ccallslack;
 } global_State;
 
 #define mainthread(g)	(&gcref(g->mainthref)->th)
@@ -766,7 +769,7 @@ struct lua_State {
   MRef hookff;		/* ASM fast function that got the last call hook. */
   uint8_t errnest;	/* Nested message-handler invocations (5.4 ERRERR bound). */
   MSize errnestofs;	/* Stack offset at the first handler invocation. */
-  MSize ccallnest;	/* Nested pcall/xpcall fast calls (5.4 C-call bound). */
+  MSize ccallnest;	/* Nested pcall/xpcall and C -> VM calls (5.4 C-call bound). */
   /* 5.4 lua_getextraspace area. Appended after every field the GC, the IR
   ** and the assembler know, so no existing offset moves. A new thread copies
   ** it from the main thread (lj_state_new); it is freed with the object. */
@@ -782,6 +785,9 @@ struct lua_State {
   ** suspended in are not part of the count the next resume sets (PUC's
   ** nCcalls after lua_resume). Equal to the initial ccallnest otherwise. */
   MSize ccallbase;
+  /* ccallnest at the last throw: the nesting the C stack really has while
+  ** the frames of that throw are unwound (see tbc_closeunwound). */
+  MSize ccallthrow;
 };
 
 #define G(L)			(mref(L->glref, global_State))

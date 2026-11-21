@@ -108,6 +108,62 @@ target x86_64 (GC64) and arm64.
   exhausting the native stack (was SIGSEGV at depth 200000 on both arches),
   `tests/d54/err_09_close_chain.lua`. A close refused that way calls no
   handler and leaves no to-be-closed slot pending on the reset thread.
+- C-call bound for every call from C into the VM. A C function that calls
+  back into Lua, which calls the C function again, was not bounded: the count
+  (`L->ccallnest`) covered pcall/xpcall and coroutine resume/close only, PUC
+  counts every call through the C boundary (`L->nCcalls`, ldo.c `ccall`,
+  `LUAI_MAXCCALLS` = 200). `local function foo() return string.gsub("a", ".",
+  foo) end` ran until the native stack was gone: SIGSEGV with and without the
+  JIT on both architectures, also from `tests/corpus/puc54/cstack.lua` (lines
+  47-65). Other shapes (a `table.sort` comparator, `__lt`/`__len`/`__tostring`
+  called through the C API, `lua_call` from a C module) ended in the Lua
+  "stack overflow" after 10000 to 33000 C levels, or died the same way,
+  depending on the size of the C frames.
+  The same counter now takes one level for every call from C: `lua_call`,
+  `lua_pcall`, `lua_cpcall`, the metamethod calls of the C API
+  (`lua_gettable`, `lua_compare`, `lua_concat`, `luaL_callmeta`, ...), the
+  `__close` handlers called from C (`lua_closeslot`, `lua_settop`, a returning
+  C function, `coroutine.close`, error unwinding), finalizers and message
+  handlers. At the bound the call is refused with PUC's recoverable "C stack
+  overflow"; like PUC (`luaE_checkcstack`) the 20 levels above the bound stay
+  usable while that error is handled, then it is "error in error handling".
+  `lua_pcall` and `lua_cpcall` return the error, the message handler of
+  `lua_pcall` included. The depths are PUC's: 197 for the gsub recursion of a
+  standalone script, 99 with a pcall or an `__index` function in each cycle,
+  199 for a C function recursing through `lua_call` in a fresh state
+  (`tests/d54/err_12_ccall_reentry.lua`, and `tests/capi/ccallbound.c`, which
+  is built against both libraries and must print the same). The main thread
+  starts at 1 instead of the former stand-in of 3, because the `lua_cpcall`
+  and `lua_pcall` of the standalone executable now count themselves.
+  All of it is C code at the C-side entries (`api_vm_call` in `lj_api.c`,
+  `lj_meta_tbccloseall`, `gc_call_finalizer`, `lj_err_run`); the interpreter,
+  the fast functions and the compiled code are untouched, and a call from Lua
+  to a C function costs nothing new. A normal return restores the count. An
+  error takes one level off for every frame it unwinds that was entered from
+  C (`err_unwind`: `FRAME_C`, `FRAME_CP`), which is why every `lj_vm_call` and
+  `lj_vm_pcall` caller has to count.
+  `__close` handlers that run while an error unwinds get the nesting of the
+  catching frame, as in PUC. PUC has unwound the C stack by then; here the C
+  frames of the throw are still in place below the handlers. The difference
+  is kept in `g->ccallslack`, and the handlers of an unwinding nested inside
+  such a handler are refused ("error in error handling") once the sum passes
+  the bound, so the C stack stays within about twice the C-call bound. A
+  program whose `__close` handlers fail and start the next round of handlers
+  ended in SIGSEGV before, also with pcall levels only
+  (`tests/d54/err_13_close_unwind_nest.lua`; PUC does not finish that
+  program in reasonable time, so the test runs without mode A).
+  Two older defects of that unwinding path showed up in the new tests and
+  are fixed with it (`tbc_closeunwound` in `lj_err.c`). The handlers were
+  called from above the place of the error; after a Lua stack overflow there
+  is no room left there, the stack check raised "error in error handling"
+  from inside the unwinding, and depending on the frame sizes the result was
+  that message instead of "stack overflow", or signal 11. They are called
+  from right above the highest pending slot now. And the function kept its
+  `level` pointer across that stack check: when the check moved the stack
+  (after a collection in an earlier handler had shrunk it), a `__close`
+  handler could be skipped without any error, 196 calls instead of 197 in 44
+  of 400 runs of the dump/reload arm on x86_64.
+  `cstack.lua` runs in the corpus now (`tests/t-guarded.tsv`).
   The main thread also starts with `LJ_CCALLNEST_BASE` 3, PUC's standalone
   baseline, so the absolute bound now matches PUC without changing any delta:
   pcall depth 197, resume `err@1` at depth 198, close failure at the 198th
@@ -299,6 +355,16 @@ target x86_64 (GC64) and arm64.
   `tests/bench/b6_tostring.lua` (no-metamethod hot paths flat, the
   `__tostring` case +23 % interpreted and no longer traced); design and path
   table: `docs/notes/tostring54.md`.
+- A stack overflow raised while the message handler itself is overflowing
+  the stack was reported as the handler's own "stack overflow". PUC reports
+  exactly this situation (luaD_growstack failing at ERRORSTACKSIZE) as
+  "error in error handling" (ldo.c luaD_errerr). The first overflow grows the
+  stack to LJ_STACK_MAX+LJ_STACK_ERREX for the handler; a second overflow in
+  the handler then hit `lj_state_growstack`'s abort branch, which threw
+  LJ_ERR_STKOV. It throws LJ_ERR_ERRERR now. `xpcall(loop, loop)` returned
+  `false, "stack overflow"`; PUC returns `false, "error in error handling"`
+  (`tests/d54/err_11_errerr_msg.lua`; the PUC suite file cstack.lua checks
+  this on line 29).
 
 ## Known JIT/performance rows (not semantic divergences)
 

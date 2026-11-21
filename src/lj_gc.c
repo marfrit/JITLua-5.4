@@ -939,6 +939,7 @@ static void gc_call_finalizer(global_State *g, lua_State *L,
   int errcode;
   lua_State *VL = vmthread(g);
   MSize oldfin = g->finbase;
+  MSize oldnest = VL->ccallnest, oldnbase = VL->ccallbase;
   TValue *top;
   lj_trace_abort(g);
   hook_entergc(g);  /* Disable hooks and new traces during __gc. */
@@ -951,7 +952,20 @@ static void gc_call_finalizer(global_State *g, lua_State *L,
   VL->top = top+1;
   /* 5.4 debug.getinfo names this frame "metamethod '__gc'". */
   g->finbase = (MSize)((top-1) - tvref(VL->stack));
-  errcode = lj_vm_pcall(VL, top, 1+0, -1);  /* Stack: |mo|o| -> | */
+  /* 5.4: the finalizer is one C call deeper than the code the collector
+  ** interrupted (PUC GCTM). The finalizer thread takes over that count. */
+  VL->ccallnest = VL->ccallbase = L->ccallnest;
+  if (lj_err_ccallover(VL)) {  /* PUC: the error of the protected call. */
+    setstrV(VL, top-1-LJ_FR2, lj_err_str(VL,
+      VL->ccallnest >= LJ_MAX_CCALLSERR ? LJ_ERR_ERRERR : LJ_ERR_CSTKOV));
+    VL->top = top-LJ_FR2;
+    errcode = LUA_ERRRUN;
+  } else {
+    VL->ccallnest++;
+    errcode = lj_vm_pcall(VL, top, 1+0, -1);  /* Stack: |mo|o| -> | */
+  }
+  VL->ccallnest = oldnest;
+  VL->ccallbase = oldnbase;
   g->finbase = oldfin;
   setgcref(g->cur_L, obj2gco(L));
   hook_restore(g, oldh);

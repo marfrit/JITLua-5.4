@@ -986,30 +986,31 @@ TValue *lj_meta_tbcclose(lua_State *L, TValue *level, MSize multres)
 ** holds the new error object. */
 int lj_meta_tbccloseall(lua_State *L, TValue *level, TValue *err)
 {
+  return lj_meta_tbccloseall_at(L, level, err, L->ccallnest,
+				G(L)->ccallslack);
+}
+
+/* The same with the C-call nesting the handlers are called from given by the
+** caller: an unwinding calls them from the nesting of the catching frame,
+** which L->ccallnest only reaches when the unwinding is done. slack is the
+** number of levels the C stack is deeper than that (see tbc_closeunwound in
+** lj_err.c). L->ccallnest is only changed around each handler call, so an
+** error raised by this function itself leaves the count alone. */
+int lj_meta_tbccloseall_at(lua_State *L, TValue *level, TValue *err,
+			   MSize nest, MSize slack)
+{
   /* level and err may point into the Lua stack, which the calls below can
   ** reallocate: keep them as offsets. */
+  global_State *g = G(L);
   ptrdiff_t lofs = savestack(L, level);
   int errinstack = (err >= tvref(L->stack) && err < tvref(L->maxstack));
   ptrdiff_t eofs = errinstack ? savestack(L, err) : 0;
   int status = LUA_OK;
-  /* The call sites set L->ccallnest to the closer's count + 1, which is the
-  ** count PUC's C call into the first __close handler adds. PUC errors when
-  ** that handler call would reach the bound; mirror it here without the C
-  ** call. Only a pending handler can hit it: closing a thread with no
-  ** to-be-closed slots never calls a handler, so PUC does not error there. */
-  if (L->tbcn > 0 && L->ccallnest > LJ_MAX_XLEVEL) {
-    /* PUC fails every one of these handler calls and has dropped all the
-    ** slots when it returns the error. They must not stay registered here
-    ** either: the callers reset the thread, and a thread reset by
-    ** lua_closethread is used again. */
-    while (L->tbcn > 0 &&
-	   restorestack(L, mref(L->tbclist, int32_t)[L->tbcn-1]) >=
-	   restorestack(L, lofs))
-      L->tbcn--;
-    if (errinstack) err = restorestack(L, eofs);
-    setstrV(L, err, lj_err_str(L, LJ_ERR_CSTKOV));
-    return LUA_ERRRUN;
-  }
+  /* Every handler call is a call from C and takes one level of the C-call
+  ** bound (PUC callclosemethod -> luaD_call); a thread that is closed from
+  ** outside got the closer's count from the call site. Only a pending
+  ** handler can hit the bound: closing a thread with no to-be-closed slots
+  ** never calls one, so PUC does not error there. */
   while (L->tbcn > 0) {
     int32_t *list = mref(L->tbclist, int32_t);
     TValue *o = restorestack(L, list[L->tbcn-1]);
@@ -1018,6 +1019,19 @@ int lj_meta_tbccloseall(lua_State *L, TValue *level, TValue *err)
     int st;
     if (o < restorestack(L, lofs)) break;
     L->tbcn--;
+    if (lj_err_ccallover_n(nest) || slack > LJ_MAX_CCALLSERR) {
+      /* PUC fails this handler call inside its protected call: the error
+      ** replaces the error object and the slot is dropped like a closed one.
+      ** It must not stay registered: the callers reset the thread, and a
+      ** thread reset by lua_closethread is used again. The same goes for
+      ** handlers of an unwinding that is nested too deep on the C stack
+      ** (see tbc_closeunwound in lj_err.c). */
+      int errerr = (nest != LJ_MAX_CCALLS);
+      if (errinstack) err = restorestack(L, eofs);
+      setstrV(L, err, lj_err_str(L, errerr ? LJ_ERR_ERRERR : LJ_ERR_CSTKOV));
+      status = errerr ? LUA_ERRERR : LUA_ERRRUN;
+      continue;
+    }
     lj_state_checkstack(L, LUA_MINSTACK);
     o = restorestack(L, list[L->tbcn]);  /* Re-derive after a possible realloc. */
     if (errinstack) err = restorestack(L, eofs);
@@ -1028,7 +1042,16 @@ int lj_meta_tbccloseall(lua_State *L, TValue *level, TValue *err)
     copyTV(L, top+1+LJ_FR2, o);
     copyTV(L, top+2+LJ_FR2, err);
     L->top = top+3+LJ_FR2;
-    st = lj_vm_pcall(L, top+1+LJ_FR2, 0+1, 0);  /* No results, no errfunc. */
+    {
+      MSize onest = L->ccallnest, othrow = L->ccallthrow;
+      MSize oslack = g->ccallslack;
+      L->ccallnest = nest + 1;
+      g->ccallslack = slack;
+      st = lj_vm_pcall(L, top+1+LJ_FR2, 0+1, 0);  /* No results, no errfunc. */
+      L->ccallnest = onest;
+      L->ccallthrow = othrow;
+      g->ccallslack = oslack;
+    }
     if (st != LUA_OK) {  /* The error of a __close replaces the error. */
       if (errinstack) err = restorestack(L, eofs);
       copyTV(L, err, L->top-1);

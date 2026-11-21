@@ -893,6 +893,17 @@ static int for_isint(cTValue *o)
 
 #define for_fits32(v)	((int64_t)(int32_t)(v) == (v))
 
+/* lj_i64_getint, inline for the per-iteration path of a wide loop. */
+static LJ_AINLINE int for_getint(cTValue *o, int64_t *p)
+{
+#if LJ_GC64
+  if (tvisi47w(o)) { *p = intV47(o); return 1; }
+#endif
+  if (tvisint(o)) { *p = (int64_t)intV(o); return 1; }
+  if (tvisi64(o)) { *p = i64V(o); return 1; }
+  return 0;
+}
+
 /* PUC luaV_flttointeger: floor for an ascending loop, ceil for a descending
 ** one (only F2Ieq rejects a non-integral float), then the range check. */
 static int for_flttoint(lua_Number n, int64_t *p, int ceil)
@@ -982,15 +993,18 @@ static int forlimit(lua_State *L, int64_t init, cTValue *lim, int64_t *limit,
 ** zero): a float there keeps the int32 FORL path away. */
 static void for_setidx(lua_State *L, TValue *o, int64_t idx, int small)
 {
-  ptrdiff_t ofs = savestack(L, o);
-  lj_i64_toTValue(L, o + FORL_EXT, idx);  /* Stores base-relative. */
-  o = restorestack(L, ofs);
-  if (!for_fits32(idx))
+  if (for_fits32(idx)) {
+    setintV(o + FORL_EXT, (int32_t)idx);
+    if (small)
+      setintV(o, (int32_t)idx);
+    else
+      setnumV(o, (lua_Number)idx);
+  } else {
+    ptrdiff_t ofs = savestack(L, o);
+    lj_i64_toTValue(L, o + FORL_EXT, idx);  /* Stores base-relative. */
+    o = restorestack(L, ofs);
     copyTV(L, o, o + FORL_EXT);
-  else if (small)
-    setintV(o, (int32_t)idx);
-  else
-    setnumV(o, (lua_Number)idx);
+  }
 }
 
 int LJ_FASTCALL lj_meta_for(lua_State *L, TValue *o)
@@ -1091,13 +1105,14 @@ const BCIns * LJ_FASTCALL lj_meta_forl(lua_State *L, TValue *o)
 #endif
   lj_assertL(bc_op(ins) == BC_FORL || bc_op(ins) == BC_IFORL,
 	     "bad FORL instruction %d", bc_op(ins));
-  if (!lj_i64_getint(o+2, &step)) for_errnum(L, o+2, "step");
+  if (!for_getint(o+2, &step)) for_errnum(L, o+2, "step");
   if (step == 0) lj_err_msg(L, LJ_ERR_FORZERO);
-  if (!lj_i64_getint(o, &idx)) {
-    if (!tvisnum(o)) for_errnum(L, o, "initial value");
+  if (tvisnum(o)) {  /* An int32 index of a wide loop, see for_setidx. */
     if (!lj_i64_numtoint(numV(o), &idx)) lj_err_msg(L, LJ_ERR_NUMNOINT);
+  } else if (!for_getint(o, &idx)) {
+    for_errnum(L, o, "initial value");
   }
-  if (!lj_i64_getint(o+1, &limit)) {
+  if (!for_getint(o+1, &limit)) {
     if (forlimit(L, idx, o+1, &limit, step)) return NULL;
     lj_i64_toTValue(L, o+1, limit);  /* Keep the converted limit. */
     o = restorestack(L, ofs);

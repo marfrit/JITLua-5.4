@@ -5156,10 +5156,9 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
 	|  test ITYPEd, ITYPEd; js >5
 	|  jz ->vmeta_for		// step zero: lj_meta_for raises 'for' step is zero
       } else {
-#ifdef LUA_USE_ASSERT
-	|  checkinttp FOR_STOP, ->assert_bad_for_arg_type
-	|  checkinttp FOR_STEP, ->assert_bad_for_arg_type
-#endif
+	// No type assertion for FOR_STOP/FOR_STEP here: debug.setlocal can
+	// write any value into them, and this path reads their low words
+	// only (docs/DIFFERENCES.md, forged '(for state)' slots).
 	|  mov ITYPE, FOR_STEP
 	|  test ITYPEd, ITYPEd; js >5
 	|  add RBd, ITYPEd; jo >1
@@ -5235,10 +5234,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
       // Anything else in the step slot (written through the debug library)
       // goes to lj_meta_forl, too, which checks every slot.
       |  checknum RB, ->vmeta_forl
-#ifdef LUA_USE_ASSERT
-      |  checknumtp FOR_STOP, ->assert_bad_for_arg_type
-      |  checknumtp FOR_STEP, ->assert_bad_for_arg_type
-#endif
+      // No type assertion for FOR_STOP: debug.setlocal can write any value
+      // there, which the float compare then reads as a NaN.
     }
     |  movsd xmm0, qword FOR_IDX
     |  movsd xmm1, qword FOR_STOP

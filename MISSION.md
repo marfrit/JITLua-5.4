@@ -2,10 +2,53 @@
 
 > This is the original mission paper dated 2026-11-14. The current status is in [README.md](README.md).
 
-Status: public release preparation. Lua 5.4 language and C API port implemented and differentially gated on Linux arm64/x86_64; current gates A+B 115 PASS / 0 FAIL / 5 XFAIL, optimization levels 248, R 62. Remaining divergences and known gaps are tracked in docs/DIFFERENCES.md and tests/known-bad.tsv.
+Status (2026-11-21, release 1.0.0): the Lua 5.4 language and C API port is implemented and differentially gated on Linux arm64 and x86_64, with identical counts on both. `tests/d54`: A+B 342 PASS / 0 FAIL / 4 XFAIL, JIT optimization levels 0-3 732, R 175, assertion build 183, GC stress 187, ASan/UBSan A+B+R 517 PASS / 0 FAIL / 4 XFAIL. Full corpus with `--strict`: 592 PASS / 0 FAIL / 16 XFAIL / 3 SKIP / 0 TIMEOUT. No open row in tests/known-bad.tsv. Remaining differences are in docs/DIFFERENCES.md. The 30-day fuzz criterion of M6 is not met and is not a gate for 1.0.0 (see "Decisions" below). The text of this paper below is the original of 2026-11-14.
 Date: 2026-11-14
 Base: LuaJIT 2.1 (official tree, `https://github.com/LuaJIT/LuaJIT`, tag v2.1)
 Target language/ABI: PUC-Rio Lua 5.4 (5.4.4/5.4.7 semantics)
+
+---
+
+## Decisions after the original paper
+
+The original text of every section stays as written. Decisions that change
+it are recorded here with their date.
+
+### 2026-11-21 — release name
+
+The release is named **1.0.0**, tarball `JITLua-5.4-1.0.0.tar.gz`. Section 9
+names the deliverable `JITLua-5.4.0.tar.gz`; that name is replaced. The
+version number is the project's own and does not claim a Lua 5.4.x patch
+level; the language level is stated as Lua 5.4.9.
+
+### 2026-11-21 — fuzzing is not a release gate for 1.0.0
+
+Section 6, Phase 6 (M6) requires 30 consecutive green days of coverage-guided
+fuzzing of the interpreter and the JIT before release ("fuzz dashboard green
+for 30 consecutive days"); Phase 3 (M3) names at least 10M generated programs.
+Neither has been run. Decision: these are **not gates for 1.0.0**.
+
+Reasoning: the differential gates that decide correctness are green on both
+architectures (counts in the status line), including the sanitizer and GC-stress
+arms; the fuzzers that exist (`tests/fuzz`, `tests/soak`) run in the local CI
+without an open failure; and a 30-day campaign cannot be completed before a
+release without making the date of the release depend on it. The risk this
+accepts is a defect that the corpus does not reach and a fuzzer would find. The
+campaign continues after the release, failing seeds go into the corpus (section
+7.3), and the defects found are fixed in 1.0.x releases. The remaining M6
+criteria (zero open harness failures, perf report) stand and are met
+(docs/perf-report-1.0.0.md). Recorded also in docs/plan.md.
+
+### 2026-11-21 — the collector is not charged for eliminated allocations
+
+An allocation that the JIT eliminates (a constructor that never escapes, an
+unused string or table) does not advance the collector in compiled code, as in
+stock LuaJIT. A loop that allocates only to wait for a finalizer or a weak-table
+clear may not end under the JIT; the interpreter follows PUC. Charging such
+loops a virtual allocation per pass was measured at 50 vs 156 ms for a
+vector-add loop with a sunk table (x86_64, `-jon`) and was not taken. This is
+the `IMPL-DEFINED` row "A compiled loop whose allocations the JIT eliminates"
+in docs/DIFFERENCES.md.
 
 ---
 

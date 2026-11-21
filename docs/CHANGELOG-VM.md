@@ -925,6 +925,24 @@ target x86_64 (GC64) and arm64.
   of reading, writing and closing it. The recorder of `f:write`/`f:flush`
   guards the handle's metatable and the registry entry, so a compiled loop
   leaves the trace when either changes (`tests/d54/io_06_handle_identity.lua`).
+- The parser left one Lua stack slot behind for every function it parsed.
+  `fs_init` (`src/lj_parse.c`) anchors two tables of constants on the stack,
+  `kt` and, since the integer/float split of the literals, `ktf` for the float
+  constants; `fs_finish` popped one. Three things followed. The loaders of
+  the C API (`lua_load`, `luaL_loadbuffer`, `luaL_loadstring`,
+  `luaL_loadfile`, `luaL_dostring`) returned with the chunk name and one
+  table per nested function *below* the loaded function, where PUC leaves
+  exactly the function (`lapi.c` `lua_load`): `lua_gettop` arithmetic was
+  off, a loop of 100000 `luaL_loadstring`/`lua_pop` pairs filled the stack
+  after 10915 rounds, and `lua_resume` of a body loaded on the coroutine
+  reported one result too many. The interactive interpreter prints what is
+  on the stack after a line (`luajit.c` `dotty`), so every result was
+  preceded by `=stdin`. And a chunk with about 65000 functions ended in
+  "stack overflow" while it was parsed; PUC loads it. `fs_finish` pops both
+  tables. Evidence: puc-code, measured-here on x86_64 and aarch64 before and
+  after. `tests/d54/load_03_many_functions.lua` (mode A),
+  `tests/capi/loadstack.c` and the REPL comparison in `tests/capi/run.sh`
+  (same source and input against PUC 5.4.9, outputs identical).
 
 ## Known JIT/performance rows (not semantic divergences)
 

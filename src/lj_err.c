@@ -112,10 +112,10 @@ LJ_NOINLINE static void unwindstack(lua_State *L, TValue *top)
   lj_state_relimitstack(L);
 }
 
-#if LJ_TBCERR_CHAIN
-/* The same for an unwinding whose catching pcall closes the pending slots
-** from the VM (lj_meta_tbcerr): the slots at or above top stay registered,
-** and the error object goes above the highest of them. */
+/* The same for an unwinding that passes a C frame on the way to the frame
+** that closes the pending slots (the catching frame, or coroutine.close for
+** a dying thread): the slots at or above top stay registered, and the error
+** object goes above the highest of them. */
 static void unwindstack_keep(lua_State *L, TValue *top)
 {
   lj_func_closeuv(L, top);
@@ -129,7 +129,6 @@ static void unwindstack_keep(lua_State *L, TValue *top)
   }
   lj_state_relimitstack(L);
 }
-#endif
 
 /* 5.4 to-be-closed variables: does an error starting at frame/cf reach a
 ** catching frame in this thread (pcall(), lua_pcall, lua_cpcall)? A dying
@@ -256,27 +255,30 @@ static void *err_unwind(lua_State *L, void *stopcf, int errcode)
       if (errcode) err_ccallout(L);
     unwind_c:
 #if LJ_UNWIND_EXT
-      if (errcode) {
+      if (errcode && errcode != LUA_YIELD) {
+	/* 5.4: the pending __close slots of the frames above stay registered
+	** for the frame that closes them: the catching pcall (from the VM),
+	** lua_pcall or lua_cpcall at its own level, like PUC luaD_pcall and
+	** finishpcallk, so a handler's caller is the catching frame or the C
+	** function that made the protected call, never a C function the error
+	** passed on the way. Without a catcher the dying thread keeps them for
+	** coroutine.close (PUC lua_closethread). */
+	L->base = frame_prevd(frame) + 1;
+	L->cframe = cframe_prev(cf);
+	unwindstack_keep(L, frame - LJ_FR2);
+	return NULL;  /* Continue unwinding. */
+      } else if (errcode) {
 	int chain;
 	int64_t level = tbc_catchlevel(L, frame_prevd(frame), cframe_prev(cf),
 				       &chain);
-	if (errcode == LUA_YIELD) chain = 0;
-	if (level >= 0 && !chain) {
+	if (level >= 0) {
 	  ptrdiff_t fofs = savestack(L, frame);
-	  /* 5.4: the __close handlers run at the level of the catching
-	  ** frame, although the C frames below it are still to be unwound. */
 	  tbc_closeunwound(L, frame - LJ_FR2, cf, frame_prevd(frame) + 1,
 			   (MSize)level);
 	  frame = restorestack(L, fofs);  /* Handlers may grow the stack. */
 	}
 	L->base = frame_prevd(frame) + 1;
 	L->cframe = cframe_prev(cf);
-#if LJ_TBCERR_CHAIN
-	if (chain) {  /* A pcall below closes them from the VM: keep them. */
-	  unwindstack_keep(L, frame - LJ_FR2);
-	  return NULL;  /* Continue unwinding. */
-	}
-#endif
 	unwindstack(L, frame - LJ_FR2);
       } else if (cf != stopcf) {
 	cf = cframe_prev(cf);
@@ -1421,6 +1423,21 @@ LJ_NOINLINE void lj_err_arg(lua_State *L, int narg, ErrMsg em)
   err_argmsg(L, narg, err2msg(em));
 }
 
+/* 5.4 luaL_typeerror names a light userdata argument "light userdata"
+** (unless its metatable has a __name); operand errors keep "userdata". */
+static const char *err_argtypename(lua_State *L, cTValue *o)
+{
+  if (tvislightud(o)) {
+    GCtab *mt = tabref(basemt_it(G(L), LJ_TLIGHTUD));
+    if (mt) {
+      cTValue *tv = lj_tab_getstr(mt, lj_str_newlit(L, "__name"));
+      if (tv && tvisstr(tv)) return strVdata(tv);
+    }
+    return "light userdata";
+  }
+  return lj_err_typename(L, o);
+}
+
 /* Typecheck error for arguments. */
 LJ_NOINLINE void lj_err_argtype(lua_State *L, int narg, const char *xname)
 {
@@ -1438,7 +1455,7 @@ LJ_NOINLINE void lj_err_argtype(lua_State *L, int narg, const char *xname)
     }
   } else {
     TValue *o = narg < 0 ? L->top + narg : L->base + narg-1;
-    tname = o < L->top ? lj_err_typename(L, o) : lj_obj_typename[0];
+    tname = o < L->top ? err_argtypename(L, o) : lj_obj_typename[0];
   }
   msg = lj_strfmt_pushf(L, err2msg(LJ_ERR_BADTYPE), xname, tname);
   err_argmsg(L, narg, msg);

@@ -628,6 +628,8 @@ int lj_lex_setup(lua_State *L, LexState *ls)
   ls->vstack = NULL;
   ls->sizevstack = 0;
   ls->vtop = 0;
+  ls->vlocal = NULL;
+  ls->sizevlocal = ls->nvlocal = 0;
   ls->nlabel = ls->ngoto = 0;
   ls->bcstack = NULL;
   ls->sizebcstack = 0;
@@ -681,6 +683,7 @@ void lj_lex_cleanup(lua_State *L, LexState *ls)
   global_State *g = G(L);
   lj_mem_freevec(g, ls->bcstack, ls->sizebcstack, BCInsLine);
   lj_mem_freevec(g, ls->vstack, ls->sizevstack, VarInfo);
+  lj_mem_freevec(g, ls->vlocal, ls->sizevlocal, VarIndex);
   lj_buf_free(g, &ls->sb);
 }
 

@@ -1803,6 +1803,30 @@ static void build_subroutines(BuildCtx *ctx)
   |  b ->fff_resn
   |.endmacro
   |
+  |// 5.4 math.deg/math.rad: x * (180/pi), x * (pi/180) on the float value.
+  |.ffunc_1 math_deg
+  |  movz TMP0, #0x404c, lsl #48		// 180.0/PI
+  |  movk TMP0, #0xa5dc, lsl #32
+  |  movk TMP0, #0x1a63, lsl #16
+  |  movk TMP0, #0xc1f8
+  |  b >1
+  |.ffunc_1 math_rad
+  |  movz TMP0, #0x3f91, lsl #48		// PI/180.0
+  |  movk TMP0, #0xdf46, lsl #32
+  |  movk TMP0, #0xa252, lsl #16
+  |  movk TMP0, #0x9d39
+  |1:
+  |  checkint CARG1, >2
+  |  scvtf FARG1, CARG1w
+  |  b >3
+  |2:
+  |  checknum CARG1, ->fff_fallback
+  |  fmov FARG1, CARG1
+  |3:
+  |  fmov FARG2, TMP0
+  |  fmul FARG1, FARG1, FARG2
+  |  b ->fff_resn
+  |
   |.ffunc_n math_sqrt
   |  fsqrt d0, d0
   |->fff_resn:
@@ -1895,6 +1919,15 @@ static void build_subroutines(BuildCtx *ctx)
   |  math_minmax math_max, lt, gt
   |
   |//-- String library -----------------------------------------------------
+  |
+  |.ffunc_1 string_len
+  |  asr ITYPE, CARG1, #47
+  |  cmn ITYPE, #-LJ_TSTR
+  |   and STR:CARG1, CARG1, #LJ_GCVMASK
+  |  bne ->fff_fallback
+  |  ldr CARG1w, STR:CARG1->len
+  |  add_TISNUM CARG1, CARG1
+  |  b ->fff_restv
   |
   |.ffunc string_byte			// Only handle the 1-arg case here.
   |  ldp PC, CARG1, [BASE, FRAME_PC]

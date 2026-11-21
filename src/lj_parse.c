@@ -123,9 +123,20 @@ typedef struct FuncScope {
 #define NAME_BREAK		((GCstr *)(uintptr_t)1)
 #define NAME_CONT		((GCstr *)(uintptr_t)2)
 
-/* Index into variable stack. See VarIndex in lj_lex.h. */
-#define VINDEX_NONE		0xffff
-#define LJ_MAX_VSTACK		(65536 - LJ_MAX_UPVAL)
+/* Index into variable stack. See VarIndex in lj_lex.h. The size bound only
+** keeps the allocation size within 32 bits; uvtmp encodes an upvalue of the
+** enclosing function as LJ_MAX_VSTACK + its index. */
+#define VINDEX_NONE		((VarIndex)~(VarIndex)0)
+#define LJ_MAX_VSTACK		((MSize)1 << 26)
+
+/* 5.4: local variables one function may declare in all (PUC lparser.c
+** registerlocalvar grows f->locvars up to SHRT_MAX). */
+#define LJ_MAX_LOCDECL		32767
+
+/* A child prototype's upvalue between fs_fixup_uv1 and fs_fixup_uv2: the
+** declaration number of the parent's local (VarInfo.ord, below 0xff00), or
+** UV_PARENTUV + the index of an upvalue of the parent. */
+#define UV_PARENTUV		0xff00
 
 #define LJ_HASH_VSTACK		0x20	/* Must be a power of 2. */
 
@@ -154,6 +165,8 @@ typedef struct FuncState {
   BCReg nkn, nkgc;		/* Number of lua_Number/GCobj constants */
   BCLine minline, maxline;	/* Min/max line number. */
   MSize vbase;			/* Base of variable stack for this function. */
+  MSize lbase;			/* Base of ls->vlocal for this function. */
+  MSize nlocdecl;		/* Locals declared so far (5.4 limit). */
   uint8_t flags;		/* Prototype flags. */
   uint8_t envuv;		/* 5.4 _ENV upvalue position + 1, 0 = none. */
   uint8_t numparams;		/* Number of parameters. */
@@ -207,12 +220,13 @@ LJ_NORET LJ_NOINLINE static void err_token(LexState *ls, LexToken tok)
 	       lj_lex_token2str(ls, tok));
 }
 
+/* 5.4 lparser.c errorlimit: a syntax error near the current token. */
 LJ_NORET static void err_limit(FuncState *fs, uint32_t limit, const char *what)
 {
   if (fs->minline == 0)
-    lj_lex_error(fs->ls, 0, LJ_ERR_XLIMM, what, limit);
+    lj_lex_error(fs->ls, fs->ls->tok, LJ_ERR_XLIMM, what, limit);
   else
-    lj_lex_error(fs->ls, 0, LJ_ERR_XLIMF, what, limit, fs->minline);
+    lj_lex_error(fs->ls, fs->ls->tok, LJ_ERR_XLIMF, what, limit, fs->minline);
 }
 
 #define checklimit(fs, v, l, m)		if ((v) >= (l)) err_limit(fs, l, m)
@@ -747,17 +761,24 @@ static void bcemit_method(FuncState *fs, ExpDesc *e, ExpDesc *key)
 /* Emit unconditional branch. */
 static BCPos bcemit_jmp(FuncState *fs)
 {
-  BCPos jpc = fs->jpc;
   BCPos j = fs->pc - 1;
   BCIns *ip = &fs->bcbase[j].ins;
-  fs->jpc = NO_JMP;
   if ((int32_t)j >= (int32_t)fs->lasttarget && bc_op(*ip) == BC_UCLO) {
+    BCPos jpc = fs->jpc;  /* Empty: a pending jump makes pc a target. */
+    fs->jpc = NO_JMP;
     setbc_j(ip, NO_JMP);
     fs->lasttarget = j+1;
+    jmp_append(fs, &j, jpc);
   } else {
+    /* The pending jumps to here land on the new JMP, as on any other
+    ** instruction (bcemit_INS). They used to join its list and get its
+    ** final target, but chains of such jumps (many gotos, each to a label
+    ** right before the next goto) then all spanned the whole chain and
+    ** broke the 16-bit jump distance where every source-level jump is
+    ** short. fs_fixup_bc threads jumps to jumps once the distances are
+    ** known. */
     j = bcemit_AJ(fs, BC_JMP, fs->freereg, NO_JMP);
   }
-  jmp_append(fs, &j, jpc);
   return j;
 }
 
@@ -1157,11 +1178,14 @@ static void bcemit_unop(FuncState *fs, BCOp op, ExpDesc *e)
 	  return;
 	} else
 #endif
-	if (expr_isnumk(e) && !expr_numiszero(e)) {  /* Avoid folding to -0. */
+	/* Avoid folding to -0. The integer 0 is its own negation (5.4: -0 is
+	** the constant integer 0, so t[-0] is an integer-key index). */
+	if (expr_isnumk(e) &&
+	    (!expr_numiszero(e) || tvisint(expr_numtv(e)))) {
 	  TValue *o = expr_numtv(e);
 	  if (tvisint(o)) {
 	    int32_t k = intV(o), negk = (int32_t)(~(uint32_t)k+1u);
-	    if (k == negk) {  /* 5.4: -(-2^31) is the integer 2^31. */
+	    if (k == negk && k != 0) {  /* 5.4: -(-2^31) is the integer 2^31. */
 	      setudataV(fs->L, o, lj_i64_box(fs->L, (int64_t)2147483648LL));
 	      e->k = VKCDATA;
 	    } else {
@@ -1276,6 +1300,12 @@ static MSize var_new(LexState *ls, BCReg n, GCstr *name)
       lj_lex_error(ls, 0, LJ_ERR_XLIMC, LJ_MAX_VSTACK);
     lj_mem_growvec(ls->L, ls->vstack, ls->sizevstack, LJ_MAX_VSTACK, VarInfo);
   }
+  if (LJ_UNLIKELY(ls->nvlocal >= ls->sizevlocal))
+    lj_mem_growvec(ls->L, ls->vlocal, ls->sizevlocal, LJ_MAX_VSTACK, VarIndex);
+  /* At most LJ_MAX_LOCDECL locals reach var_add, plus the pending ones. */
+  lj_assertFS(ls->nvlocal - fs->lbase < UV_PARENTUV, "too many declarations");
+  ls->vstack[vtop].ord = (uint16_t)(ls->nvlocal - fs->lbase);
+  ls->vlocal[ls->nvlocal++] = (VarIndex)vtop;
   lj_assertFS((uintptr_t)name < VARNAME__MAX ||
 	      lj_tab_getstr(fs->kt, name) != NULL,
 	      "unanchored variable name");
@@ -1283,7 +1313,7 @@ static MSize var_new(LexState *ls, BCReg n, GCstr *name)
   setgcref(ls->vstack[vtop].name, obj2gco(name));
   ls->vstack[vtop].info = 0;
   /* The other VarInfo fields are filled in by var_add and var_remove. */
-  fs->varmap[fs->nactvar+n] = (uint16_t)vtop;
+  fs->varmap[fs->nactvar+n] = (VarIndex)vtop;
   ls->vtop = vtop+1;
   return vtop;
 }
@@ -1299,6 +1329,11 @@ static void var_add(LexState *ls, BCReg nvars)
 {
   FuncState *fs = ls->fs;
   BCReg nactvar = fs->nactvar;
+  /* 5.4: PUC registers a local when it becomes active (adjustlocalvars), and
+  ** the error is a runtime error without a position. */
+  if (LJ_UNLIKELY(fs->nlocdecl + nvars > LJ_MAX_LOCDECL))
+    lj_err_msgv(ls->L, LJ_ERR_XLOCALS, LJ_MAX_LOCDECL);
+  fs->nlocdecl += nvars;
   while (nvars--) {
     intptr_t vidx = fs->varmap[nactvar];
     VarInfo *v = &ls->vstack[vidx];
@@ -1358,7 +1393,7 @@ static MSize var_lookup(LexState *ls, ExpDesc *e, GCstr *name)
 	  /* Create a new upvalue. */
 	  VarIndex *puvtmp;
 	  checklimit(fs, nuv, LJ_MAX_UPVAL, "upvalues");
-	  fs->uvmap[nuv] = (uint16_t)vidx;
+	  fs->uvmap[nuv] = (VarIndex)vidx;
 	  fs->nuv = nuv + 1;
 	  puvtmp = &fs->uvtmp[nuv];  /* Set below. */
 	  fs = fs->prev;  /* Continue in parent. */
@@ -1668,22 +1703,44 @@ static void fs_fixup_bc(FuncState *fs, GCproto *pt, BCIns *bc, MSize n)
   bc[0] = BCINS_AD(op, fs->framesize, 0);
   for (i = 1; i < n; i++)
     bc[i] = base[i].ins;
+  /* Thread a JMP to a JMP through to the final target where that distance
+  ** fits the jump operand (see bcemit_jmp). */
+  for (i = 1; i < n; i++) {
+    if (bc_op(bc[i]) == BC_JMP) {
+      BCPos t = (BCPos)((ptrdiff_t)i+1+bc_j(bc[i])), t0 = t;
+      int hops;
+      for (hops = 0; hops < 8 && t < n && bc_op(bc[t]) == BC_JMP; hops++) {
+	BCPos t2 = (BCPos)((ptrdiff_t)t+1+bc_j(bc[t]));
+	if (t2 == t) break;
+	t = t2;
+      }
+      if (t != t0) {
+	ptrdiff_t delta = (ptrdiff_t)t-(ptrdiff_t)(i+1);
+	if (delta >= -BCBIAS_J && delta <= BCMAX_D-BCBIAS_J)
+	  setbc_j(&bc[i], delta);
+      }
+    }
+  }
 }
 
 /* Fixup upvalues for child prototype, step #2. */
 static void fs_fixup_uv2(FuncState *fs, GCproto *pt)
 {
-  VarInfo *vstack = fs->ls->vstack;
+  LexState *ls = fs->ls;
+  VarInfo *vstack = ls->vstack;
   uint16_t *uv = proto_uv(pt);
   MSize i, n = pt->sizeuv;
   for (i = 0; i < n; i++) {
-    VarIndex vidx = uv[i];
-    if (vidx >= LJ_MAX_VSTACK)
-      uv[i] = vidx - LJ_MAX_VSTACK;
-    else if ((vstack[vidx].info & VSTACK_VAR_RW))
-      uv[i] = vstack[vidx].slot | PROTO_UV_LOCAL;
-    else
-      uv[i] = vstack[vidx].slot | PROTO_UV_LOCAL | PROTO_UV_IMMUTABLE;
+    uint32_t u = uv[i];
+    if (u >= UV_PARENTUV) {
+      uv[i] = (uint16_t)(u - UV_PARENTUV);
+    } else {
+      VarInfo *v = &vstack[ls->vlocal[fs->lbase + u]];
+      if ((v->info & VSTACK_VAR_RW))
+	uv[i] = v->slot | PROTO_UV_LOCAL;
+      else
+	uv[i] = v->slot | PROTO_UV_LOCAL | PROTO_UV_IMMUTABLE;
+    }
   }
 }
 
@@ -1762,9 +1819,15 @@ static void fs_fixup_k(FuncState *fs, GCproto *pt, void *kptr)
 /* Fixup upvalues for prototype, step #1. */
 static void fs_fixup_uv1(FuncState *fs, GCproto *pt, uint16_t *uv)
 {
+  VarInfo *vstack = fs->ls->vstack;
+  MSize i, n = fs->nuv;
   setmref(pt->uv, uv);
-  pt->sizeuv = fs->nuv;
-  memcpy(uv, fs->uvtmp, fs->nuv*sizeof(VarIndex));
+  pt->sizeuv = n;
+  for (i = 0; i < n; i++) {  /* 16 bit each, see UV_PARENTUV. */
+    VarIndex vidx = fs->uvtmp[i];
+    uv[i] = vidx >= LJ_MAX_VSTACK ? (uint16_t)(UV_PARENTUV + (vidx-LJ_MAX_VSTACK)) :
+				    vstack[vidx].ord;
+  }
 }
 
 #ifndef LUAJIT_DISABLE_DEBUGINFO
@@ -1953,6 +2016,7 @@ static GCproto *fs_finish(LexState *ls)
 
   L->top--;  /* Pop table of constants. */
   ls->vtop = fs->vbase;  /* Reset variable stack. */
+  ls->nvlocal = fs->lbase;
   ls->fs = fs->prev;
   lj_assertL(ls->fs != NULL || ls->tok == TK_eof, "bad parser state");
   return pt;
@@ -1974,6 +2038,8 @@ static void fs_init(LexState *ls, FuncState *fs)
   fs->prev = ls->fs; ls->fs = fs;  /* Append to list. */
   fs->ls = ls;
   fs->vbase = ls->vtop;
+  fs->lbase = ls->nvlocal;
+  fs->nlocdecl = 0;
   fs->L = L;
   fs->pc = 0;
   fs->lasttarget = 0;
@@ -2256,6 +2322,7 @@ static void parse_body(LexState *ls, ExpDesc *e, int needself, BCLine line)
   FuncState fs;
   FuncScope bl;
   fs_init(ls, &fs);
+  fs.maxline = fs.minline = line;  /* A limit error in the parameters. */
   fscope_begin(&fs, &bl, 0);
   proto_begin(&fs, line, parse_params(ls, needself, '(', ')'));
   parse_chunk(ls);
@@ -2273,6 +2340,7 @@ static void parse_shortfunc(LexState *ls, ExpDesc *e, GCstr *name,
   FuncScope bl;
   BCReg nparams = 0;
   fs_init(ls, &fs);
+  fs.maxline = fs.minline = line;  /* A limit error in the parameters. */
   fscope_begin(&fs, &bl, 0);
   if (name != NULL) {
     setboolV(lj_tab_setstr(ls->L, fs.kt, name), 1);  /* Anchor in new proto. */

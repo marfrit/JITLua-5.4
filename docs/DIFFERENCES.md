@@ -59,9 +59,6 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
     or `xpcall` called from Lua the handlers run after the C stack is
     unwound, as in PUC.
   - FFI callbacks are not counted.
-- `PENDING` `collectgarbage()` (and `lua_gc`) called from a finalizer runs a
-  nested collection, finalizers included; PUC ignores the call there. The
-  nesting ends at the C-call bound.
 - `IMPL-DEFINED` Stack-overflow depth: PUC grows to `LUAI_MAXSTACK`
   (1000000 slots, plus the error stack) before failing, this tree caps at
   `LJ_STACK_MAX` (plus `LJ_STACK_ERREX` for the handler), so a recursive
@@ -96,16 +93,6 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   keeping it is the cheaper allocation strategy. `tests/lib/gc-count-weak-repro.lua`.
 - `FORK` A stripped dump keeps no `linedefined`/`lastlinedefined` (both are 0
   after loading it); PUC's stripped dumps keep them (`db.lua` line 1002).
-- `PENDING` Debug levels inside an error-path `__close` handler in one shape
-  left: the error passes a C function (say a `table.sort` comparator) and is
-  caught by a protected call made from C (`lua_pcall`). The handlers of the
-  slots above that C function run inside the unwinder at the C function's
-  frame, so the Lua frames between it and the protected call are levels below
-  them; PUC shows the C function that made the protected call. Under
-  `pcall`/`xpcall` called from Lua, in `coroutine.close`, the error close of
-  `coroutine.wrap` and a protected call from C without a C function in
-  between the levels match PUC (`tests/d54/close_09_errpath_cont.lua`,
-  `tests/d54/close_10_errpath_levels.lua`).
 - `FORK` C functions that marked a slot with `lua_toclose` and then yield close
   that slot at yield time, not when the frame "returns" after the resume: with
   no C continuation frame there is no later point to run `__close`. PUC keeps
@@ -147,8 +134,9 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   function's environment table still reads "global" on both sides.
   Only the decoration in brackets differs: the error class, the type text and
   the value reported are the same. PUC's suite checks these lines in
-  `errors.lua`, which the harness skips as a whole because the file needs the
-  PUC `T.*` test hooks, so there is no `tests/known-different.tsv` row.
+  `errors.lua` (176, 190, 191 and 301, the last one a `local _ENV = _ENV`
+  with a key past the constant operand): its mode A row in
+  `tests/known-different.tsv`.
 
 - `IMPL-DEFINED` How deep syntactic nesting may go. PUC has no fixed nesting
   limit: its parser recurses and the C-call bound (`LUAI_MAXCCALLS`, 200) stops
@@ -156,21 +144,20 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   "C stack overflow", and 500 nested `do … end` blocks fail the same way. This
   tree counts nesting with a counter (`synlevel_begin`, `LJ_MAX_XLEVEL`) and
   rejects the expression shapes with its own register/constant limits
-  ("chunk has too many syntax levels", "function or expression too complex
-  near …"). The message *wording* of the shared limits now follows PUC
-  ("too many X (limit is N) in main function", `err_limit` in `src/lj_parse.c`
-  with `LJ_ERR_XLIMM/XLIMF`), and `tests/d54/parse_02_limit_msgs.lua` prints
-  the whole set; the depth at which a nesting shape is refused is the part that
-  cannot match, because PUC measures it in C frames. `errors.lua:646` reads it.
-- `PENDING` `string.len`, `math.deg`, `math.rad` and `table.move` are Lua
-  functions here (inherited `LJLIB_LUA` definitions, which the JIT inlines):
-  `debug.getinfo(string.len).what` is `"Lua"` where PUC says `"C"`, hooks
-  see them as Lua frames (a call event with `what == "Lua"`, line events
-  inside them), and tracebacks list them as Lua functions. Turning them into
-  C functions needs recorder entries so the JIT keeps inlining them.
-- `PENDING` A function called through a constant integer index (`t[2]()`)
-  has no name in `debug.getinfo(level, "n")` (also inside a hook); PUC
-  5.4.9 calls it "integer index" (`ldebug.c` getobjname, `OP_GETI`).
+  ("chunk has too many syntax levels", "function or expression needs too many
+  registers near …"). The message *wording* of the shared limits now follows
+  PUC ("too many X (limit is N) in main function near …", `err_limit` in
+  `src/lj_parse.c` with `LJ_ERR_XLIMM/XLIMF`), and
+  `tests/d54/parse_02_limit_msgs.lua` prints the whole set; the depth at which
+  a nesting shape is refused is the part that cannot match, because PUC
+  measures it in C frames. `errors.lua`'s `testrep` (lines 636-659) accepts
+  both: every message carries "too many" or "overflow".
+- `IMPL-DEFINED` Registers per function: a frame has at most 250 slots here
+  (`LJ_MAX_SLOTS`), PUC's 255 (`MAXREGS`); past that, both fail with
+  "function or expression needs too many registers". Slot numbers are 8 bit
+  in the bytecode operands, the JIT's snapshots and its trace stack
+  (`LJ_MAX_JSLOTS`, also 250), and a call needs its frame link slots (two
+  with `LJ_FR2`) above the last argument, so a frame stops short of 256.
 - `IMPL-DEFINED` How many collection cycles a program triggers. The 5.4 manual
   leaves the pacing to the implementation, and this collector's pause, step
   work and accounting differ (see the basic-step and GC policy rows). The
@@ -189,14 +176,9 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   longer ones fail to load with "control structure too long" (for example
   32767 `break`s in one loop body, or 40000 backward `goto`s to one label).
   PUC's signed jump operand has 25 bits. Same reason as the constants: the
-  16-bit jump operand of the bytecode format.
-- `PENDING` Local variable declarations: PUC allows 32767 declarations per
-  function ("too many local variables (limit is 32767)", `lparser.c`
-  registerlocalvar, `SHRT_MAX`; 200 of them active at a time). This parser
-  keeps every declared local, label and goto of the functions being parsed on
-  one variable stack of 65281 entries ("chunk has more than 65281 local
-  variables"): 70000 locals in closed blocks fail with a different message
-  here, and many labels or backward gotos count against the same stack.
+  16-bit jump operand of the bytecode format. Only jumps that are long in
+  the code itself count: a jump to a jump is threaded to the final target
+  only where that distance fits.
 
 - `IMPL-DEFINED` The default pause/stepmul are LuaJIT's measured speed policy
   300/200, not PUC's 200/100 (a deliberate tuning decision taken 2026-11-19;

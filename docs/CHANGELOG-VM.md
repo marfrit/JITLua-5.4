@@ -578,6 +578,83 @@ target x86_64 (GC64) and arm64.
   `false, "stack overflow"`; PUC returns `false, "error in error handling"`
   (`tests/d54/err_11_errerr_msg.lua`; the PUC suite file cstack.lua checks
   this on line 29).
+- Names of values read through a table index. A constant integer key that
+  fits PUC's `OP_GETI` (0..255, here `TGETB`) gives "field 'integer index'",
+  any other key in a register (`TGETV`) gives "field '?'" unless it is a
+  string constant loaded by `KSTR` (a key past the constant operand), which
+  gives its text, or "method" for such a method call (ldebug.c `getobjname`,
+  `rname`, `rkname`). `lj_debug_slotname` returned no name for both, so error
+  messages had no variable info and `debug.getinfo(level, "n")` (also in a
+  call hook) had no name for `t[2]()`. The parser now folds `-0` to the
+  integer constant 0 (only the float `-0.0` must stay unfolded), so `t[-0]`
+  is an integer-key index as in PUC (`tests/d54/debug_10_index_names.lua`).
+- Error-path `__close` handlers when the error passes a C function (a
+  `table.sort` comparator, a `string.gsub` replacement) on its way to the
+  frame that closes the pending variables. With external unwinding the C
+  frame's unwinding step closed the slots above it at once if a protected
+  call from C caught the error, so the discarded Lua frames below the C
+  function were debug levels of the handlers; without a catcher (a coroutine
+  dying that way) it dropped the slots, so `coroutine.close` and the error
+  close of `coroutine.wrap` never called their handlers. The C frame now
+  keeps them registered (`unwindstack_keep`) for every catcher: pcall from
+  the VM, `lua_pcall`/`lua_cpcall` at their own level (the handler's caller
+  is the C function that made the protected call, PUC `luaD_pcall`) and
+  `coroutine.close` for a dead thread (`tests/d54/close_11_errpath_cfunc.lua`).
+  A yield through a C frame keeps its old path.
+- Local variable limits as PUC's parser has them (lparser.c). A function
+  declares at most 32767 locals in all (registerlocalvar, `SHRT_MAX`; the
+  hidden control variables of the loops and the parameters count, labels
+  and gotos do not): past that, `load` fails with "too many local variables
+  (limit is 32767)", a runtime error without a position that also goes
+  through an enclosing message handler. The count is taken when the
+  variables become active (`var_add`), like PUC's adjustlocalvars. The
+  200-active limit and the other `errorlimit` messages end in "near
+  <token>" now, and a limit error in a parameter list names the function's
+  line (it read an uninitialized `minline`). The variable stack shared by
+  the functions being parsed (locals, labels and gotos, which stay there
+  until the function ends) used 16-bit indices and failed at 65281 entries
+  ("chunk has more than 65281 local variables"), a limit PUC does not have;
+  `VarIndex` is 32 bit now. A child prototype's upvalue keeps the parent's
+  local as its declaration number (`VarInfo.ord`, mapped back through
+  `LexState.vlocal`) between the two upvalue fixups, since the 16-bit slot
+  of the prototype cannot hold the stack index
+  (`tests/d54/parse_04_local_limits.lua`).
+- `string.len`, `math.deg` and `math.rad` are fast functions in assembler
+  with a C fallback now, C functions as in PUC: `debug.getinfo` says
+  `what = "C"`, source `=[C]`, hooks see a C frame without line events,
+  and the argument errors are `luaL_checklstring`/`luaL_checknumber`'s
+  ("got no value"; numbers and numeric strings converted; `math.deg` on a
+  table with `__mul` fails instead of calling it). They were inherited Lua
+  definitions (`LJLIB_LUA`, removed from `buildvm_libbc.h`, regenerated).
+  The recorder emits `FLOAD str.len` after `lj_ir_tostr` and `MUL` by the
+  doubles of PUC's `180.0/PI` and `PI/180.0` after `lj_ir_tonum`, so the
+  JIT still inlines them. `table.move` already was a C function; the
+  5.1 `table.foreach*`/`getn` Lua definitions exist only with
+  `LJ_51COMPAT` (`tests/d54/debug_11_cfunc_builtins.lua`). Loop over one
+  call, median of 7, base vs head in one box job per arch: `-jon` equal
+  (x86_64 len/deg/rad 0.189/0.354/0.354 s for 2e8 calls; arm64
+  0.076/0.103/0.103 s), `-joff` faster (2e7 calls, x86_64 1.105 -> 0.688,
+  2.011 -> 1.152, 2.426 -> 1.672 s; arm64 0.287 -> 0.208, 0.415 -> 0.211,
+  0.286 -> 0.227 s).
+- Two messages of PUC's `errors.lua`. An argument error on a light userdata
+  says "got light userdata" (lauxlib.c `luaL_typeerror`; a `__name` in the
+  light userdata metatable still wins), operand errors keep "userdata"
+  (`err_argtypename` in `lj_err_argtype`). The register limit reads
+  "function or expression needs too many registers" (lcode.c
+  `luaK_checkstack`) instead of "function or expression too complex"
+  (`tests/d54/err_15_lightud_registers.lua`). With them, `errors.lua` runs:
+  stepped over in a scratch copy, it differs from PUC only in the IMPL-DEFINED
+  operand names (lines 176, 190, 191, 301) and the printed stack-overflow
+  depth.
+- Chains of short jumps failed to load. `bcemit_jmp` let the pending jumps
+  to the current instruction join the list of the JMP it emitted there, so
+  they took that JMP's final target; 33000 `do goto l; ::l:: end` blocks
+  (each goto lands right before the next one) were all patched to the last
+  label and failed with "control structure too long", where PUC loads them.
+  Pending jumps now land on the new JMP like on any other instruction, and
+  `fs_fixup_bc` threads a JMP to a JMP through to the final target (up to
+  eight hops) where that distance fits the 16-bit operand
+  (`tests/d54/parse_05_jump_chains.lua`).
 
 ## Known JIT/performance rows (not semantic divergences)
 

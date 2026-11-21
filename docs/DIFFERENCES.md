@@ -81,40 +81,19 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
 - `IMPL-DEFINED` Sparse-table border for runtime-built tables may differ: 5.4
   allows any border; LuaJIT's array-growth policy differs from PUC's alimit hint
   (`tbl_03_border_divergence`).
-- `IMPL-DEFINED` When an object referenced only from a dead stack slot is
-  collected. The stack of a running Lua function is scanned up to the top of
-  its frame (inherited from LuaJIT), so a value left in the argument slot of
-  a finished call stays alive until the slot is reused or the function
-  returns. PUC limits the scan to the live registers of the instruction that
-  started the collection. `db.lua` line 913 waits in a loop for the finalizer
-  of such an object and does not end here (the runner bounds the file at
-  10 s; `tests/known-different.tsv`). `gc.lua` has the same loops at lines
-  63/82/87/92 (`repeat u = {} until finish`, GC1/GC2): PUC finalizes after 39
-  iterations. In the interpreted arm (A) the loop does not end, so the file
-  is bounded at 10 s and everything after line 339 is not exercised there;
-  the JIT arms (B, R) complete the file after the PUC `step` debt/return fix
-  and match PUC. `tests/lib/gc-finloop-repro.lua`.
-- `IMPL-DEFINED` When a weak *value* disappears relative to its finalizer. PUC
-  5.4 clears weak values in the atomic phase, before finalizers run, so a
-  finalizer of a weakly referenced object already sees the entry gone
-  (`gc.lua:323`: inside `__gc`, `C.key == nil`). LuaJIT clears weak values
-  during sweep, after the finalizers, so the finalizer sees the object still
-  present in the weak table; after the next full collection both sides agree.
-  The manual does not order these two steps; measured the same on x86_64 and
-  aarch64, `tests/lib/gc-weak-finalizer-repro.lua`.
-- `IMPL-DEFINED` Ephemeron convergence. PUC 5.4 uses the converged ephemeron
-  marking (`luaC_ephemeron`), so an ephemeron table whose keys point to values
-  that die loses those entries in the same cycle; here the weak-key algorithm
-  is the pre-5.4 one, so after a full collection the dead entries remain until
-  a later cycle (`gc.lua:347`: `next(a) == nil` fails, the reachable chain is
-  the same 100 entries in both arms). `tests/lib/gc-ephemeron-repro.lua`.
 - `FORK` `collectgarbage("count")` after clearing a weak kv table
-  (`gc.lua:475/487`): the 2^22-byte key is a long string, which LuaJIT interns
-  (the `FORK` string interning row above) and therefore still counts after the
-  table is cleared, while PUC frees it; independently, `count` reports
-  LuaJIT's allocation grain, so the absolute figure differs before the weak
-  table is involved too (measured `after fill` 12288 vs 8192 KB, `final` 2045
-  vs 0.24 KB on x86_64 and aarch64). `tests/lib/gc-count-weak-repro.lua`.
+  (`gc.lua:475/487`, now passing). The persistent part is fixed: the global
+  temp buffer is released in the atomic phase instead of halved, so after the
+  table is cleared the count drops back (the `gc.lua:487` assertion passes on
+  both arches and both JIT modes). Two residuals remain, both observables:
+  `count` reports LuaJIT's allocation grain, so the absolute figures differ
+  (`after collect` 4093 vs 4096 KB, `final` -2.8 vs +0.35 KB relative to the
+  baseline, x86_64 and aarch64, `-joff` and `-jon`); and while a long string
+  is being built, the builder buffer is counted (after fill 12288 vs 8192 KB),
+  because LuaJIT builds into its reused global temp buffer, freed at the next
+  atomic, whereas PUC's builder memory is not counted. Freeing the buffer per
+  call would match that instant but reallocates megabytes per string build;
+  keeping it is the cheaper allocation strategy. `tests/lib/gc-count-weak-repro.lua`.
 - `FORK` A stripped dump keeps no `linedefined`/`lastlinedefined` (both are 0
   after loading it); PUC's stripped dumps keep them (`db.lua` line 1002).
 - `PENDING` Debug levels inside an error-path `__close` handler in one shape
@@ -253,11 +232,34 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   `collectgarbage("setstepmul", ...)` it dies in one basic step and reports
   the finished cycle, so only the quantum differs, not the weak-table
   semantics. The manual fixes neither quantum nor PUC's object ages (`old`,
-  `touched1`, `touched2`, `survival`), which are not observable here. Measured
+  `touched1`, `touched2`, `survival`), which are not observable here. What a program can
+  observe from the generational section of `gengc.lua`: the mode string returned
+  by `collectgarbage("generational")`/`("incremental")` and
+  `collectgarbage("isrunning")` behave as in PUC; the `T.gcage`/`T.gccolor`
+  object ages are not observable (no `T` hooks here); the barrier-driven data
+  checks pass because no object is moved between age lists; and the one
+  assertion that does look at collector progress (line 122) counts steps as
+  above. Everything else in the file is inert on both sides. Measured
   the same on x86_64 and aarch64, `-joff` and `-jon`; repro
   `tests/lib/gc-step-quantum-repro.lua`, in the harness the mode-A row of
   `tests/corpus/puc54/gengc.lua` (its assert at line 122) in
   `tests/known-different.tsv`.
+
+- `IMPL-DEFINED` A compiled loop whose allocations the JIT eliminates does not
+  advance the collector. A constructor that never escapes is sunk into the
+  trace snapshots and an unused string or table is removed by dead-code
+  elimination (stock LuaJIT optimizations), so the compiled loop allocates
+  nothing and never reaches a GC step, while PUC allocates every object. A loop
+  that allocates only to wait for a finalizer or for a weak-table entry to be
+  cleared may therefore not end under the JIT; the interpreter (`-joff`, and
+  `-O0`..`-O2`, which do not sink) follows PUC. A trace that read a weak table
+  keeps its allocations. The manual does not say when the collector runs.
+  `gc.lua`'s GC1/GC2 loops (lines 57-93, `repeat u = {} until finish`) do not
+  end under `-jon` on x86_64 and aarch64 (mode B row in
+  `tests/known-different.tsv`); `tests/d54/gc_13_dropped_alloc_pace.lua`
+  asserts the interpreter. Charging such loops a virtual allocation per pass
+  would end them, but costs a vector-add loop with a sunk table 50 vs 156 ms
+  (x86_64, `-jon`); that was not taken.
 
 ### Known JIT/performance rows (not semantic divergences)
 

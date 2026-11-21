@@ -3666,6 +3666,15 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |   movn TMP0, #~LJ_TFUNC
     |   add CRET1, CRET1, TMP0, lsl #47
     |  str CRET1, [BASE, RA, lsl #3]
+    |  ldp CARG3, CARG4, GL->gc.total	// Assumes threshold follows total.
+    |  cmp CARG3, CARG4
+    |  blo >1
+    |  add CARG2, BASE, RA, lsl #3
+    |  add CARG2, CARG2, #8	// top = dst+1 (the free register)
+    |   mov CARG1, L
+    |  bl extern lj_gc_step_top  // (lua_State *L, TValue *top)
+    |  ldr BASE, L->base
+    |1:
     |  ins_next
     break;
 
@@ -3674,12 +3683,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
   case BC_TNEW:
   case BC_TDUP:
     |  // RA = dst, RC = (hbits|asize) | tab_const (~)
-    |  ldp CARG3, CARG4, GL->gc.total	// Assumes threshold follows total.
     |   str BASE, L->base
     |   str PC, SAVE_PC
-    |   mov CARG1, L
-    |  cmp CARG3, CARG4
-    |  bhs >5
     |1:
     if (op == BC_TNEW) {
       |  and CARG2, RC, #0x7ff
@@ -3687,23 +3692,29 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
       |  cmp CARG2, #0x7ff
       |  mov TMP0, #0x801
       |  csel CARG2, CARG2, TMP0, ne
+      |   mov CARG1, L
       |  bl extern lj_tab_new  // (lua_State *L, int32_t asize, uint32_t hbits)
       |  // Returns GCtab *.
     } else {
       |  mvn RC, RC
       |  ldr CARG2, [KBASE, RC, lsl #3]
+      |   mov CARG1, L
       |  bl extern lj_tab_dup  // (lua_State *L, Table *kt)
       |  // Returns GCtab *.
     }
     |  ldr BASE, L->base
     |   movk CRET1, #(LJ_TTAB>>1)&0xffff, lsl #48
     |  str CRET1, [BASE, RA, lsl #3]
-    |  ins_next
-    |
+    |  ldp CARG3, CARG4, GL->gc.total	// Assumes threshold follows total.
+    |  cmp CARG3, CARG4
+    |  blo >5
+    |  add CARG2, BASE, RA, lsl #3
+    |  add CARG2, CARG2, #8	// top = dst+1 (the free register)
+    |   mov CARG1, L
+    |  bl extern lj_gc_step_top  // (lua_State *L, TValue *top)
+    |  ldr BASE, L->base
     |5:
-    |  bl extern lj_gc_step_fixtop  // (lua_State *L)
-    |  mov CARG1, L
-    |  b <1
+    |  ins_next
     break;
 
   case BC_GGET:

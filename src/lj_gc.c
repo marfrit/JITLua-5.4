@@ -344,6 +344,8 @@ static void gcstats_cycle_hook(global_State *g)
 #define GCSWEEPCOST	10
 #define GCFINALIZECOST	100
 
+static int gc_mayclear(cTValue *o, int val);
+
 /* Stage-1 precursor: the string sweep is a pointer chase over the interned
 ** strings -- the optional stats build measures 60-91 ns per string visited,
 ** i.e. one cache miss each -- while the bucket array itself is walked in
@@ -632,8 +634,18 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
       Node *n = &node[i];
       if (!tvisnil(&n->val)) {  /* Mark non-empty slot. */
 	lj_assertG(!tvisnil(&n->key), "mark of nil key in non-empty slot");
-	if (!(weak & LJ_GC_WEAKKEY) || tvisi64(&n->key)) gc_marktv(g, &n->key);
-	if (!(weak & LJ_GC_WEAKVAL) || tvisi64(&n->val)) gc_marktv(g, &n->val);
+	if (weak == LJ_GC_WEAKKEY) {
+	  /* Ephemeron: the value is marked only when the key is (or never can
+	  ** be) cleared; a string key is marked by gc_mayclear and counts as
+	  ** marked, a boxed 5.4 integer key is marked here. */
+	  if (tvisi64(&n->key)) gc_marktv(g, &n->key);
+	  if (!gc_mayclear(&n->key, 0) && tvisgcv(&n->val) &&
+	      iswhite(gcV(&n->val)))
+	    gc_marktv(g, &n->val);
+	} else {
+	  if (!(weak & LJ_GC_WEAKKEY) || tvisi64(&n->key)) gc_marktv(g, &n->key);
+	  if (!(weak & LJ_GC_WEAKVAL) || tvisi64(&n->val)) gc_marktv(g, &n->val);
+	}
       }
     }
   }
@@ -898,11 +910,14 @@ static int gc_mayclear(cTValue *o, int val)
   return 0;  /* Cannot clear. */
 }
 
-/* Clear collected entries from weak tables. */
-static void gc_clearweak(global_State *g, GCobj *o)
+/* Clear collected values from weak tables, as PUC's clearbyvalues. Only
+** tables with a weak value part are touched; keys are a separate pass. If
+** stop is not NULL, stop when that table is reached (PUC's origweak/origall
+** prefix: only tables re-linked after the resurrection marks are cleared). */
+static void gc_clearweak_vals(global_State *g, GCobj *o, GCobj *stop)
 {
   UNUSED(g);
-  while (o) {
+  while (o != NULL && o != stop) {
     GCtab *t = gco2tab(o);
     lj_assertG((t->marked & LJ_GC_WEAK), "clear of non-weak table");
     if ((t->marked & LJ_GC_WEAKVAL)) {
@@ -913,20 +928,76 @@ static void gc_clearweak(global_State *g, GCobj *o)
 	if (gc_mayclear(tv, 1))
 	  setnilV(tv);
       }
+      if (t->hmask > 0) {
+	Node *node = noderef(t->node);
+	MSize i, hmask = t->hmask;
+	for (i = 0; i <= hmask; i++) {
+	  Node *n = &node[i];
+	  /* Clear hash value; its key is left to the key pass. */
+	  if (!tvisnil(&n->val) && gc_mayclear(&n->val, 1))
+	    setnilV(&n->val);
+	}
+      }
     }
-    if (t->hmask > 0) {
+    o = gcref(t->gclist);
+  }
+}
+
+/* Clear entries of weak-key tables whose key is about to be collected
+** (PUC's clearbykeys, after the resurrection marks). */
+static void gc_clearweak_keys(global_State *g, GCobj *o)
+{
+  UNUSED(g);
+  while (o != NULL) {
+    GCtab *t = gco2tab(o);
+    lj_assertG((t->marked & LJ_GC_WEAK), "clear of non-weak table");
+    if ((t->marked & LJ_GC_WEAKKEY) && t->hmask > 0) {
       Node *node = noderef(t->node);
       MSize i, hmask = t->hmask;
       for (i = 0; i <= hmask; i++) {
 	Node *n = &node[i];
-	/* Clear hash slot when key or value is about to be collected. */
-	if (!tvisnil(&n->val) && (gc_mayclear(&n->key, 0) ||
-				  gc_mayclear(&n->val, 1)))
+	if (!tvisnil(&n->val) && gc_mayclear(&n->key, 0))
 	  setnilV(&n->val);
       }
     }
     o = gcref(t->gclist);
   }
+}
+
+/* One ephemeron convergence pass: mark a weak-key table's value when its key
+** is already marked (or can never be cleared: a string key is marked by
+** gc_mayclear, numbers/booleans are not collectable, the boxed integer key
+** is marked). Ephemeron tables are WEAKKEY without WEAKVAL. */
+static int gc_ephemeron_pass(global_State *g)
+{
+  GCobj *o = gcref(g->gc.weak);
+  int marked = 0;
+  while (o != NULL) {
+    GCtab *t = gco2tab(o);
+    if ((t->marked & LJ_GC_WEAKKEY) && !(t->marked & LJ_GC_WEAKVAL) &&
+	t->hmask > 0) {
+      Node *node = noderef(t->node);
+      MSize i, hmask = t->hmask;
+      for (i = 0; i <= hmask; i++) {
+	Node *n = &node[i];
+	if (!tvisnil(&n->val) && tvisgcv(&n->val) &&
+	    iswhite(gcV(&n->val)) && !gc_mayclear(&n->key, 0)) {
+	  gc_marktv(g, &n->val);
+	  marked = 1;
+	}
+      }
+    }
+    o = gcref(t->gclist);
+  }
+  return marked;
+}
+
+/* PUC lgc.c convergeephemerons: repeat until no new mark. The direction
+** inversion PUC uses is only a speed-up; correctness needs the fixpoint. */
+static void gc_converge_ephemerons(global_State *g)
+{
+  while (gc_ephemeron_pass(g))
+    gc_propagate_gray(g);
 }
 
 /* Call a userdata or cdata finalizer. */
@@ -1086,6 +1157,7 @@ void lj_gc_freeall(global_State *g)
 static void atomic(global_State *g, lua_State *L)
 {
   size_t udsize;
+  GCobj *origweak;
 
   gc_mark_uv(g);  /* Need to remark open upvalues (the thread may be dead). */
   gc_propagate_gray(g);  /* Propagate any left-overs. */
@@ -1106,14 +1178,39 @@ static void atomic(global_State *g, lua_State *L)
   setgcrefnull(g->gc.grayagain);
   gc_propagate_gray(g);  /* Propagate it. */
 
+  gc_converge_ephemerons(g);  /* PUC: converge before clearing weak values. */
+
+  /* PUC lgc.c atomic: clear weak values before checking finalizers, so the
+  ** finalizer of a weakly referenced object sees the entry gone. The saved
+  ** head is PUC's origweak: only tables re-linked by the resurrection marks
+  ** are cleared again below. */
+  gc_clearweak_vals(g, gcref(g->gc.weak), NULL);
+  origweak = gcref(g->gc.weak);
+
   udsize = lj_gc_separateudata(g, 0);  /* Separate userdata to be finalized. */
   gc_mark_mmudata(g);  /* Mark them. */
   udsize += gc_propagate_gray(g);  /* And propagate the marks. */
+  gc_converge_ephemerons(g);  /* PUC: converge again after resurrection marks. */
 
-  /* All marking done, clear weak tables. */
-  gc_clearweak(g, gcref(g->gc.weak));
+  /* All marking done: clear dead ephemeron/allweak keys, then the values of
+  ** the weak tables that resurrection linked again (PUC clearbykeys, then
+  ** clearbyvalues(weak, origweak)). */
+  gc_clearweak_keys(g, gcref(g->gc.weak));
+  gc_clearweak_vals(g, gcref(g->gc.weak), origweak);
 
-  lj_buf_shrink(L, &g->tmpbuf);  /* Shrink temp buffer. */
+  { /* PUC has no global temp buffer. Releasing it returns collectgarbage("count")
+  ** to the pre-fill baseline after a weak kv table is cleared; halving it left
+  ** the buffer resident for several cycles (gc.lua:487). A buffer built by a
+  ** string/tostring/format call is only alive inside that call -- the owning
+  ** C function copies the content out before its trailing lj_gc_check -- and
+  ** finalizers run after atomic, so it can be freed here. */
+    SBuf *sb = &g->tmpbuf;
+    MSize sz = sbufsz(sb);
+    if (sz > LJ_MIN_SBUF) {
+      lj_mem_free(g, sb->b, sz);
+      sb->w = sb->b = sb->e = NULL;
+    }
+  }
 
   /* Prepare for sweep phase. */
   g->gc.currentwhite = (uint8_t)otherwhite(g);  /* Flip current white. */
@@ -1271,19 +1368,97 @@ void LJ_FASTCALL lj_gc_step_fixtop(lua_State *L)
   lj_gc_step(L);
 }
 
+/* Ditto, with the live top passed by the VM (PUC's checkGC(L,c)). */
+void lj_gc_step_top(lua_State *L, TValue *top)
+{
+  L->top = top;
+  lj_gc_step(L);
+}
+
 #if LJ_HASJIT
 /* Perform multiple GC steps. Called from JIT-compiled code. */
 #if LJ_TARGET_ARM64 || (LJ_TARGET_X86ORX64 && LJ_GC64)
 /* GC64 targets pass a 64-bit pak: traceno(16), loop-head flag(16), steps(32). */
 
-/* A weak trace runs with stale values in the stack slots above its live
-** range: the interpreter left them there and the trace never writes them.
-** They are below L->top, so they are GC roots, and a compiled loop that
-** waits for a weak entry to be collected would wait forever. This is called
-** for a GC check at the start bytecode of the root trace. If that is a loop
-** bytecode, every slot above the loop's own variables is dead at that point,
-** so clear them before the step.
+/* Stale values left in the stack slots above the live range are roots while
+** the interpreter has not overwritten them, and a trace never writes them
+** (a store to a dead local is not recorded at all): a compiled loop that
+** waits for such a value to be collected would wait forever. This is called
+** for a GC check at the start bytecode of the trace. Slots that are read by
+** any bytecode from the start pc onward (including loop control slots) keep
+** their value; every other slot is dead at the start pc and is cleared, as
+** PUC's checkGC narrows the top and the atomic phase nils the dead slice.
+** Slots an open upvalue points to are kept, as the snapshot use/def analysis
+** does.
 */
+/* Mark slots read by bytecode in [from,to) and, when wr is not NULL, slots
+** it writes. Opcode modes follow the snapshot analysis in lj_snap.c. */
+static void gc_jit_scan(GCproto *pt, BCPos from, BCPos to,
+			uint8_t *rd, uint8_t *wr)
+{
+  const BCIns *bc = proto_bc(pt);
+  BCReg fs = pt->framesize;
+  BCPos i, e;
+  BCReg sr;
+#define RD(x) do { if (rd && (x) < fs) rd[x] = 1; } while (0)
+#define WR(x) do { if (wr && (x) < fs) wr[x] = 1; } while (0)
+  for (i = from; i < to && i < pt->sizebc; i++) {
+    BCIns ins = bc[i];
+    BCOp op = bc_op(ins);
+    switch (bcmode_b(op)) {
+    case BCMvar: RD(bc_b(ins)); break;
+    default: break;
+    }
+    switch (bcmode_c(op)) {
+    case BCMvar: RD(bc_c(ins)); break;
+    case BCMrbase:  /* Only BC_CAT uses RC rbase: operands B..C. */
+      for (sr = bc_b(ins); sr <= bc_c(ins); sr++) RD(sr);
+      break;
+    default: break;
+    }
+    switch (bcmode_a(op)) {
+    case BCMvar: RD(bc_a(ins)); break;
+    case BCMdst:  /* ISTC/ISFC only copy conditionally: not a write. */
+      if (op != BC_ISTC && op != BC_ISFC) WR(bc_a(ins));
+      break;
+    case BCMbase:
+      if (op >= BC_CALLM && op <= BC_ITERN) {
+	BCReg top = (op == BC_CALLM || op == BC_CALLMT || bc_c(ins) == 0) ?
+	  fs : (BCReg)(bc_a(ins) + bc_c(ins) + LJ_FR2);
+	sr = bc_a(ins) - ((op == BC_ITERC || op == BC_ITERN) ? 3 : 0);
+	for (; sr < top; sr++) RD(sr);
+      } else if (op == BC_TSETM) {
+	for (sr = bc_a(ins) - 1; sr < fs; sr++) RD(sr);
+      }
+      break;
+    default: break;
+    }
+    /* A closure reads the parent slots it captures (as upvalues). */
+    if (op == BC_FNEW) {
+      GCproto *cpt = gco2pt(proto_kgc(pt, ~(ptrdiff_t)bc_d(ins)));
+      const uint16_t *uv = proto_uv(cpt);
+      MSize j;
+      for (j = 0; j < cpt->sizeuv; j++)
+	if ((uv[j] & PROTO_UV_LOCAL)) RD((BCReg)(uv[j] & 0xff));
+    }
+    /* Loop control slots are read by the FORI/FORL/ITERL bytecode itself. */
+    if (op == BC_FORI || op == BC_JFORI) {
+      for (sr = bc_a(ins); sr < bc_a(ins) + 3; sr++) RD(sr);
+    } else if (op >= BC_FORL && op <= BC_JFORL) {
+      for (e = bc_a(ins) + FORL_EXT + 1, sr = bc_a(ins); sr < e; sr++) RD(sr);
+    } else if (op >= BC_ITERL && op <= BC_JITERL) {
+      for (e = bc_a(ins) + 4, sr = bc_a(ins); sr < e; sr++) RD(sr);
+    } else if (bc_isret(op)) {
+      BCReg top = (op == BC_RETM) ? fs : (BCReg)(bc_a(ins) + bc_d(ins));
+      for (sr = bc_a(ins); sr < top; sr++) RD(sr);
+    }
+    if (op == BC_KNIL)
+      for (sr = bc_a(ins); sr <= bc_d(ins); sr++) WR(sr);
+  }
+#undef RD
+#undef WR
+}
+
 static void gc_jit_cleardead(global_State *g, lua_State *L, TraceNo traceno)
 {
   jit_State *J = G2J(g);
@@ -1294,28 +1469,68 @@ static void gc_jit_cleardead(global_State *g, lua_State *L, TraceNo traceno)
     return;
   T = traceref(J, traceno);
   lj_assertG(T != NULL, "no trace %d in GC step", (int)traceno);
-  if (T != NULL && T->weak) {
-    BCIns ins;
-    BCReg nlive;  /* Number of live slots at the loop head. */
-    TValue *o;
-    if (T->root != 0 && (T = traceref(J, T->root)) == NULL)
-      return;
-    ins = T->startins;
-    switch (bc_op(ins)) {
-    case BC_LOOP: case BC_ITERN:
-      nlive = bc_a(ins);
-      break;
-    case BC_FORL:
-      nlive = bc_a(ins) + FORL_EXT + 1;
-      break;
-    case BC_ITERL:  /* The preceding ITERC/ITERN has the result count. */
-      nlive = bc_a(ins) + bc_b(mref(T->startpc, const BCIns)[-1]) - 1;
-      break;
-    default:  /* Function, return or stitched start: no bound known. */
-      return;
+  if (T == NULL)
+    return;
+  if (T->root != 0 && (T = traceref(J, T->root)) == NULL)
+    return;
+  {
+    GCproto *pt = gco2pt(gcref(T->startpt));
+    const BCIns *startpc = mref(T->startpc, const BCIns);
+    const BCIns *bc = proto_bc(pt);
+    BCPos startpos = proto_bcpos(pt, startpc);
+    BCPos i, back = NO_JMP, bstart = startpos;
+    BCReg nlive = 0, fs = pt->framesize;
+    uint8_t rd[LJ_MAX_SLOTS], wr[LJ_MAX_SLOTS], ra[LJ_MAX_SLOTS];
+    BCReg s, top = (BCReg)(L->top - L->base);
+    BCOp sop = bc_op(T->startins);
+    if (top > fs) top = fs;
+    /* Find the loop back edge and the live lower bound of its control
+    ** slots. A trace starts at the first bytecode of the loop body, which
+    ** is not necessarily the loop instruction. */
+    if (sop >= BC_LOOP && sop <= BC_JLOOP) {
+      nlive = bc_a(T->startins);
+      bstart = startpos + 1;
     }
-    for (o = L->base + nlive; o < L->top; o++)
-      setnilV(o);
+    for (i = startpos + 1; i < pt->sizebc; i++) {
+      BCOp op = bc_op(bc[i]);
+      if (op >= BC_FORL && op <= BC_JFORL) {
+	back = i; nlive = bc_a(bc[i]) + FORL_EXT + 1; break;
+      }
+      if (op >= BC_ITERL && op <= BC_JITERL) {
+	back = i; nlive = bc_a(bc[i]) + 4; break;
+      }
+      if (op == BC_JMP) {
+	ptrdiff_t tgt = (ptrdiff_t)i + 1 + bc_j(bc[i]);
+	if (tgt <= (ptrdiff_t)startpos) {
+	  back = i;
+	  if (tgt >= 0 && bc_op(bc[tgt]) >= BC_LOOP && bc_op(bc[tgt]) <= BC_JLOOP)
+	    nlive = bc_a(bc[tgt]);
+	  break;
+	}
+      }
+      if (bc_isret(op)) return;  /* A return before any back edge: not a loop. */
+    }
+    if (back == NO_JMP) return;
+    memset(rd, 0, fs); memset(wr, 0, fs); memset(ra, 0, fs);
+    gc_jit_scan(pt, bstart, back + 1, rd, wr);
+    /* Reads outside the body: after the back edge, and before the start pc
+    ** (an enclosing loop runs that code again after this loop exits). */
+    gc_jit_scan(pt, 0, bstart, ra, NULL);
+    gc_jit_scan(pt, back + 1, pt->sizebc, ra, NULL);
+    for (s = 0; s < top; s++) {
+      GCobj *uv;
+      /* Slots at and above the loop's own registers are dead at the head.
+      ** Below them, a slot written in the body and read by no bytecode of
+      ** the function (and captured by no closure) is dead there too: the
+      ** trace keeps the stored value in a register, so the stack slot still
+      ** holds the stale one. */
+      int dead = (sop >= BC_LOOP && sop <= BC_JLOOP && s >= nlive) ||
+	 (wr[s] && !rd[s] && !ra[s]);
+      if (dead)
+	for (uv = gcref(L->openupval); uv != NULL; uv = gcnext(uv))
+	  if (uvval(gco2uv(uv)) == L->base + s) { dead = 0; break; }
+      if (dead) setnilV(L->base + s);
+    }
   }
 }
 

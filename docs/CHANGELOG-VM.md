@@ -30,6 +30,13 @@ target x86_64 (GC64) and arm64.
   value as the limit. Not recorded: a numeric string as the limit, a start
   beyond the clip value. `tests/d54/for_10_clip_fori.lua`, design and
   figures in docs/notes/for-loop-54.md.
+- `debug.setlocal` writing an int32 to the index of an integer `for` loop
+  whose limit or step lies outside int32 (`for i = 1, math.huge`,
+  `for i = 1, 1e10`): the loop continues from the written index, as in PUC
+  (`lvm.c` `OP_FORLOOP`). It ended at once, because the int32 FORL path took
+  the slot and read the low word of the boxed limit. The value is now stored
+  in the float form a wide loop keeps an int32 index in
+  (`lj_meta_forsetidx`). `tests/d54/for_11_setlocal_index.lua`.
 - Integer `for` loops with an int32 initial value and step and a limit
   beyond int32 (`for i = 1, math.huge`, `1, 1e10`, `1, math.maxinteger`,
   the descending mirrors) run on the int32 path while the index fits and are

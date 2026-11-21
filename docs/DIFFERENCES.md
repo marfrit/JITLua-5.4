@@ -105,10 +105,14 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   integral float and whose limit is converted like `forprep` does;
   otherwise `bad 'for' <what> (number expected, got <type>)`,
   `'for' step is zero` or `number has no integer representation`. No slot
-  value is ever followed as a pointer. Two shapes keep LuaJIT's behaviour:
-  an int32 index written next to a limit or step outside int32 is run by
-  the int32 path, which reads only the low words of the other two slots;
-  and a compiled small loop keeps a constant limit and step in the trace.
+  value is ever followed as a pointer. An int32 index written into an
+  integer loop whose limit or step lies outside int32 (`for i = 1,
+  math.huge`) is no change of kind: the loop continues from the written
+  index as in PUC (`tests/d54/for_11_setlocal_index.lua`). Two shapes keep
+  LuaJIT's behaviour: an int32 index written next to a float limit or step
+  is run by the int32 path, which reads only the low words of the other two
+  slots; and a compiled small loop keeps a constant limit and step in the
+  trace.
   Evidence: puc-code (`lvm.c` `OP_FORLOOP`), measured-here (x86_64 and
   arm64, `-joff`/`-jon`, `-O0`..`-O3`, `tests/d54/for_04_forged_state.lua`,
   mode B only: there is no PUC result to compare).

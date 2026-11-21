@@ -348,7 +348,12 @@ limit, the step), so the `FORK` row in `docs/DIFFERENCES.md` and
 `tests/d54/for_03_wide_state.lua` are unchanged. `debug.setlocal` on one of
 them first turns a clipped loop into that wide form (slots rewritten, entry
 dropped), then writes: the loop then behaves as the wide loop the debug view
-showed, as before this step.
+showed, as before this step. One write is adjusted: an int32 written to the
+index of an integer loop whose limit or step is not an int32 is stored in
+the form the wide loop keeps such an index in (a float, `for_setidx`), so
+the loop continues from that index as in PUC; stored as an int32 it would be
+picked up by the int32 FORL path, which reads the low word of the boxed
+limit (`lj_meta_forsetidx`, `tests/d54/for_11_setlocal_index.lua`).
 
 ### Equivalence
 

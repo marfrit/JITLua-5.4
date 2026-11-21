@@ -7,6 +7,19 @@ target x86_64 (GC64) and arm64.
 
 ## Language and VM
 
+- JIT: a side trace that started at the FORL exit of an integer loop crashed
+  when the parent trace had only loaded the loop's step from its own slot
+  (SIGSEGV at `-O0`..`-O3` on x86_64 and arm64; the assertion build stopped
+  in `lj_snap_replay`). The shape: the step expression is a direct call of a
+  C function that is not compiled (`for j = 1, n, utf8.len(s) do`), so the
+  trace is cut at the call and the next one starts right before the FORI,
+  which loads the three slots from the stack; the loop is unrolled, its trip
+  count changes later and the FORL exit gets hot. The exit of an integer
+  FORL restores the index minus the step (`SNAP_FORDEC`, the entry above),
+  and a slot the trace never changed is not in the snapshot, so the replay
+  read reference 0 for the step. `lj_snap_replay` now loads a step that is
+  not in the snapshot from the stack, where `lj_snap_restore` reads it too.
+  `tests/d54/for_09_stitched_header.lua`.
 - Integer `for` loops with an int32 initial value and step and a limit
   beyond int32 (`for i = 1, math.huge`, `1, 1e10`, `1, math.maxinteger`,
   the descending mirrors) run on the int32 path while the index fits and are

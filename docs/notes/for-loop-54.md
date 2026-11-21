@@ -266,7 +266,14 @@ slots), so `rec_for_isrecordable` accepts it, and the loop-start check
 - The snapshot holds the incremented index, as before, with a new entry flag
   `SNAP_FORDEC`: `lj_snap_restore` writes it back minus the step slot, and
   `lj_snap_replay` starts a side trace with `index - step` (it folds away
-  against the add). The step slot is put into the snapshot for that. So the
+  against the add). The step slot is put into the snapshot for that when the
+  trace has no entry for it; a step the trace only loaded from its own slot
+  is left out by `snapshot_slots` like any unchanged slot (the loop header
+  behind a stitched C call, `for j = 1, n, utf8.len(s)`: the trace starts
+  right before the FORI, which loads all three slots), and `lj_snap_replay`
+  then loads it from the stack, where the restore reads it as well. The
+  first version took the missing slot for reference 0 and the side trace
+  crashed (`tests/d54/for_09_stitched_header.lua`). So the
   index before the increment is never live in the loop and needs no
   register: the loop code is the same instruction for instruction (checked
   with `-jdump` on x86_64). A first version that kept the old index in the

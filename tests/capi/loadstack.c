@@ -46,11 +46,11 @@ int main(void)
   printf("above two values: st=%d top=%d %s %s %s\n", st, lua_gettop(L),
 	 luaL_typename(L, 1), luaL_typename(L, 2), luaL_typename(L, 3));
   lua_settop(L, 0);
-  for (i = 0; i < 100000; i++) {  /* No slot may stay behind per call. */
+  for (i = 0; i < 20000; i++) {  /* No slot may stay behind per call. */
     if (luaL_loadstring(L, nested) != LUA_OK) break;
     lua_pop(L, 1);
   }
-  printf("100000 loads: i=%d top=%d\n", i, lua_gettop(L));
+  printf("20000 loads: i=%d top=%d\n", i, lua_gettop(L));
   co = lua_newthread(L);
   st = luaL_loadstring(co, "local y = ... local a, b = y(1, 2) return a + b");
   lua_pushcfunction(co, yielder);

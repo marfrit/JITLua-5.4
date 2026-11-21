@@ -638,16 +638,41 @@ static TRef crec_ct_tv(jit_State *J, CType *d, TRef dp, TRef sp, cTValue *sval)
 		  ud->udtype == UDTYPE_IO_FILE ? IRFL_UDATA_FILE :
 						 IRFL_SBUF_R);
     } else {
-      /* A luaL_Stream made by a C module converts to its FILE pointer
-      ** (lj_cconv.c): left to the interpreter. Any other userdata is its
-      ** payload address, guarded not to be such a stream. */
-      GCtab *fmt = lj_cconv_filemt(J->L);
-      if (fmt) {
-	TRef trmt;
-	if (lj_cconv_isstream(J->L, ud))
-	  lj_trace_err(J, LJ_TRERR_BADTYPE);
-	trmt = emitir(IRT(IR_FLOAD, IRT_TAB), sp, IRFL_UDATA_META);
-	emitir(IRTG(IR_NE, IRT_TAB), trmt, lj_ir_ktab(J, fmt));
+      /* Any other userdata is its payload address, except a luaL_Stream
+      ** made by a C module, which converts to its FILE pointer
+      ** (lj_cconv.c lj_cconv_isstream): a plain userdata whose metatable is
+      ** registry["FILE*"]. The trace is specialized to the kind and to the
+      ** metatable of the userdata. One without a metatable is never a
+      ** stream. With a metatable, the registry entry is guarded to stay
+      ** what it is now, so the metatable cannot become the file metatable
+      ** behind the trace (the io library opened later, the entry replaced).
+      ** A userdata that carries the entry as its metatable is left to the
+      ** interpreter, whether it is a stream now or not (too short, or the
+      ** io library not opened yet). */
+      GCtab *mt = tabref(ud->metatable);
+      TRef tr = emitir(IRT(IR_FLOAD, IRT_U8), sp, IRFL_UDATA_UDTYPE);
+      emitir(IRTGI(IR_EQ), tr, lj_ir_kint(J, ud->udtype));
+      if (ud->udtype == UDTYPE_USERDATA) {
+	tr = emitir(IRT(IR_FLOAD, IRT_TAB), sp, IRFL_UDATA_META);
+	if (mt) {
+	  GCtab *reg = tabV(registry(J->L));
+	  GCstr *key = lj_cconv_filekey(J->L);
+	  cTValue *fv = lj_tab_getstr(reg, key);
+	  RecordIndex ix;
+	  if (fv && tvistab(fv) && tabV(fv) == mt)
+	    lj_trace_err(J, LJ_TRERR_BADTYPE);
+	  emitir(IRTG(IR_EQ, IRT_TAB), tr, lj_ir_ktab(J, mt));
+	  ix.tab = lj_ir_ktab(J, reg);
+	  ix.key = lj_ir_kstr(J, key);
+	  settabV(J->L, &ix.tabv, reg);
+	  setstrV(J->L, &ix.keyv, key);
+	  ix.val = 0; ix.idxchain = 0;
+	  tr = lj_record_idx(J, &ix);  /* Guards the type of the entry. */
+	  if (tref_istab(tr))
+	    emitir(IRTG(IR_EQ, IRT_TAB), tr, lj_ir_ktab(J, tabV(fv)));
+	} else {
+	  emitir(IRTG(IR_EQ, IRT_TAB), tr, lj_ir_knull(J, IRT_TAB));
+	}
       }
       sp = emitir(IRT(IR_ADD, IRT_PTR), sp, lj_ir_kintp(J, sizeof(GCudata)));
     }

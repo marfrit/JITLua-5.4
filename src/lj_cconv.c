@@ -72,6 +72,13 @@ GCtab *lj_cconv_filemt(lua_State *L)
   return NULL;
 }
 
+/* The registry key of that metatable, interned. The recorder looks the
+** entry up without the io library's root (lj_crecord.c). */
+GCstr *lj_cconv_filekey(lua_State *L)
+{
+  return lj_str_newlit(L, LUA_FILEHANDLE);
+}
+
 /* Is the plain userdata a luaL_Stream made by a C module? The io library
 ** takes such a block as a file handle (lib_io.c io_isfile, same test). */
 int lj_cconv_isstream(lua_State *L, GCudata *ud)

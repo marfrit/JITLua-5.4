@@ -39,7 +39,7 @@ arg = newarg
 
 local f, ferr = loadfile(target)
 if not f then
-  -- Mimic the standalone interpreter's syntax-error report (no extra frame).
+  -- Follow the standalone interpreter's syntax-error report (no extra frame).
   io.stderr:write("luajit: " .. tostring(ferr) .. "\n")
   os.exit(1)
 end

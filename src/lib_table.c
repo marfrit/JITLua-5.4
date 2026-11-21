@@ -35,7 +35,7 @@ typedef size_t lj_tab_Unsigned;  /* Unsigned counterpart of lua_Integer. */
 #define LJLIB_MODULE_table
 
 /* PUC 5.4.9 ltablib.c table-like rules: the operations an object must
-** define to mimic a table (some functions only need some of them). */
+** define to stand in for a table (some functions only need some of them). */
 #define TAB_R	1		/* read */
 #define TAB_W	2		/* write */
 #define TAB_L	4		/* length */

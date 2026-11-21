@@ -3517,15 +3517,23 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
       |  // Different tables or userdatas. Need to check __eq metamethod.
       |  // Field metatable must be at same offset for GCtab and GCudata!
       |  // 5.4 lobject.c luaV_equalobj: the first operand's __eq is used, and
-      |  // only if it has none, the second one's. Without a handler on the first
-      |  // operand the C helper decides (it asks the second and keeps the
-      |  // negative cache), so the old "not equal" shortcut is gone.
+      |  // only if it has none, the second one's. "Not equal" is decided here
+      |  // when neither can have one (no metatable, or its 'no __eq' flag is
+      |  // set); the C helper does the lookups and fills the negative cache.
       |  cleartp TAB:RA
       |  mov TAB:RB, TAB:RA->metatable
       |  test TAB:RB, TAB:RB
-      |  jz >7				// No metatable: let the helper decide.
+      |  jz >8				// No metatable: look at the second.
       |  test byte TAB:RB->nomm, 1<<MM_eq
-      |  jnz >7				// 'no __eq' on the first: helper decides.
+      |  jz >7				// The first may have __eq: helper.
+      |8:
+      |  mov TMPR, RD
+      |  cleartp TMPR
+      |  mov TAB:TMPR, TAB:TMPR->metatable
+      |  test TAB:TMPR, TAB:TMPR
+      |  jz <2				// No metatable either: not equal.
+      |  test byte TAB:TMPR->nomm, 1<<MM_eq
+      |  jnz <2				// 'no __eq' flag set: not equal.
       |7:
       if (vk) {
 	|  xor RBd, RBd			// ne = 0

@@ -2887,23 +2887,29 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  and TAB:CARG2, CARG1, #LJ_GCVMASK
     |  ldr TAB:TMP2, TAB:CARG2->metatable
     // 5.4 lobject.c luaV_equalobj: the first operand's __eq is used, and only
-    // if it has none, the second one's. Without a handler on the first the C
-    // helper decides (it asks the second and keeps the negative cache), so the
-    // old "not equal" shortcut is gone.
+    // if it has none, the second one's. "Not equal" is decided here when
+    // neither can have one (no metatable, or its 'no __eq' flag is set); the
+    // C helper does the lookups and fills the negative cache.
     if (vk) {
       |   mov CARG4, #0			// ne = 0
-      |  cbz TAB:TMP2, >6		// No metatable: let the helper decide.
-      |  ldrb TMP1w, TAB:TMP2->nomm
-      |  tbnz TMP1w, #MM_eq, >6		// 'no __eq' on the first: helper decides.
-      |  b ->vmeta_equal		// __eq present: call it.
-      |6:
     } else {
       |   mov CARG4, #1			// ne = 1.
-      |  cbz TAB:TMP2, >6		// No metatable: let the helper decide.
+    }
+    |  cbz TAB:TMP2, >6			// No metatable: look at the second.
+    |  ldrb TMP1w, TAB:TMP2->nomm
+    |  tbnz TMP1w, #MM_eq, >6
+    |  b ->vmeta_equal			// The first may have __eq: helper.
+    |6:
+    |  and TAB:TMP2, CARG3, #LJ_GCVMASK
+    |  ldr TAB:TMP2, TAB:TMP2->metatable
+    if (vk) {
+      |  cbz TAB:TMP2, <1		// No metatable either: not equal.
       |  ldrb TMP1w, TAB:TMP2->nomm
-      |  tbnz TMP1w, #MM_eq, >6		// 'no __eq' on the first: helper decides.
-      |  b ->vmeta_equal		// __eq present: call it.
-      |6:
+      |  tbnz TMP1w, #MM_eq, <1		// 'no __eq' flag set: not equal.
+    } else {
+      |  cbz TAB:TMP2, ->BC_ISEQV_Z	// No metatable either: not equal.
+      |  ldrb TMP1w, TAB:TMP2->nomm
+      |  tbnz TMP1w, #MM_eq, ->BC_ISEQV_Z	// 'no __eq' flag set: not equal.
     }
     |  b ->vmeta_equal
     |

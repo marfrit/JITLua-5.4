@@ -396,6 +396,12 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   with rc=1.
 
 ### Kept LuaJIT extensions
+- `EXTENSION` `lua_loadx` is kept as a second name of `lua_load` (same
+  arguments, the 5.4 `mode` included). `lua_pushfstring`, `lua_pushvfstring`
+  and `luaL_error` accept LuaJIT's additional conversions (`%u`, `%o`, `%x`
+  with flags and a width, a width for `%d`) where PUC 5.4.9 raises "invalid
+  conversion '%...' to 'lua_pushfstring'"; the conversions PUC defines
+  (`%s %c %d %I %f %p %U %%`) give PUC's output (`tests/capi/api54.c`).
 - `EXTENSION` `jit.*`, `bit.*`, `ffi`/cdata, `bcsave`, `-j`/`-O`/`-b` options.
 - `EXTENSION` FFI int64/uint64 cdata and bit operations on cdata; intended
   semantics are in `docs/ffi-int-semantics.md` (tests `ffi_int_*`, modes B/R).

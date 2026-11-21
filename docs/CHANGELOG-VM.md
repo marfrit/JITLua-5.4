@@ -925,6 +925,54 @@ target x86_64 (GC64) and arm64.
   of reading, writing and closing it. The recorder of `f:write`/`f:flush`
   guards the handle's metatable and the registry entry, so a compiled loop
   leaves the trace when either changes (`tests/d54/io_06_handle_identity.lua`).
+- The parser left one Lua stack slot behind for every function it parsed.
+  `fs_init` (`src/lj_parse.c`) anchors two tables of constants on the stack,
+  `kt` and, since the integer/float split of the literals, `ktf` for the float
+  constants; `fs_finish` popped one. Three things followed. The loaders of
+  the C API (`lua_load`, `luaL_loadbuffer`, `luaL_loadstring`,
+  `luaL_loadfile`, `luaL_dostring`) returned with the chunk name and one
+  table per nested function *below* the loaded function, where PUC leaves
+  exactly the function (`lapi.c` `lua_load`): `lua_gettop` arithmetic was
+  off, a loop of 100000 `luaL_loadstring`/`lua_pop` pairs filled the stack
+  after 10915 rounds, and `lua_resume` of a body loaded on the coroutine
+  reported one result too many. The interactive interpreter prints what is
+  on the stack after a line (`luajit.c` `dotty`), so every result was
+  preceded by `=stdin`. And a chunk with about 65000 functions ended in
+  "stack overflow" while it was parsed; PUC loads it. `fs_finish` pops both
+  tables. Evidence: puc-code, measured-here on x86_64 and aarch64 before and
+  after. `tests/d54/load_03_many_functions.lua` (mode A),
+  `tests/capi/loadstack.c` and the REPL comparison in `tests/capi/run.sh`
+  (same source and input against PUC 5.4.9, outputs identical).
+- The compiled `ipairs` iterator returned no value at the end of the
+  iteration. The interpreter returns the one `nil` of PUC's `ipairsaux`
+  (`lbaselib.c`: `return (lua_geti(L, 1, i) == LUA_TNIL) ? 1 : 2`), the
+  recorder (`recff_ipairs_aux`) still recorded zero results. In a `for` loop
+  that is the same, but a direct call that keeps every result read the stale
+  content of the result slot: `local aux = ipairs({})`, then `{aux(t, #t)}`
+  in a compiled loop was a table with one element (a function) instead of
+  the empty table, on x86_64 and aarch64 at `-O0`..`-O3`, and the assert
+  build stopped in `rec_check_slots`. The recorder records the `nil`.
+  `tests/d54/iter_03_ipairs_aux_results.lua` (mode B, all opt levels).
+- `lua_load` and `lua_dump` had their Lua 5.1 signatures: a C module written
+  for Lua 5.4 that calls `lua_load(L, reader, data, chunkname, mode)` or
+  `lua_dump(L, writer, data, strip)` did not compile. Both have the
+  signatures of PUC 5.4.9's `lua.h` now; `mode` is the one `load` takes,
+  `strip` leaves the debug information out like `string.dump(f, true)`.
+  `lua_loadx` remains, with the same arguments. `lua_pushfstring`,
+  `lua_pushvfstring` and `luaL_error` did not know `%I` (a `lua_Integer`,
+  passed as `LUAI_UACINT`) and `%U` (a code point, written as UTF-8): the
+  result was `?` and the rest of the format was dropped
+  (`luaL_error(L, "n=%I s=%s", ...)` gave `n=?`). They are formatted as
+  `lobject.c` `luaO_pushvfstring` does. Evidence: puc-code, measured-here on
+  x86_64 and aarch64. `tests/capi/api54.c`, built against both libraries
+  with identical output.
+- An `__eq` metamethod that cannot be called raised the generic call error:
+  `setmetatable({}, {__eq = false}) == {}` gave "attempt to call a boolean
+  value", without a position and without the metamethod. PUC names it, like
+  every other metamethod: "file:line: attempt to call a boolean value
+  (metamethod 'eq')" (`ldebug.c` `luaG_callerror`). `lj_meta_equal` raises
+  that error when the handler is no function and has no `__call`.
+  `tests/d54/meta_10_eq_notcallable.lua` (mode A; mode B at all opt levels).
 
 ## Known JIT/performance rows (not semantic divergences)
 
@@ -1032,3 +1080,65 @@ target x86_64 (GC64) and arm64.
   prints the message shape (location, frame count, handler still runnable); it
   was red in mode A and mode B before the change. `docs/DIFFERENCES.md` keeps
   only the recursion depth itself, which is an implementation limit.
+- `math.min`/`math.max` with an integer next to a float (`math.max(x, 0)`
+  with a float `x`, a clamp `math.min(1, math.max(0, x))`) aborted every
+  trace that reached it. The 5.4 rule returns the winning argument with its
+  own subtype, which `IR_MIN`/`IR_MAX` on converted values cannot give, so
+  the recorder left mixed lists to the interpreter with a trace abort, and
+  the whole loop then ran interpreted. The recorder (`recff_math_minmax`)
+  now records PUC's comparisons (`lmathlib.c`: min takes the next argument
+  if it is less than the best, max if the best is less than it) as guards
+  for the outcome seen while recording and returns the winning argument as
+  it is; the guard for "not less" is the unordered comparison, so a NaN
+  keeps the earlier argument. A trace that meets the other outcome leaves
+  through the guard. Uniform lists keep `IR_MIN`/`IR_MAX`. Measured (median
+  of 7, interleaved, seconds: before the 5.4 min/max rule, before this
+  change, now), `s = s + math.max(i * 0.5 - 10, 0)`, 1e8 iterations, `-jon`:
+  x86_64 0.236 / 13.178 / 0.236, aarch64 0.051 / 2.412 / 0.051; the clamp
+  0.236 / 14.947 / 0.237 and 0.051 / 3.309 / 0.051. In the interpreter a
+  mixed list still goes from the assembler fast path to the C function
+  (which now compares plain numbers itself): 2e7 iterations of the clamp,
+  `-joff`, x86_64 2.201 / 2.990 / 2.725, aarch64 0.455 / 0.603 / 0.595, i.e.
+  1.24 and 1.31 times the time before the rule; an assembler path for mixed
+  lists in both backends would be needed to close that.
+  `tests/d54/math_05_minmax_mixed_jit.lua` (the marked loops must compile).
+- `table.insert(t, v)` on a table with a metatable, `table.remove(t)` and
+  `table.concat`. The 5.4 table library goes through `__index`,
+  `__newindex` and `__len`; the first version took the metamethod path for
+  any of the three and left such calls to the interpreter in compiled code,
+  and `table.remove` became a C function without a recorder. A push reads no
+  element (PUC `tinsert`: `luaL_len`, then one `lua_seti` of a new key), so
+  only `__newindex` and `__len` matter; a pop of a non-empty table reads and
+  clears the border element, which exists, so `lua_geti`/`lua_seti` are raw
+  and only `__len` matters. Both now take the raw path in those cases, in
+  the C functions and in the recorder (`recff_table_insert`, new
+  `recff_table_remove`; the guards on the metatable and on the metamethod
+  fields are the ones `lj_record_mm_lookup` emits). An insert or remove at a
+  position, a pop of an empty table (it reads `t[0]`) and tables with the
+  metamethods named above run in the C function, stitched. `table.concat`
+  was slower because the per-element writer had become a call out of the
+  loop of `lj_buf_puttab`; it is inlined again. Measured (median of 7,
+  interleaved, seconds: 933cfe09, before this change, now), `-jon`:
+  `table.insert` on an instance with an `__index` metatable x86_64 0.225 /
+  2.029 / 0.226, aarch64 0.055 / 0.605 / 0.054; pop of such an instance
+  1.063 / 3.487 / 1.067 and 0.204 / 0.616 / 0.238; push/pop on a plain table
+  1.878 / 6.460 / 1.754 and 0.391 / 1.112 / 0.419; `table.concat` of 100
+  strings 0.633 / 0.795 / 0.633 and 0.097 / 0.140 / 0.098. `-joff`: pop of
+  an instance 0.372 / 0.699 / 0.313 and 0.099 / 0.142 / 0.067, `table.concat`
+  0.623 / 0.829 / 0.666 and 0.108 / 0.152 / 0.110.
+  `tests/d54/tbl_13_push_pop_jit.lua` (the marked loops must compile; red
+  before: stitched traces).
+- `==` and `~=` on two different tables or userdata without `__eq`, in the
+  interpreter. With the 5.4 selection (the first operand's handler, else the
+  second one's) `BC_ISEQV`/`BC_ISNEV` called `lj_meta_equal` whenever the
+  first operand had no handler, also for two plain tables. Both backends
+  now check the second operand's metatable and its negative-cache bit
+  inline and call the helper only when one of the two can have `__eq`.
+  Measured (median of 7, interleaved, seconds: 933cfe09, before this change,
+  now), 3e7 comparisons, `-joff`: two plain tables x86_64 0.460 / 0.655 /
+  0.480, aarch64 0.144 / 0.245 / 0.140; two instances of one class 0.562 /
+  0.899 / 0.607 and 0.218 / 0.291 / 0.217. Compiled code was not affected
+  (x86_64 0.120 / 0.120 / 0.119; aarch64 0.038 / 0.052 / 0.055 for 1.5e8
+  iterations of a loop whose IR is the same before and after: the guards
+  are hoisted). `tests/d54/meta_11_eq_second_cache.lua` covers handlers that
+  appear and disappear on either metatable.

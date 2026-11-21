@@ -78,10 +78,13 @@ LUA_API int lua_loadx(lua_State *L, lua_Reader reader, void *data,
   return status;
 }
 
+/* Lua 5.4 signature (lapi.c lua_load): mode selects text ("t"), binary ("b")
+** or both ("bt", or NULL). lua_loadx is the same function under LuaJIT's
+** older name. */
 LUA_API int lua_load(lua_State *L, lua_Reader reader, void *data,
-		     const char *chunkname)
+		     const char *chunkname, const char *mode)
 {
-  return lua_loadx(L, reader, data, chunkname, NULL);
+  return lua_loadx(L, reader, data, chunkname, mode);
 }
 
 typedef struct FileReaderCtx {
@@ -207,10 +210,13 @@ LUALIB_API int luaL_loadstring(lua_State *L, const char *s)
 
 /* -- Dump bytecode ------------------------------------------------------- */
 
-LUA_API int lua_dump(lua_State *L, lua_Writer writer, void *data)
+/* Lua 5.4 signature (lapi.c lua_dump): a non-zero strip leaves the debug
+** information out, like string.dump(f, true). */
+LUA_API int lua_dump(lua_State *L, lua_Writer writer, void *data, int strip)
 {
   cTValue *o = L->top-1;
-  uint32_t flags = LJ_FR2*BCDUMP_F_FR2;  /* Default mode for legacy C API. */
+  uint32_t flags = LJ_FR2*BCDUMP_F_FR2;  /* Native frame layout. */
+  if (strip) flags |= BCDUMP_F_STRIP;
   lj_checkapi(L->top > L->base, "top slot empty");
   if (tvisfunc(o) && isluafunc(funcV(o)))
     return lj_bcwrite(L, funcproto(funcV(o)), writer, data, flags);

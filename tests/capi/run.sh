@@ -77,6 +77,36 @@ else
   echo "== ccallbound (PUC side skipped: reference source missing, run tests/ref/fetch-ref.sh) =="
 fi
 
+# Loader stack effect (loadstack.c) and the 5.4 signatures and formats of
+# lua_load, lua_dump and lua_pushfstring (api54.c). Same source against both
+# libraries; the PUC output is the oracle and the two must be identical.
+for t in loadstack api54; do
+  $CC $CFLAGS -I"$SRC" "$ROOT/tests/capi/$t.c" -o "$OUT/$t" \
+    "$LIB" $LDFLAGS -lm -ldl
+  echo "== $t (JITLua-5.4) =="
+  (cd "$ROOT" && timeout 60 "$OUT/$t") >"$OUT/$t.out"
+  cat "$OUT/$t.out"
+  if [ -f "$PUC_SRC/liblua.a" ] && [ -f "$PUC_SRC/lua.h" ]; then
+    $CC $CFLAGS -I"$PUC_SRC" "$ROOT/tests/capi/$t.c" \
+      -o "$OUT/${t}_puc" "$PUC_SRC/liblua.a" $LDFLAGS -lm -ldl -lpthread
+    (cd "$ROOT" && timeout 60 "$OUT/${t}_puc") >"$OUT/${t}_puc.out"
+    diff "$OUT/${t}_puc.out" "$OUT/$t.out"
+    echo "== $t: identical to the PUC 5.4.9 reference =="
+  else
+    echo "== $t (PUC side skipped: reference source missing, run tests/ref/fetch-ref.sh) =="
+  fi
+done
+
+# The interactive interpreter prints exactly the results of a line (PUC lua.c
+# l_print): nothing the loader left on the stack.
+REPLJIT=${MODLUAJIT:-$ROOT/src/luajit}
+if [ -x "$REPLJIT" ] && [ -x "$ROOT/tests/ref/bin/lua54ref" ]; then
+  printf 'return 1+1\nx = 5\nreturn x, "a"\nreturn\n' | "$REPLJIT" -i 2>&1 | grep '^>' >"$OUT/repl.out"
+  printf 'return 1+1\nx = 5\nreturn x, "a"\nreturn\n' | "$ROOT/tests/ref/bin/lua54ref" -i 2>&1 | grep '^>' >"$OUT/repl_puc.out"
+  diff "$OUT/repl_puc.out" "$OUT/repl.out"
+  echo "== repl: identical to the PUC 5.4.9 reference =="
+fi
+
 # Public-header probe for the module-facing macros (no <limits.h> include in
 # the probe itself) and the real third-party module that exposed the gap.
 # MODLUAJIT is the host interpreter used to load the modules; it defaults to

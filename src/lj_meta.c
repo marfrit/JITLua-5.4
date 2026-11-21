@@ -629,6 +629,12 @@ TValue *lj_meta_equal(lua_State *L, GCobj *o1, GCobj *o2, int ne)
   if (mo) {
     TValue *top;
     uint32_t it;
+    /* PUC names a metamethod that cannot be called (luaG_callerror from
+    ** luaT_callTMres): "attempt to call a boolean value (metamethod 'eq')".
+    ** As in mmcall_mm, nothing is left to call without a __call chain. */
+    if (LJ_UNLIKELY(!tvisfunc(mo)) &&
+	tvisnil(lj_meta_lookup(L, mo, MM_call)))
+      lj_err_msgv(L, LJ_ERR_BADCALLMM, lj_err_typename(L, mo), "eq");
     top = curr_top(L);
     setcont(top++, ne ? lj_cont_condf : lj_cont_condt);
     if (LJ_FR2) setnilV(top++);

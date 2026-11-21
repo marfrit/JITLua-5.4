@@ -2015,7 +2015,11 @@ static GCproto *fs_finish(LexState *ls)
     setprotoV(V, V->top++, pt);
   );
 
-  L->top--;  /* Pop table of constants. */
+  /* Pop the two tables of constants that fs_init anchored (kt and ktf).
+  ** Popping one left a slot behind for every parsed function: below the
+  ** function a loader returns, and a chunk with ~65000 functions overflowed
+  ** the Lua stack while it was parsed. */
+  L->top -= 2;
   ls->vtop = fs->vbase;  /* Reset variable stack. */
   ls->nvlocal = fs->lbase;
   ls->fs = fs->prev;

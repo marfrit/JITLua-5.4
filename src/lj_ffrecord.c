@@ -618,7 +618,15 @@ static void LJ_FASTCALL recff_ipairs_aux(jit_State *J, RecordFFData *rd)
     ix.key = lj_opt_narrow_toint(J, J->base[1]);
     J->base[0] = ix.key = emitir(IRTI(IR_ADD), ix.key, lj_ir_kint(J, 1));
     J->base[1] = lj_record_idx(J, &ix);
-    rd->nres = tref_isnil(J->base[1]) ? 0 : 2;
+    if (tref_isnil(J->base[1])) {
+      /* 5.4 ipairsaux returns the one nil lua_geti pushed, like the
+      ** interpreter (fff_resnil). Recording no result left the slot of a
+      ** call that keeps every result with its stale content. */
+      J->base[0] = TREF_NIL;
+      rd->nres = 1;
+    } else {
+      rd->nres = 2;
+    }
   } else {  /* 5.4 accepts any value; the first step raises the index error. */
     lj_trace_err(J, LJ_TRERR_BADTYPE);
   }
@@ -943,14 +951,47 @@ static void LJ_FASTCALL recff_math_minmax(jit_State *J, RecordFFData *rd)
   for (i = 0; J->base[i] != 0; i++)
     if (tref_istype(J->base[i], IRT_I64)) { recff_nyiu(J, rd); return; }
   /* 5.4 lmathlib: the winning argument keeps its subtype, and a numeric string
-  ** next to a number raises a compare error. Trace only uniform int/int or
-  ** float/float argument lists; mixed or non-number lists stay interpreted. */
-  if (!tref_isinteger(J->base[0]) && !tref_isnum(J->base[0]))
-    lj_trace_err(J, LJ_TRERR_BADTYPE);
-  for (i = 1; J->base[i] != 0; i++) {
-    if (tref_isinteger(J->base[0]) != tref_isinteger(J->base[i]) ||
-	(!tref_isinteger(J->base[i]) && !tref_isnum(J->base[i])))
+  ** next to a number raises a compare error. Uniform int/int or float/float
+  ** argument lists become IR_MIN/IR_MAX, mixed number lists guarded
+  ** comparisons (below); non-number lists stay interpreted. */
+  {
+    int mixed = 0;
+    if (!tref_isinteger(J->base[0]) && !tref_isnum(J->base[0]))
       lj_trace_err(J, LJ_TRERR_BADTYPE);
+    for (i = 1; J->base[i] != 0; i++) {
+      if (!tref_isinteger(J->base[i]) && !tref_isnum(J->base[i]))
+	lj_trace_err(J, LJ_TRERR_BADTYPE);
+      if (tref_isinteger(J->base[0]) != tref_isinteger(J->base[i]))
+	mixed = 1;
+    }
+    if (mixed) {
+      /* Integers next to floats: the result is the winning argument with
+      ** its own subtype, so it is no arithmetic of the values. Record the
+      ** comparisons PUC makes (lmathlib.c: min takes the next argument if
+      ** it is less than the best, max if the best is less than it), each
+      ** as a guard for the outcome seen now, and return the winner as it
+      ** is. An int32 converts to a double exactly, so the float comparison
+      ** is PUC's exact integer/float one; the negated guard is the
+      ** unordered one, so a NaN keeps the earlier argument. A trace that
+      ** meets the other outcome leaves through the guard. */
+      BCReg best = 0;
+      lua_Number nbest = numberVnum(&rd->argv[0]);
+      TRef trbest = lj_ir_tonum(J, J->base[0]);
+      for (i = 1; J->base[i] != 0; i++) {
+	lua_Number n = numberVnum(&rd->argv[i]);
+	TRef trn = lj_ir_tonum(J, J->base[i]);
+	TRef lhs = op == IR_MIN ? trn : trbest;
+	TRef rhs = op == IR_MIN ? trbest : trn;
+	if (op == IR_MIN ? (n < nbest) : (nbest < n)) {
+	  emitir(IRTG(IR_LT, IRT_NUM), lhs, rhs);
+	  best = i; nbest = n; trbest = trn;
+	} else {
+	  emitir(IRTG(IR_UGE, IRT_NUM), lhs, rhs);
+	}
+      }
+      J->base[0] = J->base[best];
+      return;
+    }
   }
   tr = J->base[0];
   for (i = 1; J->base[i] != 0; i++) {
@@ -1809,9 +1850,12 @@ static void LJ_FASTCALL recff_table_insert(jit_State *J, RecordFFData *rd)
   ix.val = J->base[1];
   rd->nres = 0;
   if (tref_istab(ix.tab) && ix.val) {
-    if (recff_tab_hasmm(J, rd, 1|2|4)) {
-      /* 5.4: the raw ALEN/idx fast path would bypass __index/__newindex/
-      ** __len; let the interpreter (now metamethod-aware) run instead. */
+    /* 5.4: the raw ALEN/idx fast path would bypass __newindex/__len, and
+    ** an insert in the middle reads through __index as well; the interpreter
+    ** (metamethod-aware) runs those. A push never reads an element (PUC
+    ** tinsert: luaL_len, then one lua_seti), so __index alone, the metatable
+    ** of a class instance, keeps the fast path. */
+    if (recff_tab_hasmm(J, rd, J->base[2] ? (1|2|4) : (2|4))) {
       recff_nyiu(J, rd);
       return;
     }
@@ -1828,6 +1872,39 @@ static void LJ_FASTCALL recff_table_insert(jit_State *J, RecordFFData *rd)
       return;
     }
   }  /* else: Interpreter will throw. */
+}
+
+static void LJ_FASTCALL recff_table_remove(jit_State *J, RecordFFData *rd)
+{
+  TRef tab = J->base[0];
+  if (tref_istab(tab) && (!J->base[1] || tref_isnil(J->base[1])) &&
+      !recff_tab_hasmm(J, rd, 4)) {
+    /* Simple pop: v = t[#t]; t[#t] = nil. With a length above zero the
+    ** border element exists, so PUC's lua_geti and lua_seti (ltablib.c
+    ** tremove) are raw whatever __index and __newindex say; only __len
+    ** selects another path (guarded above). An empty table reads and
+    ** clears t[0] through the metamethods: left to the interpreter. */
+    TRef trlen = emitir(IRTI(IR_ALEN), tab, TREF_NIL);
+    GCtab *t = tabV(&rd->argv[0]);
+    MSize len = lj_tab_len(t);
+    emitir(IRTGI(len ? IR_NE : IR_EQ), trlen, lj_ir_kint(J, 0));
+    if (len) {
+      RecordIndex ix;
+      ix.tab = tab;
+      ix.key = trlen;
+      settabV(J->L, &ix.tabv, t);
+      setintV(&ix.keyv, (int32_t)len);
+      ix.idxchain = 0;
+      ix.val = 0;
+      J->base[0] = lj_record_idx(J, &ix);  /* Load previous value. */
+      /* Assumes ix.key/ix.tab is not modified for raw lj_record_idx(). */
+      ix.val = TREF_NIL;
+      lj_record_idx(J, &ix);  /* Remove value. */
+      rd->nres = 1;
+      return;
+    }
+  }
+  recff_nyi(J, rd);  /* A position, an empty table, __len: interpreter. */
 }
 
 static void LJ_FASTCALL recff_table_concat(jit_State *J, RecordFFData *rd)

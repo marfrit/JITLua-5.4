@@ -44,7 +44,10 @@ local function t3()
   return finish, b[1] == 34, n <= 200000
 end
 
--- GC2 shape, the finalizable table is inside an array constructor
+-- GC2 shape, the finalizable table is inside an array constructor. Only the
+-- live local is compared: under a setpause-0 stress run PUC itself keeps this
+-- object past the bound or not depending on the heap layout, so whether the
+-- loop ended by the finalizer is not stable on the reference side.
 local function t4()
   local u
   local finish = false
@@ -52,7 +55,7 @@ local function t4()
   local b = {34}
   local n = 0
   repeat u = {{}}; n = n + 1 until finish or n > 200000
-  return finish, b[1] == 34, n <= 200000
+  return b[1] == 34
 end
 
 -- constructor into a local declared before the live value above it

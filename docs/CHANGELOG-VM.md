@@ -730,8 +730,9 @@ target x86_64 (GC64) and arm64.
   and `IR_MAX` yield their second operand when the comparison is false or
   unordered in the constant folder (`lj_vm_foldarith`) and in both backends
   (x86_64 `MINSD`/`MAXSD`, arm64 `FCMP`+`FCSEL`), and the recorder passed
-  the best first; it now emits `IR_MIN/IR_MAX(arg, best)`. Integer lists are
-  unaffected (equal integers are the same value)
+  the best first; it now emits `IR_MIN/IR_MAX(arg, best)` for floats.
+  Integer lists keep the best first (equal integers are the same value, and
+  the arm64 loop keeps the running best in its register that way)
   (`tests/d54/math_04_minmax_jit_order.lua`).
 - `string.format` raises its errors in PUC's order (lstrlib.c
   `str_format`): a missing argument ("no value") before the conversion is

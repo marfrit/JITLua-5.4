@@ -109,8 +109,10 @@ the 2026-11-21 run finds none of those.
 
 For the same tree, the interleaved run of 2026-11-20 (median of 9) is the more
 precise reference: every workload reads within 10 % of stock on both
-architectures, with the short arm64 rows (a few milliseconds each) limited by
-process start-up and host sharing (`docs/CHANGELOG-VM.md`).
+architectures except arm64 nbody (0.731), a run of 1.3 ms. Measured alone on
+that host, nbody reads 0.982 at the set's size and 0.993 and 0.997 at 10 and
+100 times the iterations (`docs/CHANGELOG-VM.md`, "Known JIT/performance
+rows").
 
 ## Limits of these figures
 

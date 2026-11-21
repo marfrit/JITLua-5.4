@@ -61,6 +61,7 @@ LJ_FUNC void lj_gc_finalize_cdata(lua_State *L);
 LJ_FUNC void lj_gc_freeall(global_State *g);
 LJ_FUNCA int LJ_FASTCALL lj_gc_step(lua_State *L);
 LJ_FUNCA void LJ_FASTCALL lj_gc_step_fixtop(lua_State *L);
+LJ_FUNC void lj_gc_step_top(lua_State *L, TValue *top);
 #if LJ_HASJIT
 #if LJ_TARGET_ARM64 || (LJ_TARGET_X86ORX64 && LJ_GC64)
 LJ_FUNC int LJ_FASTCALL lj_gc_step_jit(global_State *g, uint64_t pak);

@@ -1271,19 +1271,87 @@ void LJ_FASTCALL lj_gc_step_fixtop(lua_State *L)
   lj_gc_step(L);
 }
 
+/* Ditto, with the live top passed by the VM (PUC's checkGC(L,c)). */
+void lj_gc_step_top(lua_State *L, TValue *top)
+{
+  L->top = top;
+  lj_gc_step(L);
+}
+
 #if LJ_HASJIT
 /* Perform multiple GC steps. Called from JIT-compiled code. */
 #if LJ_TARGET_ARM64 || (LJ_TARGET_X86ORX64 && LJ_GC64)
 /* GC64 targets pass a 64-bit pak: traceno(16), loop-head flag(16), steps(32). */
 
-/* A weak trace runs with stale values in the stack slots above its live
-** range: the interpreter left them there and the trace never writes them.
-** They are below L->top, so they are GC roots, and a compiled loop that
-** waits for a weak entry to be collected would wait forever. This is called
-** for a GC check at the start bytecode of the root trace. If that is a loop
-** bytecode, every slot above the loop's own variables is dead at that point,
-** so clear them before the step.
+/* Stale values left in the stack slots above the live range are roots while
+** the interpreter has not overwritten them, and a trace never writes them
+** (a store to a dead local is not recorded at all): a compiled loop that
+** waits for such a value to be collected would wait forever. This is called
+** for a GC check at the start bytecode of the trace. Slots that are read by
+** any bytecode from the start pc onward (including loop control slots) keep
+** their value; every other slot is dead at the start pc and is cleared, as
+** PUC's checkGC narrows the top and the atomic phase nils the dead slice.
+** Slots an open upvalue points to are kept, as the snapshot use/def analysis
+** does.
 */
+/* Mark slots read by bytecode in [from,to) and, when wr is not NULL, slots
+** it writes. Opcode modes follow the snapshot analysis in lj_snap.c. */
+static void gc_jit_scan(GCproto *pt, BCPos from, BCPos to,
+			uint8_t *rd, uint8_t *wr)
+{
+  const BCIns *bc = proto_bc(pt);
+  BCReg fs = pt->framesize;
+  BCPos i, e;
+  BCReg sr;
+#define RD(x) do { if (rd && (x) < fs) rd[x] = 1; } while (0)
+#define WR(x) do { if (wr && (x) < fs) wr[x] = 1; } while (0)
+  for (i = from; i < to && i < pt->sizebc; i++) {
+    BCIns ins = bc[i];
+    BCOp op = bc_op(ins);
+    switch (bcmode_b(op)) {
+    case BCMvar: RD(bc_b(ins)); break;
+    default: break;
+    }
+    switch (bcmode_c(op)) {
+    case BCMvar: RD(bc_c(ins)); break;
+    case BCMrbase:  /* Only BC_CAT uses RC rbase: operands B..C. */
+      for (sr = bc_b(ins); sr <= bc_c(ins); sr++) RD(sr);
+      break;
+    default: break;
+    }
+    switch (bcmode_a(op)) {
+    case BCMvar: RD(bc_a(ins)); break;
+    case BCMdst:  /* ISTC/ISFC only copy conditionally: not a write. */
+      if (op != BC_ISTC && op != BC_ISFC) WR(bc_a(ins));
+      break;
+    case BCMbase:
+      if (op >= BC_CALLM && op <= BC_ITERN) {
+	BCReg top = (op == BC_CALLM || op == BC_CALLMT || bc_c(ins) == 0) ?
+	  fs : (BCReg)(bc_a(ins) + bc_c(ins) + LJ_FR2);
+	sr = bc_a(ins) - ((op == BC_ITERC || op == BC_ITERN) ? 3 : 0);
+	for (; sr < top; sr++) RD(sr);
+      } else if (op == BC_TSETM) {
+	for (sr = bc_a(ins) - 1; sr < fs; sr++) RD(sr);
+      }
+      break;
+    default: break;
+    }
+    /* Loop control slots are read by the LOOP/FORL/ITERL bytecode itself. */
+    if (op >= BC_FORL && op <= BC_JFORL) {
+      for (e = bc_a(ins) + FORL_EXT + 1, sr = bc_a(ins); sr < e; sr++) RD(sr);
+    } else if (op >= BC_ITERL && op <= BC_JITERL) {
+      for (e = bc_a(ins) + 4, sr = bc_a(ins); sr < e; sr++) RD(sr);
+    } else if (bc_isret(op)) {
+      BCReg top = (op == BC_RETM) ? fs : (BCReg)(bc_a(ins) + bc_d(ins));
+      for (sr = bc_a(ins); sr < top; sr++) RD(sr);
+    }
+    if (op == BC_KNIL)
+      for (sr = bc_a(ins); sr <= bc_d(ins); sr++) WR(sr);
+  }
+#undef RD
+#undef WR
+}
+
 static void gc_jit_cleardead(global_State *g, lua_State *L, TraceNo traceno)
 {
   jit_State *J = G2J(g);
@@ -1294,28 +1362,63 @@ static void gc_jit_cleardead(global_State *g, lua_State *L, TraceNo traceno)
     return;
   T = traceref(J, traceno);
   lj_assertG(T != NULL, "no trace %d in GC step", (int)traceno);
-  if (T != NULL && T->weak) {
-    BCIns ins;
-    BCReg nlive;  /* Number of live slots at the loop head. */
-    TValue *o;
-    if (T->root != 0 && (T = traceref(J, T->root)) == NULL)
-      return;
-    ins = T->startins;
-    switch (bc_op(ins)) {
-    case BC_LOOP: case BC_ITERN:
-      nlive = bc_a(ins);
-      break;
-    case BC_FORL:
-      nlive = bc_a(ins) + FORL_EXT + 1;
-      break;
-    case BC_ITERL:  /* The preceding ITERC/ITERN has the result count. */
-      nlive = bc_a(ins) + bc_b(mref(T->startpc, const BCIns)[-1]) - 1;
-      break;
-    default:  /* Function, return or stitched start: no bound known. */
-      return;
+  if (T == NULL)
+    return;
+  if (T->root != 0 && (T = traceref(J, T->root)) == NULL)
+    return;
+  {
+    GCproto *pt = gco2pt(gcref(T->startpt));
+    const BCIns *startpc = mref(T->startpc, const BCIns);
+    const BCIns *bc = proto_bc(pt);
+    BCPos startpos = proto_bcpos(pt, startpc);
+    BCPos i, back = NO_JMP, bstart = startpos;
+    BCReg nlive = 0, fs = pt->framesize;
+    uint8_t rd[LJ_MAX_SLOTS], wr[LJ_MAX_SLOTS], ra[LJ_MAX_SLOTS];
+    BCReg s, top = (BCReg)(L->top - L->base);
+    BCOp sop = bc_op(T->startins);
+    if (top > fs) top = fs;
+    /* Find the loop back edge and the live lower bound of its control
+    ** slots. A trace starts at the first bytecode of the loop body, which
+    ** is not necessarily the loop instruction. */
+    if (sop >= BC_LOOP && sop <= BC_JLOOP) {
+      nlive = bc_a(T->startins);
+      bstart = startpos + 1;
     }
-    for (o = L->base + nlive; o < L->top; o++)
-      setnilV(o);
+    for (i = startpos + 1; i < pt->sizebc; i++) {
+      BCOp op = bc_op(bc[i]);
+      if (op >= BC_FORL && op <= BC_JFORL) {
+	back = i; nlive = bc_a(bc[i]) + FORL_EXT + 1; break;
+      }
+      if (op >= BC_ITERL && op <= BC_JITERL) {
+	back = i; nlive = bc_a(bc[i]) + 4; break;
+      }
+      if (op == BC_JMP) {
+	ptrdiff_t tgt = (ptrdiff_t)i + 1 + bc_j(bc[i]);
+	if (tgt <= (ptrdiff_t)startpos) {
+	  back = i;
+	  if (tgt >= 0 && bc_op(bc[tgt]) >= BC_LOOP && bc_op(bc[tgt]) <= BC_JLOOP)
+	    nlive = bc_a(bc[tgt]);
+	  break;
+	}
+      }
+      if (bc_isret(op)) return;  /* A return before any back edge: not a loop. */
+    }
+    if (back == NO_JMP) return;
+    memset(rd, 0, fs); memset(wr, 0, fs); memset(ra, 0, fs);
+    gc_jit_scan(pt, bstart, back + 1, rd, wr);
+    gc_jit_scan(pt, back + 1, pt->sizebc, ra, NULL);
+    for (s = 0; s < top; s++) {
+      GCobj *uv;
+      /* Slots at and above the loop's own registers are dead at the head.
+      ** Below them, a slot written in the body whose old value is read
+      ** neither in the body nor after it is dead there too (the trace drops
+      ** the store, so nothing else would overwrite it). */
+      int dead = s >= nlive || (wr[s] && !rd[s] && !ra[s]);
+      if (dead)
+	for (uv = gcref(L->openupval); uv != NULL; uv = gcnext(uv))
+	  if (uvval(gco2uv(uv)) == L->base + s) { dead = 0; break; }
+      if (dead) setnilV(L->base + s);
+    }
   }
 }
 

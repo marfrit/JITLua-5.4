@@ -519,6 +519,7 @@ err:
 TValue *lj_meta_cat(lua_State *L, TValue *top, int left)
 {
   int fromc = 0;
+  TValue *ftop = top;  /* Last operand: BC_CAT's operands end at the free register. */
   if (left < 0) { left = -left; fromc = 1; }
   do {
     if (!(tvisstr(top) || tvisnumber(top) || tvisi64(top) || tvisbuf(top)) ||
@@ -590,7 +591,7 @@ TValue *lj_meta_cat(lua_State *L, TValue *top, int left)
     }
   } while (left >= 1);
   if (LJ_UNLIKELY(G(L)->gc.total >= G(L)->gc.threshold)) {
-    if (!fromc) L->top = curr_topL(L);
+    if (!fromc) L->top = ftop + 1;  /* PUC's checkGC(L, one past the operands). */
     lj_gc_step(L);
   }
   return NULL;

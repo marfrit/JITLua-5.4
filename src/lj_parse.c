@@ -1088,6 +1088,9 @@ static void bcemit_binop(FuncState *fs, BinOpr op, ExpDesc *e1, ExpDesc *e2)
       expr_free(fs, e2);
       expr_free(fs, e1);
       e1->u.s.info = bcemit_ABC(fs, BC_CAT, 0, e1->u.s.info, e2->u.s.info);
+      lj_assertFS(bc_c(*bcptr(fs, e1)) == fs->freereg &&
+		  bc_b(*bcptr(fs, e1)) < bc_c(*bcptr(fs, e1)),
+		  "CAT operands not consecutive at the free register");
     }
     e1->k = VRELOCABLE;
   } else {
@@ -2139,13 +2142,10 @@ static void expr_table(LexState *ls, ExpDesc *e)
     ilp->ins = BCINS_AD(BC_TSETM, freg, const_num(fs, &en));
     setbc_b(&ilp[-1].ins, 0);
   }
-  if (pc == fs->pc-1) {  /* Make expr relocable if possible. */
-    e->u.s.info = pc;
-    fs->freereg--;
-    e->k = VRELOCABLE;
-  } else {
-    e->k = VNONRELOC;  /* May have been changed by expr_index. */
-  }
+  /* Keep a single TNEW/TDUP at the free register, as PUC does: the GC check
+  ** after the store then uses reg+1 as the live top. An assignment to a
+  ** local below the free register needs one MOV. */
+  e->k = VNONRELOC;  /* May have been changed by expr_index. */
   if (!t) {  /* Construct TNEW RD: hhhhhaaaaaaaaaaa. */
     BCIns *ip = &fs->bcbase[pc].ins;
     if (!needarr) narr = 0;
@@ -2215,9 +2215,12 @@ static void proto_finish(LexState *ls, ExpDesc *e, ptrdiff_t oldbase)
   pfs = ls->fs;
   pfs->bcbase = ls->bcstack + oldbase;  /* May have been reallocated. */
   pfs->bclim = (BCPos)(ls->sizebcstack - oldbase);
-  /* Store new prototype in the constant array of the parent. */
-  expr_init(e, VRELOCABLE,
-	    bcemit_AD(pfs, BC_FNEW, 0, const_gc(pfs, obj2gco(pt), LJ_TPROTO)));
+  /* Store new prototype in the constant array of the parent. The closure is
+  ** built at the parent's free register (PUC's codeclosure does the same), so
+  ** the GC check after the store can use reg+1 as the live top. */
+  expr_init(e, VNONRELOC, pfs->freereg);
+  bcemit_AD(pfs, BC_FNEW, pfs->freereg, const_gc(pfs, obj2gco(pt), LJ_TPROTO));
+  bcreg_reserve(pfs, 1);
   pfs->flags |= (uint8_t)flags;  /* Inherited flags. */
   if (!(pfs->flags & PROTO_CHILD)) {
     if (pfs->flags & PROTO_HAS_RETURN)

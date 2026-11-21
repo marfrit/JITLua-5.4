@@ -2619,7 +2619,7 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
 		 (int)(ir - as->ir) - REF_BIAS);
       asm_snap_prev(as);
       if (!ra_used(ir) && !ir_sideeff(ir) && (as->flags & JIT_F_OPT_DCE) &&
-	  !(T->weak && ir_isalloc(ir->o)))
+	  !ir_isalloc(ir->o))
 	continue;  /* Dead-code elimination can be soooo easy. */
       if (irt_isguard(ir->t))
 	asm_snap_prep(as);

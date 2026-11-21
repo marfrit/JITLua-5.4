@@ -161,14 +161,14 @@ GCfunc *lj_func_newL_empty(lua_State *L, GCproto *pt, GCtab *env)
   return fn;
 }
 
-/* Do a GC check and create a new Lua function with inherited upvalues. */
+/* Create a new Lua function with inherited upvalues. The GC check is done by
+** the caller (BC_FNEW) after the store, as PUC's OP_CLOSURE does. */
 GCfunc *lj_func_newL_gc(lua_State *L, GCproto *pt, GCfuncL *parent)
 {
   GCfunc *fn;
   GCRef *puv;
   MSize i, nuv;
   TValue *base;
-  lj_gc_check_fixtop(L);
   fn = func_newL(L, pt, &parent->envv);
   /* NOBARRIER: The GCfunc is new (marked white). */
   puv = parent->uvptr;

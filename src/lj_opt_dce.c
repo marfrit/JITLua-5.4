@@ -44,7 +44,7 @@ static void dce_propagate(jit_State *J)
     IRIns *ir = IR(ins);
     if (irt_ismarked(ir->t)) {
       irt_clearmark(ir->t);
-    } else if (!ir_sideeff(ir) && !(J->cur.weak && ir_isalloc(ir->o))) {
+    } else if (!ir_sideeff(ir) && !ir_isalloc(ir->o)) {
       *pchain[ir->o] = ir->prev;  /* Reroute original instruction chain. */
       lj_ir_nop(ir);
       continue;
@@ -61,10 +61,10 @@ static void dce_propagate(jit_State *J)
 ** the unused ones with a NOP. Note that compressing the IR to eliminate
 ** the NOPs does not pay off.
 **
-** A trace that reads a table which is weak at record time (GCtrace.weak)
-** keeps its GC allocations (ir_isalloc) alive: they grow the heap, so the
-** loop's GC check makes progress and the weak entry can be cleared.
-** Traces without weak tables keep full DCE.
+** GC allocations are kept in every trace, as PUC allocates them too: a
+** trace that drops an allocation would not grow the heap, so its loop's GC
+** check could not make progress and a waiting finalizer or weak entry would
+** wait forever (the old weak-only rule was the same argument, narrower).
 */
 void lj_opt_dce(jit_State *J)
 {

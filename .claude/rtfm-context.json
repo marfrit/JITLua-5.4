@@ -1,0 +1,6 @@
+{
+  "hookSpecificOutput": {
+    "hookEventName": "UserPromptSubmit",
+    "additionalContext": "RTFM MANDATE (AGENTS.md + CLAUDE.md, not optional). Before the first substantive tool call of this turn, if it touches semantics, a VM/JIT mechanism, a library function, the GC or a difference-list entry: (1) read docs/DIFFERENCES.md, docs/CHANGELOG-VM.md and the docs/notes/ design note for the area; (2) read tests/known-bad.tsv, tests/known-different.tsv, tests/t-guarded.tsv; (3) read PUC 5.4.9's SOURCE (tests/ref/dist), not only the manual -- where they disagree PUC's code is the reference; cite file:function on both sides; (4) state the EVIDENCE CLASS (manual|puc-code|measured-here) of every disposition; (5) an IMPL-DEFINED/FORK/PENDING label is not evidence -- IMPL-DEFINED means technically impossible, with the reason; (6) a negative that was never tried is not verified; (7) every semantic change also lives in the recorder and both backends: test mode B at opt levels 0-3, guard what the recorder checks; (8) context use is never a reason to drop work; compaction does not end the session."
+  }
+}

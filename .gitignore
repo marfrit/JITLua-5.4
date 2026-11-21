@@ -28,3 +28,7 @@ __pycache__/
 !tests/ref/dist/*.tar.gz
 !tests/capi/dist/*.tar.gz
 .dlcache/
+
+# operator-local agent rules and working notes: never committed
+CLAUDE.local.md
+docs/notes/WORKING-*.md

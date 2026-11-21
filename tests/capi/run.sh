@@ -127,6 +127,15 @@ else
 fi
 [ "$LSTREAM_RC" = 0 ]
 
+# The same kind of handle passed to the FFI as a FILE * (ffistream.c): it
+# converts to luaL_Stream.f like the library's own handles, interpreted and
+# compiled. The chunk checks itself; PUC has no FFI, so there is no oracle
+# run.
+$CC $CFLAGS -I"$SRC" "$ROOT/tests/capi/ffistream.c" -o "$OUT/ffistream" \
+  "$LIB" $LDFLAGS -lm -ldl
+echo "== ffistream (JITLua-5.4) =="
+timeout 60 "$OUT/ffistream"
+
 # Public-header probe for the module-facing macros (no <limits.h> include in
 # the probe itself) and the real third-party module that exposed the gap.
 # MODLUAJIT is the host interpreter used to load the modules; it defaults to

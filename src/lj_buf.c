@@ -242,7 +242,7 @@ SBuf *lj_buf_putstr_rep(SBuf *sb, GCstr *s, int32_t rep)
 /* Append one table.concat element in 5.4 lstrlib.c's conversion rules
 ** (strings as they are, integers and floats formatted). Returns 0 for a
 ** value that cannot be concatenated; *pw is the new write pointer. */
-static int lj_buf_puttab_elem(SBuf *sb, cTValue *o, MSize seplen, char **pw)
+int lj_buf_puttab_elem(SBuf *sb, cTValue *o, MSize seplen, char **pw)
 {
   char *w;
   if (tvisstr(o)) {

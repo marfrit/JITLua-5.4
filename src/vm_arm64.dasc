@@ -521,6 +521,14 @@ static void build_subroutines(BuildCtx *ctx)
   |   ldr GL, L->glref			// Setup pointer to global state.
   |->vm_unwind_ff_eh:			// Landing pad for external unwinder.
   |  bti_tailcall
+  |  // 5.4: a thread in the function slot is the anchor err_unwind left for
+  |  // the pending __close handlers of the protected call: run them first.
+  |  ldr BASE, L->base
+  |  ldr TMP0, [BASE, FRAME_FUNC]
+  |  asr ITYPE, TMP0, #47
+  |  cmn ITYPE, #-LJ_TTHREAD
+  |  beq >8
+  |->vm_unwind_ff_tail:		// Also the end of vm_tbcerr.
   |  ldr TMP2w, L->ccallnest		// Count out like vm_returnp.
   |  ldr TMP3w, L->ccallbase
   |  cmp TMP2w, TMP3w
@@ -545,6 +553,22 @@ static void build_subroutines(BuildCtx *ctx)
   |  sub RA, BASE, #8			// Results start at BASE-8.
   |    str TMP0, [BASE, #-8]		// Prepend false to error message.
   |  b ->vm_returnc
+  |
+  |8:
+  |   st_vmstate ST_INTERP
+  |  // Fallthrough.
+  |
+  |->vm_tbcerr:			// Error-path __close chain (5.4).
+  |  // L->base = anchor, error object at L->top-1.
+  |  mov CARG1, L
+  |  bl extern lj_meta_tbcerr		// (lua_State *L)
+  |  cbz CRET1, ->vm_unwind_ff_tail	// None left: pcall returns false, err.
+  |  ldr RB, L->base			// The anchor: old base for vmeta_call.
+  |  sub TMP1, CRET1, RB
+  |  add PC, TMP1, #FRAME_CONT		// Link to the anchor.
+  |  mov BASE, CRET1
+  |  mov NARGS8:RC, #16			// __close(value, err).
+  |  b ->vm_call_dispatch
   |
   |//-----------------------------------------------------------------------
   |//-- Grow stack for calls -----------------------------------------------
@@ -707,6 +731,8 @@ static void build_subroutines(BuildCtx *ctx)
   |.if FFI
   |    bls >1
   |.endif
+  |  cmp CARG1, #3			// Before the load: the anchor has no
+  |  beq ->cont_tbcerr			// function in its slot.
   |  ldr CARG3, LFUNC:CARG3->pc
   |  ldr KBASE, [CARG3, #PC2PROTO(k)]
   |  cmp CARG1, #2
@@ -744,6 +770,14 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov RA, CRET1			// Results, moved down.
   |  ldr BASE, L->base
   |  b <1
+  |
+  |->cont_tbcerr:			// Error-path __close returned (5.4).
+  |  // BASE = anchor, CARG4 = meta base = o+6; the error object is at o+1.
+  |  bti_jump
+  |  sub TMP0, CARG4, #32		// o+2.
+  |  str BASE, L->base
+  |  str TMP0, L->top
+  |  b ->vm_tbcerr
   |
   |->cont_cat:				// RA = resultptr, CARG4 = meta base
   |  bti_jump

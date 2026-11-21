@@ -110,8 +110,18 @@ LJ_STATIC_ASSERT((LJ_TFUNC ^ LJ_TTRACE) == 1u);
 
 /* Special continuations. LJ_CONT_TAILRET returns the results of a C function
 ** that was entered from a tail call to the frame that made the tail call.
+** LJ_CONT_TBCERR follows a __close handler on the error path of a pcall
+** called from Lua (lj_meta_tbcerr): its frame links to the protected
+** function's frame, whose function slot holds the thread as a dummy.
 */
-enum { LJ_CONT_TAILCALL, LJ_CONT_FFI_CALLBACK, LJ_CONT_TAILRET };
+enum { LJ_CONT_TAILCALL, LJ_CONT_FFI_CALLBACK, LJ_CONT_TAILRET,
+       LJ_CONT_TBCERR };
+/* The VM backends that run the error-path close chain (vm_tbcerr). */
+#if LJ_FR2 && (LJ_TARGET_X64 || LJ_TARGET_ARM64)
+#define LJ_TBCERR_CHAIN		1
+#else
+#define LJ_TBCERR_CHAIN		0
+#endif
 
 #if LJ_FR2
 #define frame_contpc(f)		(frame_pc((f)-2))

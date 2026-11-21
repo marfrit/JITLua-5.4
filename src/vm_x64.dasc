@@ -553,6 +553,14 @@ static void build_subroutines(BuildCtx *ctx)
   |->vm_unwind_ff_eh:			// Landing pad for external unwinder.
   |  endbr
   |  mov L:RB, SAVE_L
+  |  // 5.4: a thread in the function slot is the anchor err_unwind left for
+  |  // the pending __close handlers of the protected call: run them first.
+  |  mov BASE, L:RB->base
+  |  mov ITYPE, [BASE-16]
+  |  sar ITYPE, 47
+  |  cmp ITYPEd, LJ_TTHREAD
+  |  je >8
+  |->vm_unwind_ff_tail:		// Also the end of vm_tbcerr. RB = L.
   |  mov TMPRd, L:RB->ccallnest		// Count out like vm_returnp.
   |  mov ITYPEd, L:RB->ccallbase
   |  cmp ITYPEd, TMPRd			// Carry if ccallbase < ccallnest.
@@ -581,6 +589,26 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov RA, -16			// Results start at BASE+RA = BASE-16.
   |  set_vmstate INTERP
   |  jmp ->vm_returnc			// Increments RD/MULTRES and returns.
+  |
+  |8:
+  |  mov DISPATCH, L:RB->glref		// Setup pointer to dispatch table.
+  |  add DISPATCH, GG_G2DISP
+  |  set_vmstate INTERP
+  |  // Fallthrough.
+  |
+  |->vm_tbcerr:			// Error-path __close chain (5.4).
+  |  // RB = L, L->base = anchor, error object at L->top-1.
+  |  mov CARG1, L:RB
+  |  call extern lj_meta_tbcerr		// (lua_State *L)
+  |  test RC, RC
+  |  jz ->vm_unwind_ff_tail		// None left: pcall returns false, err.
+  |  mov BASE, L:RB->base		// The anchor.
+  |  mov RA, RC				// New base: func/args below and at RA.
+  |  sub RC, BASE
+  |  lea PC, [RC+FRAME_CONT]		// Link to the anchor.
+  |  mov KBASE, RA			// Not the CALLT hint (vmeta_call).
+  |  mov NARGS:RDd, 2+1			// __close(value, err).
+  |  jmp ->vm_call_dispatch
   |
   |//-----------------------------------------------------------------------
   |//-- Grow stack for calls -----------------------------------------------
@@ -764,6 +792,8 @@ static void build_subroutines(BuildCtx *ctx)
   |.endif
   |  cmp RA, 2
   |  je ->cont_tailret
+  |  cmp RA, 3
+  |  je ->cont_tbcerr
   |  mov LFUNC:KBASE, [BASE-16]
   |  cleartp LFUNC:KBASE
   |  mov KBASE, LFUNC:KBASE->pc
@@ -805,6 +835,15 @@ static void build_subroutines(BuildCtx *ctx)
   |  call extern lj_dispatch_tailret	// (lua_State *L, TValue *res, int n)
   |  mov BASE, L:RB->base		// Results in RC, moved down.
   |  jmp <1
+  |
+  |->cont_tbcerr:			// Error-path __close returned (5.4).
+  |  // BASE = anchor, RB = meta base = o+6; the error object is at o+1.
+  |  endbr
+  |  lea RA, [RB-32]			// o+2.
+  |  mov L:RB, SAVE_L
+  |  mov L:RB->base, BASE
+  |  mov L:RB->top, RA
+  |  jmp ->vm_tbcerr
   |
   |->cont_cat:				// BASE = base, RC = result, RB = mbase
   |  endbr

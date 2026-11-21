@@ -52,7 +52,7 @@ extern double __divdf3(double a, double b);
   _(lj_meta_bitop) \
   _(lj_meta_call) _(lj_meta_cat) _(lj_meta_comp) _(lj_meta_equal) \
   _(lj_meta_for) _(lj_meta_istype) _(lj_meta_len) _(lj_meta_tget) \
-  _(lj_meta_tset) _(lj_state_growstack) _(lj_strfmt_number) \
+  _(lj_meta_tset) _(lj_meta_tbcerr) _(lj_state_growstack) _(lj_strfmt_number) \
   _(lj_str_new) _(lj_tab_dup) _(lj_tab_get) _(lj_tab_getinth) _(lj_tab_len) \
   _(lj_tab_new) _(lj_tab_newkey) _(lj_tab_next) _(lj_tab_reasize) \
   _(lj_tab_setinth) _(lj_buf_putstr_reverse) _(lj_buf_putstr_lower) \

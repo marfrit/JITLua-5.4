@@ -687,6 +687,13 @@ target x86_64 (GC64) and arm64.
   atomic phase free it (`table.concat(p, "", 1, 50)` wrong in 300 of 300
   runs on both arches). Plain tables keep the temp-buffer fast path, which
   calls no metamethod (`tests/d54/tbl_08_concat_mm_buffer.lua`).
+- `table.concat` calls `__len` first, also when an end is given, and before
+  the separator and the bounds are checked (ltablib.c `tconcat`: `aux_getn`,
+  then `luaL_optlstring`/`luaL_optinteger`): a `__len` returning 1.5 raises
+  "object length is not an integer" with an explicit end, and a bad
+  separator is reported after one `__len` call. For a plain table the raw
+  length is not observable and is still taken only without an end
+  (`tests/d54/tbl_10_concat_len_order.lua`).
 
 ## Known JIT/performance rows (not semantic divergences)
 

@@ -663,6 +663,21 @@ target x86_64 (GC64) and arm64.
   `fs_fixup_bc` threads a JMP to a JMP through to the final target (up to
   eight hops) where that distance fits the 16-bit operand
   (`tests/d54/parse_05_jump_chains.lua`).
+- Operand names as PUC's symbolic execution gives them (ldebug.c). A name
+  read through a local or an upvalue named `_ENV` is a global (`isEnv`):
+  `local _ENV = {x = {}}; a = a + 1` reports "(global 'a')", also with a
+  key past the constant operand (`TGETV`); a method call stays a method.
+  A slot whose last write lies inside the range of an earlier forward jump
+  that lands after the write and at or before the faulting instruction has
+  no name (`findsetreg`/`filterpc` with `jmptarget`): `(aaa or aaa)()`,
+  `(f or g)()` and `x = (aaa or aaa) + (aaa and aaa)` name nothing, while
+  locals, finished branches and loops keep their names.
+  `lj_debug_slotname` gets `debug_isenv` for `TGETS`/`TGETV` and
+  `debug_condwrite` (forward `JMP`/`UCLO` before the writer) before it
+  names a writer; a `MOV` moves the use point like PUC's `MOVE` recursion
+  (`tests/d54/err_16_operand_names.lua`). `errors.lua` now passes every
+  assertion; only its printed stack-overflow depth differs (rows in
+  `tests/known-different.tsv`).
 
 ## Known JIT/performance rows (not semantic divergences)
 

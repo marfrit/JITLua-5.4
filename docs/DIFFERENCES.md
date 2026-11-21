@@ -117,27 +117,6 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   against PUC's `lua.h` and linked against JITLua reads the wrong bytes and must
   be rebuilt against JITLua's headers (see the source-compatible FORK row
   above).
-- `IMPL-DEFINED` The variable named in an operand error message. LuaJIT walks
-  the bytecode backwards from the faulting instruction to the instruction that
-  last wrote the slot (`lj_debug_slotname` in `src/lj_debug.c`); PUC runs its
-  own symbolic execution (`getobjname`/`findsetreg`/`filterpc` in `ldebug.c`).
-  Two visible consequences, measured against PUC 5.4.9:
-  a computed operand keeps its name here, where PUC refuses to name a register
-  it cannot prove was set unconditionally — `aaa = {}; (aaa or aaa)()` is
-  "attempt to call a table value (global 'aaa')" here and "attempt to call a
-  table value" in PUC (the same for
-  `x = (aaa or aaa) + (aaa and aaa)`, and for `local f, g; (f or g)()`);
-  and a name read through a *local* named `_ENV` is a field of that local here,
-  where PUC calls the same access a global — `local _ENV = {x = {}}; a = a + 1`
-  is "attempt to perform arithmetic on a nil value (field 'a')" here and
-  "(global 'a')" in PUC (its `isEnv`), while a free name that resolves to the
-  function's environment table still reads "global" on both sides.
-  Only the decoration in brackets differs: the error class, the type text and
-  the value reported are the same. PUC's suite checks these lines in
-  `errors.lua` (176, 190, 191 and 301, the last one a `local _ENV = _ENV`
-  with a key past the constant operand): its mode A row in
-  `tests/known-different.tsv`.
-
 - `IMPL-DEFINED` How deep syntactic nesting may go. PUC has no fixed nesting
   limit: its parser recurses and the C-call bound (`LUAI_MAXCCALLS`, 200) stops
   it, so `load("return " .. string.rep("(", 500) .. "2" .. …)` fails with

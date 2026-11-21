@@ -1433,8 +1433,18 @@ static void gc_jit_scan(GCproto *pt, BCPos from, BCPos to,
       break;
     default: break;
     }
-    /* Loop control slots are read by the LOOP/FORL/ITERL bytecode itself. */
-    if (op >= BC_FORL && op <= BC_JFORL) {
+    /* A closure reads the parent slots it captures (as upvalues). */
+    if (op == BC_FNEW) {
+      GCproto *cpt = gco2pt(proto_kgc(pt, ~(ptrdiff_t)bc_d(ins)));
+      const uint16_t *uv = proto_uv(cpt);
+      MSize j;
+      for (j = 0; j < cpt->sizeuv; j++)
+	if ((uv[j] & PROTO_UV_LOCAL)) RD((BCReg)(uv[j] & 0xff));
+    }
+    /* Loop control slots are read by the FORI/FORL/ITERL bytecode itself. */
+    if (op == BC_FORI || op == BC_JFORI) {
+      for (sr = bc_a(ins); sr < bc_a(ins) + 3; sr++) RD(sr);
+    } else if (op >= BC_FORL && op <= BC_JFORL) {
       for (e = bc_a(ins) + FORL_EXT + 1, sr = bc_a(ins); sr < e; sr++) RD(sr);
     } else if (op >= BC_ITERL && op <= BC_JITERL) {
       for (e = bc_a(ins) + 4, sr = bc_a(ins); sr < e; sr++) RD(sr);
@@ -1503,13 +1513,17 @@ static void gc_jit_cleardead(global_State *g, lua_State *L, TraceNo traceno)
     if (back == NO_JMP) return;
     memset(rd, 0, fs); memset(wr, 0, fs); memset(ra, 0, fs);
     gc_jit_scan(pt, bstart, back + 1, rd, wr);
+    /* Reads outside the body: after the back edge, and before the start pc
+    ** (an enclosing loop runs that code again after this loop exits). */
+    gc_jit_scan(pt, 0, bstart, ra, NULL);
     gc_jit_scan(pt, back + 1, pt->sizebc, ra, NULL);
     for (s = 0; s < top; s++) {
       GCobj *uv;
       /* Slots at and above the loop's own registers are dead at the head.
-      ** Below them, a slot written in the body whose old value is read
-      ** neither in the body nor after it is dead there too (the trace drops
-      ** the store, so nothing else would overwrite it). */
+      ** Below them, a slot written in the body and read by no bytecode of
+      ** the function (and captured by no closure) is dead there too: the
+      ** trace keeps the stored value in a register, so the stack slot still
+      ** holds the stale one. */
       int dead = (sop >= BC_LOOP && sop <= BC_JLOOP && s >= nlive) ||
 	 (wr[s] && !rd[s] && !ra[s]);
       if (dead)

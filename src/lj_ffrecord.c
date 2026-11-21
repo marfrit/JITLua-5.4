@@ -618,7 +618,15 @@ static void LJ_FASTCALL recff_ipairs_aux(jit_State *J, RecordFFData *rd)
     ix.key = lj_opt_narrow_toint(J, J->base[1]);
     J->base[0] = ix.key = emitir(IRTI(IR_ADD), ix.key, lj_ir_kint(J, 1));
     J->base[1] = lj_record_idx(J, &ix);
-    rd->nres = tref_isnil(J->base[1]) ? 0 : 2;
+    if (tref_isnil(J->base[1])) {
+      /* 5.4 ipairsaux returns the one nil lua_geti pushed, like the
+      ** interpreter (fff_resnil). Recording no result left the slot of a
+      ** call that keeps every result with its stale content. */
+      J->base[0] = TREF_NIL;
+      rd->nres = 1;
+    } else {
+      rd->nres = 2;
+    }
   } else {  /* 5.4 accepts any value; the first step raises the index error. */
     lj_trace_err(J, LJ_TRERR_BADTYPE);
   }

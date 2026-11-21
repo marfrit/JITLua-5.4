@@ -578,6 +578,16 @@ target x86_64 (GC64) and arm64.
   `false, "stack overflow"`; PUC returns `false, "error in error handling"`
   (`tests/d54/err_11_errerr_msg.lua`; the PUC suite file cstack.lua checks
   this on line 29).
+- Names of values read through a table index. A constant integer key that
+  fits PUC's `OP_GETI` (0..255, here `TGETB`) gives "field 'integer index'",
+  any other key in a register (`TGETV`) gives "field '?'" unless it is a
+  string constant loaded by `KSTR` (a key past the constant operand), which
+  gives its text, or "method" for such a method call (ldebug.c `getobjname`,
+  `rname`, `rkname`). `lj_debug_slotname` returned no name for both, so error
+  messages had no variable info and `debug.getinfo(level, "n")` (also in a
+  call hook) had no name for `t[2]()`. The parser now folds `-0` to the
+  integer constant 0 (only the float `-0.0` must stay unfolded), so `t[-0]`
+  is an integer-key index as in PUC (`tests/d54/debug_10_index_names.lua`).
 
 ## Known JIT/performance rows (not semantic divergences)
 

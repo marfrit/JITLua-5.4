@@ -189,9 +189,6 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   see them as Lua frames (a call event with `what == "Lua"`, line events
   inside them), and tracebacks list them as Lua functions. Turning them into
   C functions needs recorder entries so the JIT keeps inlining them.
-- `PENDING` A function called through a constant integer index (`t[2]()`)
-  has no name in `debug.getinfo(level, "n")` (also inside a hook); PUC
-  5.4.9 calls it "integer index" (`ldebug.c` getobjname, `OP_GETI`).
 - `IMPL-DEFINED` How many collection cycles a program triggers. The 5.4 manual
   leaves the pacing to the implementation, and this collector's pause, step
   work and accounting differ (see the basic-step and GC policy rows). The

@@ -67,6 +67,7 @@ LJ_FUNC int lj_meta_forkind(lua_State *L, cTValue *o, TValue *out);
 LJ_FUNCA const BCIns * LJ_FASTCALL lj_meta_forclip(lua_State *L, TValue *o);
 LJ_FUNC int lj_meta_forview(lua_State *L, TValue *o, MSize k, TValue *dst);
 LJ_FUNC void lj_meta_forunclip(lua_State *L, TValue *o);
+LJ_FUNC int lj_meta_forsetidx(lua_State *L, TValue *o, cTValue *v);
 #if LJ_HASJIT
 LJ_FUNCA int lj_meta_forclipi(lua_State *L, int32_t slot, int32_t init,
 			      int32_t step, int64_t limit);

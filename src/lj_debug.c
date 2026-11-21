@@ -663,10 +663,14 @@ LUA_API const char *lua_setlocal(lua_State *L, const lua_Debug *ar, int n)
   if (name) {
     if (forbase) {  /* A clipped loop takes its wide form first. */
       ptrdiff_t ofs = savestack(L, o);
+      ptrdiff_t fofs = savestack(L, forbase);
       lj_meta_forunclip(L, forbase);
       o = restorestack(L, ofs);
+      forbase = restorestack(L, fofs);
     }
-    copyTV(L, o, L->top-1);
+    /* An int32 index of a loop in the wide form is kept as a float. */
+    if (!(forbase && o == forbase && lj_meta_forsetidx(L, o, L->top-1)))
+      copyTV(L, o, L->top-1);
   }
   L->top--;
   return name;

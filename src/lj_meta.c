@@ -1214,6 +1214,25 @@ int lj_meta_forclipn(lua_State *L, int32_t slot, int32_t init, int32_t step,
 }
 #endif
 
+/* debug.setlocal of FOR_IDX of the numeric loop at o (after
+** lj_meta_forunclip): an int32 index written into an integer loop whose limit
+** or step is not an int32 is stored as a float, the form such a loop keeps
+** its int32 index in (for_setidx), so the loop continues from the new index
+** as in PUC instead of on the int32 path. Returns 1 if the slot was
+** written. */
+int lj_meta_forsetidx(lua_State *L, TValue *o, cTValue *v)
+{
+  UNUSED(L);
+  if (tvisint(v) && !tvisi47w(v) &&
+      for_isint(o+FORL_STOP) && for_isint(o+FORL_STEP) &&
+      !(tvisint(o+FORL_STOP) && !tvisi47w(o+FORL_STOP) &&
+	tvisint(o+FORL_STEP) && !tvisi47w(o+FORL_STEP))) {
+    setnumV(o, (lua_Number)intV(v));
+    return 1;
+  }
+  return 0;
+}
+
 int LJ_FASTCALL lj_meta_for(lua_State *L, TValue *o)
 {
   int64_t init, step;

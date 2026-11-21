@@ -2099,12 +2099,26 @@ LUA_API int lua_gc(lua_State *L, int what, ...)
       g->gc.debt = 0;  /* do a basic step */
       res = lj_gc_step(L) > 0;
     } else {  /* add 'data' to the total debt */
-      debt = (int64_t)data * 1024 + (int64_t)g->gc.debt;
-      g->gc.debt = debt > 0 ? (GCSize)debt : 0;
-      /* A negative step only lowers the debt: PUC's luaC_checkGC then runs no
-      ** collector work when the debt stays non-positive, and the result is
-      ** false because no cycle ended. */
-      if (debt > 0) res = lj_gc_step(L) > 0;
+      /* PUC's GCdebt: what is owed plus the allocation beyond the threshold
+      ** (negative while below it). */
+      int64_t owed = (int64_t)data * 1024 + (int64_t)g->gc.debt;
+      debt = owed + ((int64_t)g->gc.total - (int64_t)g->gc.threshold);
+      if (debt > 0) {
+	/* Worked off before the call returns (lgc.c incstep loops while the
+	** debt lasts): one lj_gc_step pays GCSTEPSIZE bytes of debt, so 'data'
+	** KB take about data*1024/GCSTEPSIZE steps; the loop ends early with
+	** the cycle. */
+	int64_t n = (debt + GCSTEPSIZE - 1) / GCSTEPSIZE;
+	g->gc.debt = owed > 0 ? (GCSize)owed : 0;
+	do {
+	  if (lj_gc_step(L) > 0) { res = 1; break; }
+	} while (--n > 0);
+      } else {
+	/* A negative step only lowers the debt: no collector work, false, and
+	** the next collection moves out by that much (luaE_setdebt). */
+	g->gc.debt = 0;
+	g->gc.threshold = g->gc.total + (GCSize)(-debt);
+      }
     }
     g->gc.stopped = stopped;
     break;

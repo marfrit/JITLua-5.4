@@ -14,6 +14,9 @@ enum {
 };
 
 /* Bitmasks for marked field of GCobj. */
+/* Debt paid by one lj_gc_step (also used by lua_gc LUA_GCSTEP). */
+#define GCSTEPSIZE	1024u
+
 #define LJ_GC_WHITE0	0x01
 #define LJ_GC_WHITE1	0x02
 #define LJ_GC_BLACK	0x04

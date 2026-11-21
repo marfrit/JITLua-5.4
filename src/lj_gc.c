@@ -339,7 +339,6 @@ static void gcstats_cycle_hook(global_State *g)
 #define GCSTATS_ALLOC_CLOSE() ((void)0)
 #endif
 
-#define GCSTEPSIZE	1024u
 #define GCSWEEPMAX	40
 #define GCSWEEPCOST	10
 #define GCFINALIZECOST	100
@@ -1327,6 +1326,16 @@ static size_t gc_onestep(lua_State *L)
 }
 
 /* Perform a limited amount of incremental GC steps. */
+/* End of a cycle: the next one starts when the heap grows by 'pause'.
+** 5.4 lgc.c setpause: the debt is clamped to <= 0, i.e. the threshold never
+** lies below the current total, and nothing is owed into the next cycle. */
+static void gc_setpause(global_State *g)
+{
+  GCSize t = (g->gc.estimate/100) * (g->gc.pause * 4);
+  g->gc.threshold = t > g->gc.total ? t : g->gc.total;
+  g->gc.debt = 0;
+}
+
 int LJ_FASTCALL lj_gc_step(lua_State *L)
 {
   global_State *g = G(L);
@@ -1344,7 +1353,7 @@ int LJ_FASTCALL lj_gc_step(lua_State *L)
   do {
     lim -= (GCSize)gc_onestep(L);
     if (g->gc.state == GCSpause) {
-      g->gc.threshold = (g->gc.estimate/100) * (g->gc.pause * 4);
+      gc_setpause(g);
       g->vmstate = ostate;
       GCSTATS_STEP_RET(1);  /* Finished a GC cycle. */
     }
@@ -1586,7 +1595,7 @@ void lj_gc_fullgc(lua_State *L)
   /* Now perform a full GC. */
   g->gc.state = GCSpause;
   do { gc_onestep(L); } while (g->gc.state != GCSpause);
-  g->gc.threshold = (g->gc.estimate/100) * (g->gc.pause * 4);
+  gc_setpause(g);
   g->vmstate = ostate;
 #ifdef LUAJIT_GC_STATS
   gcstats_pause();

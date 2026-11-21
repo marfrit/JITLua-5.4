@@ -943,6 +943,16 @@ target x86_64 (GC64) and arm64.
   after. `tests/d54/load_03_many_functions.lua` (mode A),
   `tests/capi/loadstack.c` and the REPL comparison in `tests/capi/run.sh`
   (same source and input against PUC 5.4.9, outputs identical).
+- The compiled `ipairs` iterator returned no value at the end of the
+  iteration. The interpreter returns the one `nil` of PUC's `ipairsaux`
+  (`lbaselib.c`: `return (lua_geti(L, 1, i) == LUA_TNIL) ? 1 : 2`), the
+  recorder (`recff_ipairs_aux`) still recorded zero results. In a `for` loop
+  that is the same, but a direct call that keeps every result read the stale
+  content of the result slot: `local aux = ipairs({})`, then `{aux(t, #t)}`
+  in a compiled loop was a table with one element (a function) instead of
+  the empty table, on x86_64 and aarch64 at `-O0`..`-O3`, and the assert
+  build stopped in `rec_check_slots`. The recorder records the `nil`.
+  `tests/d54/iter_03_ipairs_aux_results.lua` (mode B, all opt levels).
 
 ## Known JIT/performance rows (not semantic divergences)
 

@@ -733,6 +733,18 @@ target x86_64 (GC64) and arm64.
   the best first; it now emits `IR_MIN/IR_MAX(arg, best)`. Integer lists are
   unaffected (equal integers are the same value)
   (`tests/d54/math_04_minmax_jit_order.lua`).
+- `string.format` raises its errors in PUC's order (lstrlib.c
+  `str_format`): a missing argument ("no value") before the conversion is
+  parsed, so `("%5")` and `("%")` report the argument; for `d i u o x X e E
+  f g G` the argument check before the specification check (`("%#d", {})`
+  is "number expected, got table"), for `c a A p` the specification first.
+  A format that ends after '%' or its flags and width is "invalid
+  conversion '%5' to 'format'", the message of PUC's empty conversion.
+  `%c` casts the integer to `int` like PUC (`2^32+65` is "A"; it was
+  clamped to `0x7fffffff`), with the exact integer check of
+  `luaL_checkinteger`; the recorder now traces `%c` only for int32
+  arguments, since its float conversion neither checked nor cut the value
+  (`tests/d54/fmt_05_error_order.lua`).
 
 ## Known JIT/performance rows (not semantic divergences)
 

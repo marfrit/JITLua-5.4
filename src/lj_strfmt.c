@@ -967,43 +967,79 @@ GCstr * LJ_FASTCALL lj_strfmt_tolstrres(lua_State *L)
 const char *lj_strfmt_pushvf(lua_State *L, const char *fmt, va_list argp)
 {
   SBuf *sb = lj_buf_tmp_(L);
-  FormatState fs;
-  SFormat sf;
   GCstr *str;
-  lj_strfmt_init(&fs, fmt, (MSize)strlen(fmt));
-  while ((sf = lj_strfmt_parse(&fs)) != STRFMT_EOF) {
-    switch (STRFMT_TYPE(sf)) {
-    case STRFMT_LIT:
-      lj_buf_putmem(sb, fs.str, fs.len);
-      break;
-    case STRFMT_INT:
-      lj_strfmt_putfxint(sb, sf, va_arg(argp, int32_t));
-      break;
-    case STRFMT_UINT:
-      lj_strfmt_putfxint(sb, sf, va_arg(argp, uint32_t));
-      break;
-    case STRFMT_NUM:
-      lj_strfmt_putfnum(sb, STRFMT_G14, va_arg(argp, lua_Number));
-      break;
-    case STRFMT_STR: {
-      const char *s = va_arg(argp, char *);
-      if (s == NULL) s = "(null)";
-      lj_buf_putmem(sb, s, (MSize)strlen(s));
-      break;
-      }
-    case STRFMT_CHAR:
-      lj_buf_putb(sb, va_arg(argp, int));
-      break;
-    case STRFMT_PTR:
-      lj_strfmt_putptr(sb, va_arg(argp, void *));
-      break;
-    case STRFMT_ERR:
-    default:
-      lj_buf_putb(sb, '?');
-      lj_assertL(0, "bad string format near offset %d", fs.len);
-      break;
+  const char *seg = fmt, *end = fmt + strlen(fmt);
+  /* Lua 5.4 lobject.c luaO_pushvfstring has two conversions that are not
+  ** string.format conversions, so the shared parser rejects them: '%I', a
+  ** lua_Integer (passed as LUAI_UACINT), and '%U', a code point (passed as
+  ** long) written as UTF-8. The format is cut at each of them; the pieces in
+  ** between go through the parser. */
+  do {
+    FormatState fs;
+    SFormat sf;
+    const char *p = seg;
+    int spec = 0;
+    while (p < end) {
+      if (*p != '%') { p++; continue; }
+      if (p+1 < end && (p[1] == 'I' || p[1] == 'U')) { spec = p[1]; break; }
+      p += (p+1 < end) ? 2 : 1;  /* Skips '%%' as well. */
     }
-  }
+    lj_strfmt_init(&fs, seg, (MSize)(p - seg));
+    seg = spec ? p+2 : end;
+    while ((sf = lj_strfmt_parse(&fs)) != STRFMT_EOF) {
+      switch (STRFMT_TYPE(sf)) {
+      case STRFMT_LIT:
+	lj_buf_putmem(sb, fs.str, fs.len);
+	break;
+      case STRFMT_INT:
+	lj_strfmt_putfxint(sb, sf, va_arg(argp, int32_t));
+	break;
+      case STRFMT_UINT:
+	lj_strfmt_putfxint(sb, sf, va_arg(argp, uint32_t));
+	break;
+      case STRFMT_NUM:
+	lj_strfmt_putfnum(sb, STRFMT_G14, va_arg(argp, lua_Number));
+	break;
+      case STRFMT_STR: {
+	const char *s = va_arg(argp, char *);
+	if (s == NULL) s = "(null)";
+	lj_buf_putmem(sb, s, (MSize)strlen(s));
+	break;
+	}
+      case STRFMT_CHAR:
+	lj_buf_putb(sb, va_arg(argp, int));
+	break;
+      case STRFMT_PTR:
+	lj_strfmt_putptr(sb, va_arg(argp, void *));
+	break;
+      case STRFMT_ERR:
+      default:
+	lj_buf_putb(sb, '?');
+	lj_assertL(0, "bad string format near offset %d", fs.len);
+	break;
+      }
+    }
+    if (spec == 'I') {
+      lj_strfmt_putfxint(sb, STRFMT_INT, (uint64_t)va_arg(argp, LUAI_UACINT));
+    } else if (spec == 'U') {
+      /* lobject.c luaO_utf8esc: up to 6 bytes, code points below 2^31. */
+      unsigned long x = (unsigned long)va_arg(argp, long);
+      char buf[8];
+      int n = 1;
+      if (x < 0x80) {
+	buf[7] = (char)x;
+      } else {
+	unsigned int mfb = 0x3f;  /* Maximum that fits in the first byte. */
+	do {
+	  buf[8 - (n++)] = (char)(0x80 | (x & 0x3f));
+	  x >>= 6;
+	  mfb >>= 1;
+	} while (x > mfb);
+	buf[8 - n] = (char)((~mfb << 1) | x);
+      }
+      lj_buf_putmem(sb, buf + 8 - n, (MSize)n);
+    }
+  } while (seg < end);
   str = lj_buf_str(L, sb);
   setstrV(L, L->top, str);
   incr_top(L);

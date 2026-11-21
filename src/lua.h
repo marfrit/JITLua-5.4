@@ -255,9 +255,11 @@ LUA_API int   (lua_pcallk) (lua_State *L, int nargs, int nresults, int errfunc,
                             lua_KContext ctx, lua_KFunction k);
 LUA_API int   (lua_cpcall) (lua_State *L, lua_CFunction func, void *ud);
 LUA_API int   (lua_load) (lua_State *L, lua_Reader reader, void *dt,
-                                        const char *chunkname);
+                                        const char *chunkname,
+                                        const char *mode);
 
-LUA_API int (lua_dump) (lua_State *L, lua_Writer writer, void *data);
+LUA_API int (lua_dump) (lua_State *L, lua_Writer writer, void *data,
+                                        int strip);
 
 
 /*

@@ -114,13 +114,6 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   their return event is fired from a note the call event leaves, and no call
   event is dispatched without the call mask. With `"cr"` the events equal
   PUC's (`tests/d54/debug_07_tostring_hook.lua`).
-- `PENDING` `debug.traceback` of a stack overflow prints no numbered Lua
-  frames here (`xpcall(g, debug.traceback, 1)` yields a message without
-  `:line:` entries), while PUC prints the repeated recursion frames at the
-  overflowing line and then the handler. The recursion depth before the
-  overflow also differs by design (32711 calls here, 999962 in PUC); the suite
-  reads the frame line numbers at `errors.lua:528` in `errors.lua`, one of the
-  files the harness skips.
 - `PENDING` Return hook of a function that ends in a tail call to a C
   function: PUC calls the return hook for the Lua caller after the C function
   returns; here the caller returns through the continuation without a hook

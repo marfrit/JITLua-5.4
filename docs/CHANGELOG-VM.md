@@ -529,3 +529,24 @@ target x86_64 (GC64) and arm64.
   report it; the stress test `tests/d54/close_07_unwind_chain.lua` runs the
   shape in fresh coroutines after deep recursion, and the deterministic
   evidence is the file-scope chain described above.
+- The message handler of a stack overflow had too little stack to run in, and
+  the overflowing frame was destroyed before the message was built. Two parts:
+  `lj_state.c` gave the overdrawn error window `LJ_STACK_ERREX` = 51 slots, so
+  `debug.traceback` -- which walks the (huge) stack and concatenates -- asked
+  for more stack while the limit was still overdrawn, fell into the abort
+  branch of `lj_state_growstack` and the error degenerated to "error in error
+  handling" with no frames at all. PUC reserves 200 slots for exactly this
+  (`ldo.c ERRORSTACKSIZE = LUAI_MAXSTACK + 200`); `LJ_STACK_ERREX` now carries
+  them. And the dummy frame that replaces a Lua frame reaching past the window
+  was installed *before* the resize, although the wider window usually fits
+  that frame: the dummy hides the function slot, so `lj_debug_addloc_rt` found
+  no line ("stack overflow" without the PUC "file:line: " prefix) and
+  `lj_debug_frame` skipped the frame, which dropped it from the traceback. The
+  dummy is installed only when the frame still violates the window after the
+  resize. Measured on x86_64 and aarch64: the interpreter went from
+  "error in error handling" / 19 unnumbered frames to PUC's message with the
+  location and 20 frames, in both JIT arms; the interpreter arm had also lost
+  the traceback after three plain overflows. `tests/d54/err_14_stkov_traceback.lua`
+  prints the message shape (location, frame count, handler still runnable); it
+  was red in mode A and mode B before the change. `docs/DIFFERENCES.md` keeps
+  only the recursion depth itself, which is an implementation limit.

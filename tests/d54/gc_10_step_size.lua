@@ -10,7 +10,8 @@ collectgarbage("setpause", 200)
 local function dosteps(siz)
   collectgarbage()
   local a = {}
-  for i = 1, 100 do a[i] = {{}}; local b = {} end
+  local g = {}  -- the garbage escapes, so the JIT cannot sink it away
+  for i = 1, 100 do a[i] = {{}}; g[1] = {} end
   local x = collectgarbage("count")
   local i = 0
   repeat i = i + 1 until collectgarbage("step", siz) or i > 100000

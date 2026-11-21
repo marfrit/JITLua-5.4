@@ -1566,7 +1566,8 @@ static void gola_fixup(LexState *ls, FuncScope *bl)
 	setgcrefnull(v->name);  /* Invalidate label that goes out of scope. */
 	if (name != NAME_BREAK && name != NAME_CONT) ls->nlabel--;
 	for (vg = v+1; vg < ve; vg++)  /* Resolve pending backward gotos. */
-	  if (strref(vg->name) == name && gola_isgoto(vg)) {
+	  if (gcref(vg->name) != NULL && strref(vg->name) == name &&
+	      gola_isgoto(vg)) {
 	    if ((bl->flags&(FSCOPE_UPVAL|FSCOPE_TBC)) && vg->slot > v->slot)
 	      gola_close(ls, vg);
 	    gola_patch(ls, vg, v);

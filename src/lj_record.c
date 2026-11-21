@@ -853,8 +853,13 @@ static void rec_for_loop(jit_State *J, const BCIns *fori, ScEvEntry *scev,
   BCReg ra = bc_a(*fori);
   cTValue *tv = &J->L->base[ra];
   TRef idx = J->base[ra+FORL_IDX];
+  /* The loop kind follows PUC 5.4's rule, which lj_meta_for has already
+  ** applied to the slots: an integer loop has int32 slots (small kind), a
+  ** float loop has float slots. Do not narrow integral float values to an
+  ** int32 loop: PUC keeps the control variable a float there. */
   IRType t = idx ? tref_type(idx) :
-	     (init || LJ_DUALNUM) ? lj_opt_narrow_forl(J, tv) : IRT_NUM;
+	     (LJ_DUALNUM && tvisint(&tv[FORL_IDX]) &&
+	      tvisint(&tv[FORL_STEP])) ? IRT_INT : IRT_NUM;
   int mode = IRSLOAD_INHERIT +
     ((!LJ_DUALNUM || tvisint(tv) == (t == IRT_INT)) ? IRSLOAD_READONLY : 0);
   TRef stop = fori_arg(J, fori, ra+FORL_STOP, t, mode);
@@ -897,6 +902,12 @@ static LoopEvent rec_for(jit_State *J, const BCIns *fori, int isforl)
   LoopEvent ev;
   TRef stop;
   IRType t;
+  /* A wide integer loop is not recorded in this step: its state object in
+  ** FOR_IDX has no IR representation. The interpreter runs the loop. */
+  if (tvisforstate(&tv[FORL_IDX])) {
+    setintV(&J->errinfo, BC_FORI);
+    lj_trace_err_info(J, LJ_TRERR_NYIBC);
+  }
   /* Avoid semantic mismatches and always failing guards. */
   if ((tvisnum(&tv[FORL_IDX]) && tvisnan(&tv[FORL_IDX])) ||
       (tvisnum(&tv[FORL_STOP]) && tvisnan(&tv[FORL_STOP])) ||
@@ -919,24 +930,17 @@ static LoopEvent rec_for(jit_State *J, const BCIns *fori, int isforl)
     }
   } else {  /* Handle FORI/JFORI opcodes. */
     BCReg i;
-    /* 5.4 integers outside int32 as control values: lj_meta_for turns them
-    ** into floats (ADR-001b), here and when the interpreter runs the FORI.
-    ** Load such a slot before that, as the int64 the trace will find. */
-    for (i = FORL_IDX; i <= FORL_STEP; i++)
-      if (!tr[i] && tvisi64any(&tv[i])) sload(J, ra+i);
-    lj_meta_for(J->L, tv);
-    t = (LJ_DUALNUM || tref_isint(tr[FORL_IDX])) ? lj_opt_narrow_forl(J, tv) :
-						   IRT_NUM;
+    /* Lua 5.4 forprep: prepare the slots as the interpreter's FORI would.
+    ** RETRY leaves int32 (small integer loop) or float values; SKIP/WIDE
+    ** means a wide integer loop, which is not recorded. */
+    if (lj_meta_for(J->L, tv) != LJ_FOR_RETRY) {
+      setintV(&J->errinfo, BC_FORI);
+      lj_trace_err_info(J, LJ_TRERR_NYIBC);
+    }
+    t = (LJ_DUALNUM && tvisint(&tv[FORL_IDX]) &&
+	 tvisint(&tv[FORL_STEP])) ? IRT_INT : IRT_NUM;
     for (i = FORL_IDX; i <= FORL_STEP; i++) {
       if (!tr[i]) sload(J, ra+i);
-      if (tref_isi64(tr[i])) {
-	/* The same conversion as lj_meta_for. It applies to a value outside
-	** int32 only: an int32 stays an integer there and can make the loop
-	** an integer loop, and an int64 ref can hold one (see the
-	** representation rule at the top). */
-	rec_i64_guardwide(J, tr[i]);
-	tr[i] = emitir(IRTN(IR_CONV), tr[i], IRCONV_NUM_I64);
-      }
       lj_assertJ(tref_isnumber_str(tr[i]), "bad FORI argument type");
       if (tref_isstr(tr[i]))
 	tr[i] = emitir(IRTG(IR_STRTO, IRT_NUM), tr[i], 0);
@@ -3583,6 +3587,12 @@ static const BCIns *rec_setup_root(jit_State *J)
   BCReg ra = bc_a(ins);
   switch (bc_op(ins)) {
   case BC_FORL:
+    /* A wide integer loop keeps its state in a private object in FOR_IDX and
+    ** is not recorded: there is no IR representation for it. */
+    if (tvisforstate(&J->L->base[ra])) {
+      setintV(&J->errinfo, BC_FORI);
+      lj_trace_err_info(J, LJ_TRERR_NYIBC);
+    }
     J->bc_extent = (MSize)(-bc_j(ins))*sizeof(BCIns);
     pc += 1+bc_j(ins);
     J->bc_min = pc;

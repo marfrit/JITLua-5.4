@@ -1281,13 +1281,59 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov CARG2, RA			// Caveat: CARG2 == BASE
   |  mov L:CARG1, L:RB			// Caveat: CARG1 == RA
   |  mov SAVE_PC, PC
-  |  call extern lj_meta_for	// (lua_State *L, TValue *base)
+  |  call extern lj_meta_for	// (lua_State *L, TValue *base) -> status
   |  mov BASE, L:RB->base
+  |  mov TMPRd, eax			// RCd/RDd is eax: save the status first.
   |  mov RCd, [PC-4]
   |  movzx RAd, RCH
   |  movzx OP, RCL
   |  shr RCd, 16
+  |  test TMPRd, TMPRd
+  |  jnz ->vmeta_for_status
   |  jmp aword [DISPATCH+OP*8+GG_DISP2STATIC]	// Retry FORI or JFORI.
+  |
+  |->vmeta_for_status:
+  |  cmp TMPRd, 2		// LJ_FOR_WIDE
+  |  je ->vmeta_for_wide
+  |  // PUC forprep skipped the loop: jump past it.
+  |  branchPC RD
+  |  ins_next
+  |
+  |->vmeta_for_wide:
+  |  // Wide integer loop entered; the state object is in FOR_IDX and FOR_EXT
+  |  // holds the control variable. A wide loop is not recorded, so even a
+  |  // JFORI patched by a trace of another loop kind must go straight into the
+  |  // body: record the body address for the FORL stub and fall through.
+  |  lea RA, [BASE+RA*8]		// RA is the operand A register index again.
+  |  mov TMPR, [RA]
+  |  cleartp TMPR
+  |  mov qword [TMPR+sizeof(GCudata)+offsetof(ForState, body)], PC
+  |  ins_next
+  |
+  |->vmeta_forl:
+  |  // One iteration of a wide integer loop: lj_meta_forl returns 1 to
+  |  // continue, 0 to finish.
+  |  mov L:RB, SAVE_L
+  |  mov L:RB->base, BASE
+  |  mov CARG2, RA			// Caveat: CARG2 == BASE
+  |  mov L:CARG1, L:RB			// Caveat: CARG1 == RA
+  |  mov SAVE_PC, PC
+  |  call extern lj_meta_forl	// (lua_State *L, TValue *base)
+  |  mov BASE, L:RB->base
+  |  mov TMPRd, eax			// RCd/RDd is eax: save the status first.
+  |  mov RCd, [PC-4]
+  |  movzx RAd, RCH
+  |  test TMPRd, TMPRd
+  |  jz ->vmeta_forl_leave
+  |  // Continue at the body address kept in the state object: a JFORL's jump
+  |  // field holds the trace number, not a target.
+  |  lea RA, [BASE+RA*8]
+  |  mov RB, [RA]
+  |  cleartp RB
+  |  mov RC, [RB+sizeof(GCudata)+offsetof(ForState, body)]
+  |  mov PC, RC
+  |->vmeta_forl_leave:
+  |  ins_next
   |
   |//-----------------------------------------------------------------------
   |//-- Fast functions -----------------------------------------------------
@@ -5026,10 +5072,10 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
       |  mov TMPR, FOR_STOP
       if (!vk) {
 	|  checkint TMPR, ->vmeta_for
+	|  checkint FOR_STEP, ->vmeta_for
 	|  mov ITYPE, FOR_STEP
 	|  test ITYPEd, ITYPEd; js >5
-	|  sar ITYPE, 47;
-	|  cmp ITYPEd, LJ_TISNUM; jne ->vmeta_for
+	|  jz ->vmeta_for		// step zero: lj_meta_for raises 'for' step is zero
       } else {
 #ifdef LUA_USE_ASSERT
 	|  checkinttp FOR_STOP, ->assert_bad_for_arg_type
@@ -5097,17 +5143,23 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     } else if (!vk) {
       |  checknumtp FOR_IDX, ->vmeta_for
     }
+    |  mov RB, FOR_STEP
     if (!vk) {
       |  checknumtp FOR_STOP, ->vmeta_for
+      |  checknum RB, ->vmeta_for
+      |  mov TMPR, RB			// +0.0 and -0.0: let lj_meta_for raise
+      |  shl TMPR, 1
+      |  jz ->vmeta_for
     } else {
+      // A wide integer loop has an integer step, a float loop a float step
+      // (lj_meta_for converted it): this tells them apart in the FP path.
+      // Checked before the debug assertions below: a wide loop leaves the
+      // original limit and step in their slots (they may be strings).
+      |  checknum RB, ->vmeta_forl
 #ifdef LUA_USE_ASSERT
       |  checknumtp FOR_STOP, ->assert_bad_for_arg_type
       |  checknumtp FOR_STEP, ->assert_bad_for_arg_type
 #endif
-    }
-    |  mov RB, FOR_STEP
-    if (!vk) {
-      |  checknum RB, ->vmeta_for
     }
     |  movsd xmm0, qword FOR_IDX
     |  movsd xmm1, qword FOR_STOP
@@ -5123,12 +5175,15 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  movsd qword FOR_EXT, xmm0
     if (op == BC_FORI) {
       |.if DUALNUM
+      |  jp <7			// unordered (NaN limit): PUC enters the body once
       |  jnb <7
       |.else
+      |  jp >2
       |  jnb >2
       |  branchPC RD
       |.endif
     } else if (op == BC_JFORI) {
+      |  jp <7			// unordered (NaN limit): enter the body, no trace
       |  branchPC RD
       |  movzx RDd, PC_RD
       |  jnb =>BC_JLOOP

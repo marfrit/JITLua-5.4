@@ -1,9 +1,10 @@
 --! §3.3.5: a numeric for loop whose start, limit or step is an integer
 --! outside the int32 range, in code that gets compiled. The number of
 --! iterations and the values must be the same with and without the JIT.
---! Against PUC 5.4.9 this file differs (tests/known-bad.tsv): the loop
---! variable of such a loop is a float here, and from 2^53 on the loop does
---! not count correctly. The counts below stop at 20 for that reason.
+--! Against PUC 5.4.9 this file now agrees (the Lua 5.4 numeric-for rules:
+--! tests/d54/for_02_54_rules.lua covers the individual rules). Earlier it
+--! differed because the loop variable of such a loop was a float and from
+--! 2^53 on the loop did not count correctly; the counts below stop at 20.
 local out = {}
 local function rec(name, ...)
   local n, t = select("#", ...), {}

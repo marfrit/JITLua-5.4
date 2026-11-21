@@ -56,9 +56,8 @@ ERRDEF(NOLFUNC,	"Lua function expected")
 ERRDEF(NOFUNCL,	"function or level expected")
 ERRDEF(NOSFT,	"string/function/table expected")
 ERRDEF(NOPROXY,	"boolean or proxy expected")
-ERRDEF(FORINIT,	LUA_QL("for") " initial value must be a number")
-ERRDEF(FORLIM,	LUA_QL("for") " limit must be a number")
-ERRDEF(FORSTEP,	LUA_QL("for") " step must be a number")
+ERRDEF(FORBAD, "bad 'for' %s (number expected, got %s)")
+ERRDEF(FORZERO,	LUA_QL("for") " step is zero")
 
 /* C API checks. */
 ERRDEF(NOENV,	"no calling environment")

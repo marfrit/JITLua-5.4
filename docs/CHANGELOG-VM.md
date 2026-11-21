@@ -7,6 +7,27 @@ target x86_64 (GC64) and arm64.
 
 ## Language and VM
 
+- The Lua 5.4 numeric `for` rules, following PUC's `forprep`/`forlimit` and
+  `OP_FORLOOP`. `lj_meta_for` decides the loop kind from the initial value
+  and the step only: both integers make an integer loop, whose limit is
+  converted with floor/ceil, clipped at the integer bounds or skipped, and
+  whose iteration count is precomputed as unsigned 64 bit so the index wraps
+  without an overflow test; otherwise a float loop converts all three with
+  `tonumber`. Small integer loops keep the int32 FORI/FORL fast paths; a wide
+  one keeps PUC's index, count and step in a private state object in FOR_IDX
+  (one allocation per loop start) and costs one C call per iteration
+  (`lj_meta_forl`). FORI/JFORI and FORL/IFORL recognise it in both the x86_64
+  and arm64 VMs; step zero and the operand errors now use PUC's texts
+  (`'for' step is zero`, `bad 'for' <what> (number expected, got <type>)`).
+  A wide loop is not recorded (NYI abort, the interpreter runs it), so the
+  `tvisi64any` pre-load and int64-to-float conversion in the recorder are
+  gone; integral float loop values are no longer narrowed into an int32
+  trace, which kept the control variable an integer where PUC has a float.
+  A float loop with a NaN limit now runs its body once like PUC: FORI entry
+  treats an unordered comparison as "not past the limit". Covered by
+  `tests/d54/for_02_54_rules.lua`; `for_01_int64_control.lua` left
+  `tests/known-bad.tsv`. Design and measurements: docs/notes/for-loop-54.md.
+
 - 5.4 parity in the library and the error messages, five fixes.
   `coroutine.isyieldable([co])` now reports a fresh, suspended and dead
   coroutine as yieldable (it tested the caller's C-frame nesting, which a

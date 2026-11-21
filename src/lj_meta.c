@@ -26,6 +26,7 @@
 #include "lj_debug.h"
 #include "lj_state.h"
 #include "lj_i64.h"
+#include "lj_udata.h"
 #if LJ_HASFFI
 #include "lj_ctype.h"
 #include "lj_cdata.h"
@@ -857,48 +858,184 @@ TValue *lj_meta_call(lua_State *L, TValue *func, TValue *top)
 }
 #endif
 
-/* Helper for FORI. Coercion. */
-void LJ_FASTCALL lj_meta_for(lua_State *L, TValue *o)
+/* -- Lua 5.4 numeric 'for' loops ----------------------------------------- */
+
+/* Specification: PUC 5.4.9 lvm.c forprep/forlimit and OP_FORLOOP. The loop is
+** an integer loop iff the initial value and the step are integers (no string
+** coercion for those two). Then the limit is converted with floor for an
+** ascending and ceil for a descending loop, clipped to the integer bounds or
+** skipping the loop; the iteration count is precomputed as unsigned 64 bit and
+** the index wraps like intop(+), so the integer limits cannot make a loop run
+** forever. Otherwise all three values are converted with tonumber. Step zero
+** raises for both kinds. Three loop kinds after FORI: small integer (init,
+** step and clipped limit fit int32, the existing int32 FORI/FORL paths are
+** exact for it), float, and wide integer (any of the three outside int32).
+**
+** A wide loop keeps PUC's state (current index, remaining count, step) in a
+** private GCudata in FOR_IDX: one allocation per loop start, none per
+** iteration. FORL then calls lj_meta_forl once per iteration. FOR_EXT holds
+** the control variable in its canonical 5.4 integer encoding. */
+
+static int for_isint(cTValue *o)
 {
-  /* ADR-001b: widened 47-bit inline or boxed int64 bounds are numbers for 5.4;
-  ** they cannot narrow to int32, so convert them to exactly-representable
-  ** floats here (47 bits fit a double exactly; larger boxes are rounded, a
-  ** documented limitation) BEFORE the number checks below. */
-  {
-    ptrdiff_t i;
-    for (i = 0; i <= 2; i++) {
-      if (tvisi47w(o+i))
-	setnumV(o+i, (lua_Number)intV47(o+i));
-      else if (tvisi64(o+i))
-	setnumV(o+i, (lua_Number)i64V(o+i));
+  return tvisint(o) || tvisi64(o);  /* int32, 47-bit inline, or boxed */
+}
+
+/* PUC luaV_flttointeger: floor for an ascending loop, ceil for a descending
+** one (only F2Ieq rejects a non-integral float), then the range check. */
+static int for_flttoint(lua_Number n, int64_t *p, int ceil)
+{
+  lua_Number f = floor(n);
+  if (n != f && ceil) f += 1;
+  /* MININTEGER has an exact float form, MAXINTEGER may round up to 2^63. */
+  if (!(f >= -9223372036854775808.0 && f < 9223372036854775808.0)) return 0;
+  *p = (int64_t)f;
+  return 1;
+}
+
+static int for_toint(cTValue *o, int64_t *p, int ceil)
+{
+  int64_t i;
+  if (lj_i64_getint(o, &i)) { *p = i; return 1; }
+  if (tvisnum(o)) return for_flttoint(numV(o), p, ceil);
+  return 0;
+}
+
+/* PUC luaV_tointeger: a numeric string is converted first. The scanner uses
+** the 5.4 rules (hex wraps mod 2^64, a decimal integer that does not fit
+** int64 becomes a float), so the results match luaO_str2num. */
+static int for_tointeger(lua_State *L, cTValue *o, int64_t *p, int ceil)
+{
+  if (tvisstr(o)) {
+    TValue tv;
+    int64_t i;
+    setnilV(&tv);  /* the scanner leaves the tag alone for a float result */
+    if (!lj_strscan_number64(L, strV(o), &tv)) return 0;
+    if (lj_i64_getint(&tv, &i)) { *p = i; return 1; }
+    return for_flttoint(numV(&tv), p, ceil);
+  }
+  return for_toint(o, p, ceil);
+}
+
+/* PUC luaV_tonumber_ (integers become exactly-representable floats) plus the
+** string coercion of tonumber(). */
+static int for_tonumber(lua_State *L, cTValue *o, lua_Number *n)
+{
+  int64_t i;
+  if (lj_i64_getint(o, &i)) { *n = (lua_Number)i; return 1; }
+  if (tvisnum(o)) { *n = numV(o); return 1; }
+  if (tvisstr(o)) {
+    TValue tv;
+    setnilV(&tv);
+    if (!lj_strscan_number64(L, strV(o), &tv)) return 0;
+    if (lj_i64_getint(&tv, &i)) *n = (lua_Number)i;
+    else *n = numV(&tv);
+    return 1;
+  }
+  return 0;
+}
+
+/* PUC luaG_forerror: "bad 'for' <what> (number expected, got <type>)". */
+static void for_errnum(lua_State *L, cTValue *o, const char *what)
+{
+  lj_err_msgv(L, LJ_ERR_FORBAD, what, lj_err_typename(L, o));
+}
+
+/* PUC forlimit: convert the limit, clip a float outside the integer range to
+** the nearer bound, or signal a skip when it lies on the wrong side. Returns
+** non-zero if the loop must not run. */
+static int forlimit(lua_State *L, int64_t init, cTValue *lim, int64_t *limit,
+		    int64_t step)
+{
+  int64_t l;
+  if (for_tointeger(L, lim, &l, step < 0)) {
+    *limit = l;
+  } else {
+    lua_Number flim;  /* try as a float: out of the integer range? */
+    if (!for_tonumber(L, lim, &flim)) for_errnum(L, lim, "limit");
+    if (0 < flim) {	/* positive: too large for maxinteger */
+      if (step < 0) return 1;
+      *limit = (int64_t)0x7fffffffffffffffLL;
+    } else {	/* NaN or less than mininteger */
+      if (step > 0) return 1;
+      *limit = (int64_t)(-0x7fffffffffffffffLL - 1);
     }
   }
-  if (!lj_strscan_numberobj(o)) lj_err_msg(L, LJ_ERR_FORINIT);
-  if (!lj_strscan_numberobj(o+1)) lj_err_msg(L, LJ_ERR_FORLIM);
-  if (!lj_strscan_numberobj(o+2)) lj_err_msg(L, LJ_ERR_FORSTEP);
-  if (LJ_DUALNUM) {
-    /* Ensure all slots are integers or all slots are numbers. */
-    int32_t k[3];
-    int nint = 0;
-    ptrdiff_t i;
-    for (i = 0; i <= 2; i++) {
-      if (tvisint(o+i)) {
-	k[i] = intV(o+i); nint++;
-      } else {
-	int64_t i64;
-	if (lj_num2int_check(numV(o+i), i64, k[i])) nint++;
+  return step > 0 ? init > *limit : init < *limit;
+}
+
+int LJ_FASTCALL lj_meta_for(lua_State *L, TValue *o)
+{
+  int64_t init, step;
+  /* The recorder calls this before the FORI executes; a wide loop it prepared
+  ** must not be coerced again, so an existing state object means "enter". */
+  if (tvisforstate(o)) return LJ_FOR_WIDE;
+  if (for_isint(o) && for_isint(o+2) && for_toint(o, &init, 0) &&
+      for_toint(o+2, &step, 0)) {
+    int64_t limit;
+    if (step == 0) lj_err_msg(L, LJ_ERR_FORZERO);
+    if (forlimit(L, init, o+1, &limit, step)) return LJ_FOR_SKIP;
+    if ((int64_t)(int32_t)init == init && (int64_t)(int32_t)step == step &&
+	(int64_t)(int32_t)limit == limit) {
+      /* Small integer loop: the int32 FORI/FORL paths are exact (an int32
+      ** overflow of idx + step leaves before the wrapped index compares). */
+      setintV(o, (int32_t)init);
+      setintV(o+1, (int32_t)limit);
+      setintV(o+2, (int32_t)step);
+      return LJ_FOR_RETRY;
+    } else {
+      uint64_t count;
+      ptrdiff_t ofs = o - L->base;
+      GCudata *ud;
+      ForState *s;
+      if (step > 0) {	/* ascending */
+	count = (uint64_t)limit - (uint64_t)init;
+	if (step != 1) count /= (uint64_t)step;
+      } else {	/* descending; -(step + 1) avoids negating mininteger */
+	count = (uint64_t)init - (uint64_t)limit;
+	count /= (uint64_t)(-(step + 1)) + 1u;
       }
-    }
-    if (nint == 3) {  /* Narrow to integers. */
-      setintV(o, k[0]);
-      setintV(o+1, k[1]);
-      setintV(o+2, k[2]);
-    } else if (nint != 0) {  /* Widen to numbers. */
-      if (tvisint(o)) setnumV(o, (lua_Number)intV(o));
-      if (tvisint(o+1)) setnumV(o+1, (lua_Number)intV(o+1));
-      if (tvisint(o+2)) setnumV(o+2, (lua_Number)intV(o+2));
+      /* A GC allocation may move the stack: address the slots base-relative
+      ** after it (the offset is taken before). */
+      ud = lj_udata_new(L, sizeof(ForState), tabref(L->env));
+      ud->udtype = UDTYPE_FORSTATE;
+      s = (ForState *)uddata(ud);
+      s->idx = init;
+      s->count = count;
+      s->step = step;
+      s->body = NULL;	/* the VM's FORI/wide stub fills in the body PC */
+      setudataV(L, L->base + ofs, ud);
+      lj_i64_toTValue(L, L->base + ofs + FORL_EXT, init);
+      return LJ_FOR_WIDE;
     }
   }
+  {
+    lua_Number init, limit, step;
+    /* PUC's error order for a float loop: limit, step, initial value. */
+    if (!for_tonumber(L, o+1, &limit)) for_errnum(L, o+1, "limit");
+    if (!for_tonumber(L, o+2, &step)) for_errnum(L, o+2, "step");
+    if (!for_tonumber(L, o, &init)) for_errnum(L, o, "initial value");
+    if (step == 0) lj_err_msg(L, LJ_ERR_FORZERO);
+    if ((0 < step) ? (limit < init) : (init < limit)) return LJ_FOR_SKIP;
+    setnumV(o, init);
+    setnumV(o+1, limit);
+    setnumV(o+2, step);
+    return LJ_FOR_RETRY;
+  }
+}
+
+/* One iteration of a wide integer loop: PUC OP_FORLOOP's integer branch.
+** Returns 1 if the loop continues, 0 if it must finish. */
+int LJ_FASTCALL lj_meta_forl(lua_State *L, TValue *o)
+{
+  GCudata *ud = udataV(o);
+  ForState *s = (ForState *)uddata(ud);
+  lj_assertX(tvisforstate(o), "bad wide 'for' state");
+  if (s->count == 0) return 0;
+  s->count--;
+  s->idx = (int64_t)((uint64_t)s->idx + (uint64_t)s->step);
+  lj_i64_toTValue(L, o + FORL_EXT, s->idx);  /* may box and move the stack */
+  return 1;
 }
 
 

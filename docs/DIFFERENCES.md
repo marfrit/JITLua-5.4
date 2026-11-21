@@ -14,6 +14,9 @@ compile-time switch brings it back).
 Platforms: all VM and JIT changes target **x86_64 (GC64) and arm64** on Linux,
 the two tested platforms. The other LuaJIT backends (x86, arm, ppc, mips and
 non-GC64 builds) are not maintained and may lack individual 5.4 changes.
+The Lua 5.4 numeric-`for` rules are implemented in the x86_64 and arm64 VMs
+only; the other backends compile but keep LuaJIT's 2.1 coercion and would
+misread a wide loop's state object.
 For x86_64 without GC64 that is concrete: `src/Makefile` picks `vm_x86.dasc`
 (the VM for 32 bit GC references) whenever `LJ_FR2` is off, and that VM has no
 handler for `BC_IDIV`, `BC_KI64`, `BC_TBC` or `BC_TBCCLO` and no `cont_tbc` or
@@ -75,28 +78,6 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   raises.
 - `PENDING` `math.max` and `math.min` accept numeric strings; PUC compares the
   arguments as they are and raises "attempt to compare string with number".
-- `PENDING` A numeric `for` loop with an integer start, limit or step outside
-  the int32 range runs as a float loop (the VM's loop instructions count in
-  int32 or in doubles, and `lj_meta_for` converts such a value). The loop
-  variable is then a float: `for i = 2147483646, 2147483649 do print(i) end`
-  prints `2147483646.0` and so on, and `for i = 1, math.maxinteger` has a
-  float `i` from the first iteration. From 2^53 on the values are rounded
-  and the loop does not count correctly:
-  `for i = math.maxinteger - 2, math.maxinteger do ... end` does not end
-  (PUC: three iterations). Compiled code and the interpreter agree
-  (`tests/d54/for_01_int64_control.lua`, a `tests/known-bad.tsv` row for the
-  comparison with PUC). The PUC suite checks this in `nextvar.lua`, one of
-  the files the harness skips.
-- `PENDING` A numeric string as a `for` bound is converted with the
-  int32-or-double rule: a decimal integer string outside int32 makes the loop
-  a float loop (PUC: integer loop), and a hexadecimal one does not wrap
-  (`for i = 1, "0xffffffffffffffff"` runs; PUC runs it zero times). The
-  converse also happens: an integral float start or step becomes an integer
-  loop here, while PUC runs a float loop unless start and step are integers.
-  `for i = 1.0, 10 do print(math.type(i)) end` prints `integer` (PUC:
-  `float`), and `for i = -1, -10, -1.0` likewise; PUC's `for i = 1, 3.0, 1`
-  is an integer loop and here too. The suite checks both directions at
-  `nextvar.lua:624/635`, one of the files the harness skips.
 - `IMPL-DEFINED` String arithmetic is part of the VM's arithmetic fallback;
   the string metatable has no `__add`, `__sub`, ... entries (PUC implements
   the coercion through them, so there it can be inspected and replaced).

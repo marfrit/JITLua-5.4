@@ -1095,7 +1095,20 @@ static void build_subroutines(BuildCtx *ctx)
   |   str BASE, L->base
   |  mov CARG2, RA
   |   str PC, SAVE_PC
-  |  bl extern lj_meta_for	// (lua_State *L, TValue *base)
+  |  bl extern lj_meta_for	// (lua_State *L, TValue *base) -> status
+  |  ldr BASE, L->base		// May have moved (a wide loop allocates).
+  |  cmp CRET1, #2		// LJ_FOR_WIDE
+  |  beq ->vmeta_for_wide
+  |  cbz CRET1, ->vmeta_for_retry
+  |  // PUC forprep skipped the loop: jump past it.
+  |  ldr INSw, [PC, #-4]
+  |  decode_RD RC, INS
+  |  add RC, PC, RC, lsl #2
+  |  sub RC, RC, #0x20000
+  |  mov PC, RC
+  |  ins_next
+  |
+  |->vmeta_for_retry:
   |  ldr INSw, [PC, #-4]
   |.if JIT
   |   uxtb TMP0w, INSw
@@ -1107,6 +1120,40 @@ static void build_subroutines(BuildCtx *ctx)
   |   beq =>BC_JFORI
   |.endif
   |  b =>BC_FORI
+  |
+  |->vmeta_for_wide:
+  |  // Wide integer loop entered: FOR_IDX holds the state object and FOR_EXT
+  |  // the control variable. A wide loop is not recorded, so even a JFORI
+  |  // patched by a trace of another loop kind goes straight into the body;
+  |  // record the body address for the FORL stub.
+  |  ldr INSw, [PC, #-4]
+  |  decode_RA RA, INS
+  |  add RA, BASE, RA, lsl #3
+  |  ldr TMP0, [RA]
+  |  and TMP0, TMP0, #LJ_GCVMASK
+  |  str PC, [TMP0, #sizeof(GCudata)+offsetof(ForState, body)]
+  |  ins_next
+  |
+  |->vmeta_forl:
+  |  // One iteration of a wide integer loop: 1 continues, 0 finishes.
+  |  mov CARG1, L
+  |   str BASE, L->base
+  |  mov CARG2, RA
+  |   str PC, SAVE_PC
+  |  bl extern lj_meta_forl	// (lua_State *L, TValue *base)
+  |  ldr BASE, L->base		// FOR_EXT may box and move the stack.
+  |  cbz CRET1, ->vmeta_forl_leave
+  |  // Continue at the body address in the state object: a JFORL's jump field
+  |  // holds the trace number, not a target.
+  |  ldr INSw, [PC, #-4]
+  |  decode_RA RA, INS
+  |  add RA, BASE, RA, lsl #3
+  |  ldr TMP0, [RA]
+  |  and TMP0, TMP0, #LJ_GCVMASK
+  |  ldr TMP1, [TMP0, #sizeof(GCudata)+offsetof(ForState, body)]
+  |  mov PC, TMP1
+  |->vmeta_forl_leave:
+  |  ins_next
   |
   |//-----------------------------------------------------------------------
   |//-- Fast functions -----------------------------------------------------
@@ -4391,6 +4438,7 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     if (!vk) {
       |  checkint CARG2, ->vmeta_for
       |   checkint CARG3, ->vmeta_for
+      |   cbz CARG3w, ->vmeta_for	// step zero: lj_meta_for raises
       |  tbnz CARG3w, #31, >4
       |  cmp CARG1w, CARG2w
     } else {
@@ -4426,13 +4474,19 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  b <1
     |
     |5:  // FP loop.
-    |  ldp d0, d1, FOR_IDX
-    |  blo ->vmeta_for
     if (!vk) {
+      |  ldp d0, d1, FOR_IDX
+      |  blo ->vmeta_for
       |  checknum CARG2, ->vmeta_for
       |   checknum CARG3, ->vmeta_for
+      |   lsl TMP1, CARG3, #1		// +0.0 and -0.0: let lj_meta_for raise
+      |   cbz TMP1, ->vmeta_for
       |  str d0, FOR_EXT
     } else {
+      |  ldp d0, d1, FOR_IDX
+      |  // A wide integer loop has an integer step, a float loop a float step
+      |  // (lj_meta_for converted it): this tells them apart in the FP path.
+      |  checknum CARG3, ->vmeta_forl
       |  ldr d2, FOR_STEP
       |  fadd d0, d0, d2
     }
@@ -4444,8 +4498,10 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
       |  str d0, FOR_EXT
     }
     if (op == BC_FORI) {
-      |  csel PC, RC, PC, hi
+      |  csel PC, RC, PC, gt	// skip only when strictly past the limit; an
+      |  				// unordered (NaN) limit enters once like PUC
     } else if (op == BC_JFORI) {
+      |  bvs <2			// unordered (NaN limit): enter the body, no trace
       |  mov PC, RC
       |  ldrh RCw, [RC, #-4+OFS_RD]
       |  bls =>BC_JLOOP

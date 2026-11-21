@@ -1201,6 +1201,21 @@ static void build_subroutines(BuildCtx *ctx)
   |1:
   |  ins_next
   |
+  |->vmeta_forclip:
+  |  // The int32 FORL path left a loop whose limit is the clip value of its
+  |  // step: lj_meta_forclip continues a clipped loop as a wide loop (body
+  |  // PC), or returns NULL to leave it (docs/notes/for-loop-54.md).
+  |  mov CARG1, L
+  |   str BASE, L->base
+  |  mov CARG2, RA
+  |   str PC, SAVE_PC
+  |  bl extern lj_meta_forclip	// (lua_State *L, TValue *base) -> PC/NULL
+  |  ldr BASE, L->base		// The limit may box, a GC step may run.
+  |  cbz CRET1, >1
+  |  mov PC, CRET1
+  |1:
+  |  ins_next
+  |
   |//-----------------------------------------------------------------------
   |//-- Fast functions -----------------------------------------------------
   |//-----------------------------------------------------------------------
@@ -4531,6 +4546,13 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
       |  checkint CARG2, ->vmeta_for
       |   checkint CARG3, ->vmeta_for
       |   cbz CARG3w, ->vmeta_for	// step zero: lj_meta_for raises
+      |  // A limit equal to the clip value of the step (INT32_MAX - step, for
+      |  // a negative step INT32_MIN - step) starts the loop in C, which keeps
+      |  // the clipped-limit list exact (lj_meta_for).
+      |   add TMP1w, CARG2w, CARG3w
+      |   eor TMP1w, TMP1w, CARG3w, asr #31	// INT32_MAX in both cases
+      |   cmn TMP1w, #1			// Set overflow if TMP1w == INT32_MAX.
+      |   bvs ->vmeta_for
       |  tbnz CARG3w, #31, >4
       |  cmp CARG1w, CARG2w
     } else {
@@ -4558,6 +4580,11 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     if (op == BC_JFORI || op == BC_JFORL) {
       |  ble =>BC_JLOOP
     }
+    if (op == BC_IFORL) {
+      |  bgt >3
+    } else if (op == BC_JFORL) {
+      |  b >3
+    }
     |2:
     |   ins_next
     |
@@ -4565,6 +4592,17 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     |  cmp CARG2w, CARG1w
     |  b <1
     |
+    if (vk) {
+      |3:  // The loop is left (the index passed the limit without an int32
+      |    // overflow). Only a limit equal to the clip value of the step can
+      |    // be a clipped one: lj_meta_forclip decides.
+      |  add TMP1w, CARG2w, CARG3w
+      |  eor TMP1w, TMP1w, CARG3w, asr #31	// INT32_MAX in both cases
+      |  cmn TMP1w, #1			// Set overflow if TMP1w == INT32_MAX.
+      |  bvs ->vmeta_forclip
+      |  b <2
+      |
+    }
     |5:  // FP loop.
     if (!vk) {
       |  ldp d0, d1, FOR_IDX

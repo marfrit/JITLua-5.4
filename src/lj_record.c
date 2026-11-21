@@ -723,6 +723,7 @@ static TRef find_kinit(jit_State *J, const BCIns *endpc, BCReg slot, IRType t)
 	  cTValue *tv = proto_knumtv(J->pt, bc_d(ins));
 	  if (t == IRT_INT) {
 	    if (tvisint(tv)) {
+	      if (tvisi47w(tv)) return 0;  /* Outside int32 (a clipped limit). */
 	      return lj_ir_kint(J, intV(tv));
 	    } else {
 	      int64_t i64;
@@ -832,10 +833,15 @@ static LoopEvent rec_for_iter(IROp *op, cTValue *o, int isforl)
   }
 }
 
-/* Record checks for FOR loop overflow and step direction. */
+/* Record checks for FOR loop overflow and step direction. init is 0 for a
+** FORL, 1 for the start of a loop trace and 2 for a recorded FORI. The FORI
+** check also excludes a limit equal to the clip value of the step (stop +
+** step at the int32 bound, see lj_meta.c): the interpreter's FORI starts
+** such a loop in C, so the guard exits to it. */
 static void rec_for_check(jit_State *J, IRType t, int dir,
 			  TRef stop, TRef step, int init)
 {
+  int fori = (init == 2);
   if (!tref_isk(step)) {
     /* Non-constant step: need a guard for the direction (excluding +-0). */
     TRef zero = (t == IRT_INT) ? lj_ir_kint(J, 0) : lj_ir_knum_zero(J);
@@ -846,28 +852,82 @@ static void rec_for_check(jit_State *J, IRType t, int dir,
 	/* Constant stop: optimize check away or to a range check for step. */
 	int32_t k = IR(tref_ref(stop))->i;
 	if (dir) {
-	  if (k > 0)
-	    emitir(IRTGI(IR_LE), step, lj_ir_kint(J, (int32_t)0x7fffffff-k));
+	  if (k > 0 || (fori && k == 0))
+	    emitir(IRTGI(fori ? IR_LT : IR_LE), step,
+		   lj_ir_kint(J, (int32_t)0x7fffffff-k));
 	} else {
-	  if (k < 0)
-	    emitir(IRTGI(IR_GE), step, lj_ir_kint(J, (int32_t)0x80000000-k));
+	  if (k < 0 || (fori && k == 0))
+	    emitir(IRTGI(fori ? IR_GT : IR_GE), step,
+		   lj_ir_kint(J, (int32_t)0x80000000-k));
 	}
       } else {
 	/* Stop+step variable: need full overflow check. */
 	TRef tr = emitir(IRTGI(IR_ADDOV), step, stop);
-	emitir(IRTI(IR_USE), tr, 0);  /* ADDOV is weak. Avoid dead result. */
+	if (fori)
+	  emitir(IRTGI(IR_NE), tr,
+		 lj_ir_kint(J, (int32_t)(dir ? 0x7fffffff : 0x80000000)));
+	else
+	  emitir(IRTI(IR_USE), tr, 0);  /* ADDOV is weak. Avoid dead result. */
       }
     }
   } else if (init && t == IRT_INT && !tref_isk(stop)) {
     /* Constant step: optimize overflow check to a range check for stop. */
     int32_t k = IR(tref_ref(step))->i;
     k = (int32_t)(dir ? 0x7fffffff : 0x80000000) - k;
-    emitir(IRTGI(dir ? IR_LE : IR_GE), stop, lj_ir_kint(J, k));
+    emitir(IRTGI(dir ? (fori ? IR_LT : IR_LE) : (fori ? IR_GT : IR_GE)),
+	   stop, lj_ir_kint(J, k));
   }
 }
 
-/* Record a FORL instruction. */
-static void rec_for_loop(jit_State *J, const BCIns *fori, ScEvEntry *scev,
+/* The loop is left at a FORL of an integer loop: a limit equal to the clip
+** value of the step may be a clipped one, which the interpreter continues
+** as a wide loop (lj_meta_forclip). Guard against that limit. */
+static void rec_for_clipguard(jit_State *J, int dir, TRef stop, TRef step)
+{
+  if (tref_isk(step)) {
+    int32_t k = IR(tref_ref(step))->i;
+    k = (int32_t)(dir ? 0x7fffffff : 0x80000000) - k;
+    emitir(IRTGI(IR_NE), stop, lj_ir_kint(J, k));
+  } else {
+    TRef tr = emitir(IRTI(IR_ADD), stop, step);
+    emitir(IRTGI(IR_NE), tr,
+	   lj_ir_kint(J, (int32_t)(dir ? 0x7fffffff : 0x80000000)));
+  }
+}
+
+/* Could the limit of an integer loop be the clip value of its step when the
+** trace runs? Not if both are constants that differ from it. */
+static int rec_for_mayclip(jit_State *J, int dir, TRef stop, TRef step)
+{
+  if (tref_isk(stop) && tref_isk(step)) {
+    int32_t k = IR(tref_ref(step))->i;
+    k = (int32_t)(dir ? 0x7fffffff : 0x80000000) - k;
+    return IR(tref_ref(stop))->i == k;
+  }
+  return 1;
+}
+
+/* Does the FORL of the integer loop at o leave the int32 path at its limit,
+** which is the clip value of the step? The interpreter then decides whether
+** a clipped loop continues as a wide loop (lj_meta_forclip). */
+static int rec_for_atclip(cTValue *o)
+{
+  int32_t step, k;
+  if (!(tvisint(&o[FORL_IDX]) && tvisint(&o[FORL_STOP]) &&
+	tvisint(&o[FORL_STEP])))
+    return 0;
+  step = intV(&o[FORL_STEP]);
+  if (step == 0) return 0;
+  k = (int32_t)((step > 0 ? (int64_t)0x7fffffff : (int64_t)-0x7fffffff-1) -
+		step);
+  return intV(&o[FORL_STOP]) == k &&
+	 (step > 0 ? (int64_t)intV(&o[FORL_IDX]) + step > k :
+		     (int64_t)intV(&o[FORL_IDX]) + step < k);
+}
+
+/* Record a FORL instruction. Returns the index before the increment, which
+** for a FORL (init 0) of an integer loop is left to rec_for to add. */
+static TRef rec_for_loop(jit_State *J, const BCIns *fori, ScEvEntry *scev,
 			 int init)
 {
   BCReg ra = bc_a(*fori);
@@ -888,6 +948,7 @@ static void rec_for_loop(jit_State *J, const BCIns *fori, ScEvEntry *scev,
     ((!LJ_DUALNUM || tvisint(tv) == (t == IRT_INT)) ? IRSLOAD_READONLY : 0);
   TRef stop = fori_arg(J, fori, ra+FORL_STOP, t, mode);
   TRef step = fori_arg(J, fori, ra+FORL_STEP, t, mode);
+  TRef previdx;
   int tc, dir = rec_for_direction(&tv[FORL_STEP]);
   lj_assertJ(bc_op(*fori) == BC_FORI || bc_op(*fori) == BC_JFORI,
 	     "bad bytecode %d instead of FORI/JFORI", bc_op(*fori));
@@ -908,12 +969,14 @@ static void rec_for_loop(jit_State *J, const BCIns *fori, ScEvEntry *scev,
   if (!idx)
     idx = fori_load(J, ra+FORL_IDX, t,
 		    IRSLOAD_INHERIT + tc + (J->scev.start << 16));
-  if (!init)
+  previdx = idx;
+  if (!init && t != IRT_INT)
     J->base[ra+FORL_IDX] = idx = emitir(IRT(IR_ADD, t), idx, step);
   J->base[ra+FORL_EXT] = idx;
   scev->idx = tref_ref(idx);
   setmref(scev->pc, fori);
   J->maxslot = ra+FORL_EXT+1;
+  return previdx;
 }
 
 /* Record FORL/JFORL or FORI/JFORI. */
@@ -924,7 +987,7 @@ static LoopEvent rec_for(jit_State *J, const BCIns *fori, int isforl)
   TRef *tr = &J->base[ra];
   IROp op;
   LoopEvent ev;
-  TRef stop;
+  TRef stop, step = 0, previdx = 0;
   IRType t;
   TValue cv[3];  /* FORI: the values the interpreter's FORI works on. */
   cTValue *iv = tv;
@@ -946,13 +1009,24 @@ static LoopEvent rec_for(jit_State *J, const BCIns *fori, int isforl)
     if (mref(J->scev.pc, const BCIns) == fori && tref_ref(idx) == J->scev.idx) {
       t = J->scev.t.irt;
       stop = J->scev.stop;
-      idx = emitir(IRT(IR_ADD, t), idx, J->scev.step);
-      tr[FORL_EXT] = tr[FORL_IDX] = idx;
+      step = J->scev.step;
+      previdx = idx;
+      if (t != IRT_INT) {  /* See below for an integer loop. */
+	idx = emitir(IRT(IR_ADD, t), idx, J->scev.step);
+	tr[FORL_EXT] = tr[FORL_IDX] = idx;
+      }
     } else {
       ScEvEntry scev;
-      rec_for_loop(J, fori, &scev, 0);
+      previdx = rec_for_loop(J, fori, &scev, 0);
       t = scev.t.irt;
       stop = scev.stop;
+      step = scev.step;
+    }
+    /* Left at a clip value: the interpreter decides (wide or not). */
+    if (t == IRT_INT && rec_for_atclip(tv) &&
+	rec_for_mayclip(J, rec_for_direction(&tv[FORL_STEP]), stop, step)) {
+      setintV(&J->errinfo, BC_FORL);
+      lj_trace_err_info(J, LJ_TRERR_NYIBC);
     }
   } else {  /* Handle FORI/JFORI opcodes. */
     BCReg i;
@@ -984,7 +1058,7 @@ static LoopEvent rec_for(jit_State *J, const BCIns *fori, int isforl)
     }
     tr[FORL_EXT] = tr[FORL_IDX];
     stop = tr[FORL_STOP];
-    rec_for_check(J, t, dir, stop, tr[FORL_STEP], 1);
+    rec_for_check(J, t, dir, stop, tr[FORL_STEP], 2);
     iv = cv;
   }
 
@@ -999,16 +1073,38 @@ static LoopEvent rec_for(jit_State *J, const BCIns *fori, int isforl)
     if (!isforl && ev != LOOPEV_LEAVE) op = d ? IR_ULE : IR_UGE;
     else if (isforl && ev == LOOPEV_LEAVE) op = d ? IR_UGT : IR_ULT;
   }
-  if (ev == LOOPEV_LEAVE) {
-    J->maxslot = ra+FORL_EXT+1;
-    J->pc = fori+1;
+  if (isforl && t == IRT_INT) {
+    /* An integer loop may run with a clipped limit (lj_meta.c), so every
+    ** guard of its FORL exits to the FORL itself: the interpreter
+    ** re-executes it and takes the exit edge (lj_meta_forclip) or continues.
+    ** The snapshot holds the incremented index, flagged to be restored minus
+    ** the step (SNAP_FORDEC), so the index before the increment needs no
+    ** register of its own; the step is put into the snapshot for that. A
+    ** loop that is left also guards against a limit equal to the clip
+    ** value. */
+    int d = rec_for_direction(&tv[FORL_STEP]);
+    TRef nidx = emitir(IRTI(IR_ADD), previdx, step);
+    if (!tr[FORL_STEP]) tr[FORL_STEP] = TREF(tref_ref(step), IRT_INT);
+    tr[FORL_IDX] = nidx | TREF_FORDEC;
+    tr[FORL_EXT] = 0;  /* Dead at the FORL, which writes it. */
+    J->maxslot = ra+FORL_STEP+1;
+    J->pc = fori+bc_j(*fori);
+    lj_snap_add(J);
+    tr[FORL_EXT] = tr[FORL_IDX] = nidx;
+    emitir(IRTGI(op), nidx, stop);
+    if (ev == LOOPEV_LEAVE && rec_for_mayclip(J, d, stop, step))
+      rec_for_clipguard(J, d, stop, step);
   } else {
-    J->maxslot = ra;
-    J->pc = fori+bc_j(*fori)+1;
+    if (ev == LOOPEV_LEAVE) {
+      J->maxslot = ra+FORL_EXT+1;
+      J->pc = fori+1;
+    } else {
+      J->maxslot = ra;
+      J->pc = fori+bc_j(*fori)+1;
+    }
+    lj_snap_add(J);
+    emitir(IRTG(op, t), tr[FORL_IDX], stop);
   }
-  lj_snap_add(J);
-
-  emitir(IRTG(op, t), tr[FORL_IDX], stop);
 
   if (ev == LOOPEV_LEAVE) {
     J->maxslot = ra;
@@ -3769,8 +3865,14 @@ void lj_record_setup(jit_State *J)
     ** The one exception is BC_ITERN, which sets LJ_TRACE_RECORD_1ST.
     */
     lj_snap_add(J);
-    if (bc_op(J->cur.startins) == BC_FORL)
+    if (bc_op(J->cur.startins) == BC_FORL) {
+      /* The hot FORL leaves the int32 path at a clip value: the loop does
+      ** not come back in this form (lj_meta_forclip may continue it as a
+      ** wide loop, at the loop body). */
+      if (rec_for_atclip(&J->L->base[bc_a(J->pc[-1])]))
+	lj_trace_err(J, LJ_TRERR_LLEAVE);
       rec_for_loop(J, J->pc-1, &J->scev, 1);
+    }
     else if (bc_op(J->cur.startins) == BC_ITERC)
       J->startpc = NULL;
     if (1 + J->pt->framesize >= LJ_MAX_JSLOTS)

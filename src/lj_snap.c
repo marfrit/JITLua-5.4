@@ -521,7 +521,7 @@ void lj_snap_replay(jit_State *J, GCtrace *T)
   SnapEntry *map = &T->snapmap[snap->mapofs];
   MSize n, nent = snap->nent;
   BloomFilter seen = 0;
-  int pass23 = 0;
+  int pass23 = 0, fordec = 0;
   J->framedepth = 0;
   /* Emit IR for slots inherited from parent snapshot. */
   for (n = 0; n < nent; n++) {
@@ -553,8 +553,9 @@ void lj_snap_replay(jit_State *J, GCtrace *T)
       tr = emitir_raw(IRT(IR_SLOAD, t), s, mode);
     }
   setslot:
-    /* Same as TREF_* flags. */
+    /* Same as TREF_* flags. SNAP_FORDEC is applied below. */
     J->slot[s] = tr | (sn&(SNAP_TAIL|SNAP_KEYINDEX|SNAP_CONT|SNAP_FRAME));
+    if ((sn & SNAP_FORDEC)) fordec = 1;
     J->framedepth += ((sn & (SNAP_CONT|SNAP_FRAME)) && (s != LJ_FR2));
     if ((sn & SNAP_FRAME))
       J->baseslot = s+1;
@@ -688,6 +689,18 @@ void lj_snap_replay(jit_State *J, GCtrace *T)
 	      emitir(IRT(IR_XBAR, IRT_NIL), 0, 0);
 	    }
 	}
+      }
+    }
+  }
+  if (fordec) {  /* Resume an integer FORL: undo its increment. */
+    for (n = 0; n < nent; n++) {
+      SnapEntry sn = map[n];
+      if ((sn & SNAP_FORDEC)) {
+	BCReg s = snap_slot(sn);
+	TRef step = J->slot[s+FORL_STEP];
+	lj_assertJ(tref_isint(J->slot[s]) && tref_isint(step),
+		   "FORL index or step slot is not an int32");
+	J->slot[s] = emitir(IRTI(IR_SUB), J->slot[s], step);
       }
     }
   }
@@ -982,6 +995,7 @@ const BCIns *lj_snap_restore(jit_State *J, void *exptr)
   BloomFilter rfilt = snap_renamefilter(T, snapno);
   const BCIns *pc = snap_pc(&map[nent]);
   lua_State *L = J->L;
+  int fordec = 0;
 
   /* Set interpreter PC to the next PC to get correct error messages.
   ** But not for returns or tail calls, since pc+1 may be out-of-range.
@@ -1028,6 +1042,8 @@ const BCIns *lj_snap_restore(jit_State *J, void *exptr)
 	setframe_ftsz(o, snap_slot(sn) != 0 ? (int32_t)*flinks-- : ftsz0);
 	L->base = o+1;
 #endif
+      } else if ((sn & SNAP_FORDEC)) {
+	fordec = 1;
       } else if ((sn & SNAP_KEYINDEX)) {
 	/* A IRT_INT key index slot is restored as a number. Undo this. */
 	o->u32.lo = (uint32_t)(LJ_DUALNUM ? intV(o) : lj_num2int(numV(o)));
@@ -1038,6 +1054,18 @@ const BCIns *lj_snap_restore(jit_State *J, void *exptr)
 	lj_assertJ(tvisfunc(o), "tail mark on a non-function slot");
 	o->u64 &= FRAME_TAILCLR;
 #endif
+      }
+    }
+  }
+  if (fordec) {  /* Resume an integer FORL: undo its increment. */
+    for (n = 0; n < nent; n++) {
+      SnapEntry sn = map[n];
+      if ((sn & SNAP_FORDEC)) {
+	TValue *o = &frame[snap_slot(sn)];
+	lj_assertJ(tvisint(o) && tvisint(o+FORL_STEP),
+		   "FORL index or step slot is not an int32");
+	setintV(o, (int32_t)((uint32_t)intV(o) -
+			     (uint32_t)intV(o+FORL_STEP)));
       }
     }
   }

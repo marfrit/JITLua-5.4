@@ -507,6 +507,7 @@ typedef uint32_t TRef;
 #define TREF_CONT		0x00020000
 #define TREF_KEYINDEX		0x00100000
 #define TREF_TAIL		0x00200000  /* Function of a tail-called frame. */
+#define TREF_FORDEC		0x00400000  /* Integer FORL index, incremented. */
 
 #define TREF(ref, t)		((TRef)((ref) + ((t)<<24)))
 

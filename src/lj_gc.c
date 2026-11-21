@@ -898,11 +898,14 @@ static int gc_mayclear(cTValue *o, int val)
   return 0;  /* Cannot clear. */
 }
 
-/* Clear collected entries from weak tables. */
-static void gc_clearweak(global_State *g, GCobj *o)
+/* Clear collected values from weak tables, as PUC's clearbyvalues. Only
+** tables with a weak value part are touched; keys are a separate pass. If
+** stop is not NULL, stop when that table is reached (PUC's origweak/origall
+** prefix: only tables re-linked after the resurrection marks are cleared). */
+static void gc_clearweak_vals(global_State *g, GCobj *o, GCobj *stop)
 {
   UNUSED(g);
-  while (o) {
+  while (o != NULL && o != stop) {
     GCtab *t = gco2tab(o);
     lj_assertG((t->marked & LJ_GC_WEAK), "clear of non-weak table");
     if ((t->marked & LJ_GC_WEAKVAL)) {
@@ -913,15 +916,35 @@ static void gc_clearweak(global_State *g, GCobj *o)
 	if (gc_mayclear(tv, 1))
 	  setnilV(tv);
       }
+      if (t->hmask > 0) {
+	Node *node = noderef(t->node);
+	MSize i, hmask = t->hmask;
+	for (i = 0; i <= hmask; i++) {
+	  Node *n = &node[i];
+	  /* Clear hash value; its key is left to the key pass. */
+	  if (!tvisnil(&n->val) && gc_mayclear(&n->val, 1))
+	    setnilV(&n->val);
+	}
+      }
     }
-    if (t->hmask > 0) {
+    o = gcref(t->gclist);
+  }
+}
+
+/* Clear entries of weak-key tables whose key is about to be collected
+** (PUC's clearbykeys, after the resurrection marks). */
+static void gc_clearweak_keys(global_State *g, GCobj *o)
+{
+  UNUSED(g);
+  while (o != NULL) {
+    GCtab *t = gco2tab(o);
+    lj_assertG((t->marked & LJ_GC_WEAK), "clear of non-weak table");
+    if ((t->marked & LJ_GC_WEAKKEY) && t->hmask > 0) {
       Node *node = noderef(t->node);
       MSize i, hmask = t->hmask;
       for (i = 0; i <= hmask; i++) {
 	Node *n = &node[i];
-	/* Clear hash slot when key or value is about to be collected. */
-	if (!tvisnil(&n->val) && (gc_mayclear(&n->key, 0) ||
-				  gc_mayclear(&n->val, 1)))
+	if (!tvisnil(&n->val) && gc_mayclear(&n->key, 0))
 	  setnilV(&n->val);
       }
     }
@@ -1086,6 +1109,7 @@ void lj_gc_freeall(global_State *g)
 static void atomic(global_State *g, lua_State *L)
 {
   size_t udsize;
+  GCobj *origweak;
 
   gc_mark_uv(g);  /* Need to remark open upvalues (the thread may be dead). */
   gc_propagate_gray(g);  /* Propagate any left-overs. */
@@ -1106,12 +1130,22 @@ static void atomic(global_State *g, lua_State *L)
   setgcrefnull(g->gc.grayagain);
   gc_propagate_gray(g);  /* Propagate it. */
 
+  /* PUC lgc.c atomic: clear weak values before checking finalizers, so the
+  ** finalizer of a weakly referenced object sees the entry gone. The saved
+  ** head is PUC's origweak: only tables re-linked by the resurrection marks
+  ** are cleared again below. */
+  gc_clearweak_vals(g, gcref(g->gc.weak), NULL);
+  origweak = gcref(g->gc.weak);
+
   udsize = lj_gc_separateudata(g, 0);  /* Separate userdata to be finalized. */
   gc_mark_mmudata(g);  /* Mark them. */
   udsize += gc_propagate_gray(g);  /* And propagate the marks. */
 
-  /* All marking done, clear weak tables. */
-  gc_clearweak(g, gcref(g->gc.weak));
+  /* All marking done: clear dead ephemeron/allweak keys, then the values of
+  ** the weak tables that resurrection linked again (PUC clearbykeys, then
+  ** clearbyvalues(weak, origweak)). */
+  gc_clearweak_keys(g, gcref(g->gc.weak));
+  gc_clearweak_vals(g, gcref(g->gc.weak), origweak);
 
   lj_buf_shrink(L, &g->tmpbuf);  /* Shrink temp buffer. */
 

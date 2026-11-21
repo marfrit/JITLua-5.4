@@ -46,8 +46,9 @@ typedef struct BCInsLine {
   BCLine line;		/* Line number for this bytecode. */
 } BCInsLine;
 
-/* Index into variable stack. */
-typedef uint16_t VarIndex;
+/* Index into variable stack. 32 bit: the locals, labels and gotos of all
+** functions being parsed share the stack (5.4 has no limit across them). */
+typedef uint32_t VarIndex;
 
 #define LJ_VINDEX_HSIZE	32	/* Hash table size. Must be a power of 2. */
 #define LJ_VINDEX_MASK	(LJ_VINDEX_HSIZE-1)
@@ -60,6 +61,7 @@ typedef struct VarInfo {
   BCLine line;		/* Definition line (labels: for 5.4 duplicate diagnostics). */
   uint8_t slot;		/* Variable slot. */
   uint8_t info;		/* Variable/goto/label info. */
+  uint16_t ord;		/* Locals: declaration number within the function. */
   VarIndex prev;	/* Previous entry in variable hash chain. */
 } VarInfo;
 
@@ -86,6 +88,9 @@ typedef struct LexState {
   VarInfo *vstack;	/* Stack for names and extents of local variables. */
   MSize sizevstack;	/* Size of variable stack. */
   MSize vtop;		/* Top of variable stack. */
+  VarIndex *vlocal;	/* Variable stack index of each declared local. */
+  MSize sizevlocal;	/* Size of vlocal. */
+  MSize nvlocal;	/* Top of vlocal. */
   BCInsLine *bcstack;	/* Stack for bytecode instructions/line numbers. */
   MSize sizebcstack;	/* Size of bytecode stack. */
   uint32_t level;	/* Syntactical nesting level. */

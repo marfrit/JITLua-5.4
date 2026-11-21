@@ -24,7 +24,7 @@ LJ_FUNC int lj_meta_tailcall(lua_State *L, cTValue *tv);
 /* Return values of lj_meta_for. */
 #define LJ_FOR_RETRY	0	/* slots prepared, re-execute FORI/JFORI */
 #define LJ_FOR_SKIP	1	/* PUC forprep skipped the loop: jump past it */
-#define LJ_FOR_WIDE	2	/* state object in FOR_IDX, FOR_EXT set: enter the body */
+#define LJ_FOR_WIDE	2	/* wide integer loop prepared: enter the body */
 
 /* C helpers for some instructions, called from assembler VM. */
 LJ_FUNCA cTValue *lj_meta_tget(lua_State *L, cTValue *o, cTValue *k);
@@ -53,10 +53,13 @@ LJ_FUNCA void lj_meta_istype(lua_State *L, BCReg ra, BCReg tp);
 #endif
 LJ_FUNCA TValue *lj_meta_call(lua_State *L, TValue *func, TValue *top);
 /* Lua 5.4 numeric 'for': lj_meta_for prepares the loop (PUC forprep) and says
-** what the FORI stub has to do; lj_meta_forl runs one wide-loop iteration (PUC
-** OP_FORLOOP's integer branch). Returns LJ_FOR_* / non-zero to continue. */
+** what the FORI stub has to do (LJ_FOR_*); lj_meta_forl runs one iteration of
+** an integer loop that is not small (PUC OP_FORLOOP's integer branch) and
+** returns the body PC to continue or NULL; lj_meta_forkind is the recorder's
+** side-effect free view of a FORI. */
 LJ_FUNCA int LJ_FASTCALL lj_meta_for(lua_State *L, TValue *o);
-LJ_FUNCA int LJ_FASTCALL lj_meta_forl(lua_State *L, TValue *o);
+LJ_FUNCA const BCIns * LJ_FASTCALL lj_meta_forl(lua_State *L, TValue *o);
+LJ_FUNC int lj_meta_forkind(lua_State *L, cTValue *o, TValue *out);
 /* 5.4 to-be-closed variables. */
 LJ_FUNCA void LJ_FASTCALL lj_meta_tbcmark(lua_State *L, TValue *o);
 LJ_FUNCA TValue *lj_meta_tbcclose(lua_State *L, TValue *level, MSize multres);

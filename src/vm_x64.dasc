@@ -1365,39 +1365,26 @@ static void build_subroutines(BuildCtx *ctx)
   |  ins_next
   |
   |->vmeta_for_wide:
-  |  // Wide integer loop entered; the state object is in FOR_IDX and FOR_EXT
-  |  // holds the control variable. A wide loop is not recorded, so even a
-  |  // JFORI patched by a trace of another loop kind must go straight into the
-  |  // body: record the body address for the FORL stub and fall through.
-  |  lea RA, [BASE+RA*8]		// RA is the operand A register index again.
-  |  mov TMPR, [RA]
-  |  cleartp TMPR
-  |  mov qword [TMPR+sizeof(GCudata)+offsetof(ForState, body)], PC
+  |  // Wide integer loop entered: lj_meta_for has written the slots (plain
+  |  // numbers) and FOR_EXT. A wide loop is not recorded, so even a JFORI
+  |  // patched by a trace of another loop kind goes straight into the body.
   |  ins_next
   |
   |->vmeta_forl:
-  |  // One iteration of a wide integer loop: lj_meta_forl returns 1 to
-  |  // continue, 0 to finish.
+  |  // One iteration of an integer loop that is not small: lj_meta_forl
+  |  // returns the PC of the loop body (also for a JFORL, whose jump field
+  |  // holds the trace number), or NULL to leave the loop.
   |  mov L:RB, SAVE_L
   |  mov L:RB->base, BASE
   |  mov CARG2, RA			// Caveat: CARG2 == BASE
   |  mov L:CARG1, L:RB			// Caveat: CARG1 == RA
   |  mov SAVE_PC, PC
-  |  call extern lj_meta_forl	// (lua_State *L, TValue *base)
+  |  call extern lj_meta_forl	// (lua_State *L, TValue *base) -> PC/NULL
   |  mov BASE, L:RB->base
-  |  mov TMPRd, eax			// RCd/RDd is eax: save the status first.
-  |  mov RCd, [PC-4]
-  |  movzx RAd, RCH
-  |  test TMPRd, TMPRd
-  |  jz ->vmeta_forl_leave
-  |  // Continue at the body address kept in the state object: a JFORL's jump
-  |  // field holds the trace number, not a target.
-  |  lea RA, [BASE+RA*8]
-  |  mov RB, [RA]
-  |  cleartp RB
-  |  mov RC, [RB+sizeof(GCudata)+offsetof(ForState, body)]
+  |  test RC, RC
+  |  jz >1
   |  mov PC, RC
-  |->vmeta_forl_leave:
+  |1:
   |  ins_next
   |
   |//-----------------------------------------------------------------------
@@ -5245,8 +5232,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
     } else {
       // A wide integer loop has an integer step, a float loop a float step
       // (lj_meta_for converted it): this tells them apart in the FP path.
-      // Checked before the debug assertions below: a wide loop leaves the
-      // original limit and step in their slots (they may be strings).
+      // Anything else in the step slot (written through the debug library)
+      // goes to lj_meta_forl, too, which checks every slot.
       |  checknum RB, ->vmeta_forl
 #ifdef LUA_USE_ASSERT
       |  checknumtp FOR_STOP, ->assert_bad_for_arg_type

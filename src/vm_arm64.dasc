@@ -1155,10 +1155,10 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov CARG2, RA
   |   str PC, SAVE_PC
   |  bl extern lj_meta_for	// (lua_State *L, TValue *base) -> status
-  |  ldr BASE, L->base		// May have moved (a wide loop allocates).
-  |  cmp CRET1, #2		// LJ_FOR_WIDE
+  |  ldr BASE, L->base		// May have moved (a wide loop may box).
+  |  cmp CRET1w, #2		// LJ_FOR_WIDE (an int: only w0 is defined)
   |  beq ->vmeta_for_wide
-  |  cbz CRET1, ->vmeta_for_retry
+  |  cbz CRET1w, ->vmeta_for_retry
   |  // PUC forprep skipped the loop: jump past it.
   |  ldr INSw, [PC, #-4]
   |  decode_RD RC, INS
@@ -1181,37 +1181,24 @@ static void build_subroutines(BuildCtx *ctx)
   |  b =>BC_FORI
   |
   |->vmeta_for_wide:
-  |  // Wide integer loop entered: FOR_IDX holds the state object and FOR_EXT
-  |  // the control variable. A wide loop is not recorded, so even a JFORI
-  |  // patched by a trace of another loop kind goes straight into the body;
-  |  // record the body address for the FORL stub.
-  |  ldr INSw, [PC, #-4]
-  |  decode_RA RA, INS
-  |  add RA, BASE, RA, lsl #3
-  |  ldr TMP0, [RA]
-  |  and TMP0, TMP0, #LJ_GCVMASK
-  |  str PC, [TMP0, #sizeof(GCudata)+offsetof(ForState, body)]
+  |  // Wide integer loop entered: lj_meta_for has written the slots (plain
+  |  // numbers) and FOR_EXT. A wide loop is not recorded, so even a JFORI
+  |  // patched by a trace of another loop kind goes straight into the body.
   |  ins_next
   |
   |->vmeta_forl:
-  |  // One iteration of a wide integer loop: 1 continues, 0 finishes.
+  |  // One iteration of an integer loop that is not small: lj_meta_forl
+  |  // returns the PC of the loop body (also for a JFORL, whose jump field
+  |  // holds the trace number), or NULL to leave the loop.
   |  mov CARG1, L
   |   str BASE, L->base
   |  mov CARG2, RA
   |   str PC, SAVE_PC
-  |  bl extern lj_meta_forl	// (lua_State *L, TValue *base)
-  |  ldr BASE, L->base		// FOR_EXT may box and move the stack.
-  |  cbz CRET1, ->vmeta_forl_leave
-  |  // Continue at the body address in the state object: a JFORL's jump field
-  |  // holds the trace number, not a target.
-  |  ldr INSw, [PC, #-4]
-  |  decode_RA RA, INS
-  |  add RA, BASE, RA, lsl #3
-  |  ldr TMP0, [RA]
-  |  and TMP0, TMP0, #LJ_GCVMASK
-  |  ldr TMP1, [TMP0, #sizeof(GCudata)+offsetof(ForState, body)]
-  |  mov PC, TMP1
-  |->vmeta_forl_leave:
+  |  bl extern lj_meta_forl	// (lua_State *L, TValue *base) -> PC/NULL
+  |  ldr BASE, L->base		// FOR_EXT may box, a GC step may run.
+  |  cbz CRET1, >1
+  |  mov PC, CRET1
+  |1:
   |  ins_next
   |
   |//-----------------------------------------------------------------------
@@ -4585,6 +4572,8 @@ static void build_ins(BuildCtx *ctx, BCOp op, int defop)
       |  ldp d0, d1, FOR_IDX
       |  // A wide integer loop has an integer step, a float loop a float step
       |  // (lj_meta_for converted it): this tells them apart in the FP path.
+      |  // Anything else in the step slot (written through the debug library)
+      |  // goes to lj_meta_forl, too, which checks every slot.
       |  checknum CARG3, ->vmeta_forl
       |  ldr d2, FOR_STEP
       |  fadd d0, d0, d2

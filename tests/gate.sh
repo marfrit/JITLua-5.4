@@ -290,6 +290,9 @@ verdict() {  # verdict <label> <seconds>
 # harness over everything, then the stage counts.
 gate_full() {
   D=$TMP
+  # The assert stage of ci-box passes HARNESS_EXTRA on to the harness: an
+  # exported one would take tests out of the full run.
+  unset HARNESS_EXTRA
   r1=0; sh tests/ci-box.sh > $D/cb.log 2>&1 || r1=$?
   r2=0; sh tests/ci-local.sh --sanitizers-only > $D/san.log 2>&1 || r2=$?
   r3=0; { make -j4 >/dev/null 2>&1 && tests/ref/fetch-ref.sh >/dev/null 2>&1 && tests/harness.sh --mode all --timeout 120 --strict; } > $D/strict.log 2>&1 || r3=$?

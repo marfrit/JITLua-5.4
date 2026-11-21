@@ -2008,6 +2008,8 @@ LUA_API int lua_closethread(lua_State *L, lua_State *from)
   L->status = LUA_OK;
   /* Closer's nesting; lj_meta_tbccloseall counts the handler calls. */
   L->ccallnest = L->ccallbase = from ? from->ccallnest : 0;
+  /* No frames below the handlers (PUC luaE_resetthread). */
+  L->base = tvref(L->stack) + 1 + LJ_FR2;
   st = lj_meta_tbccloseall(L, tvref(L->stack), eslot);
   /* The reset thread has no frames: nothing is nested. */
   L->ccallnest = L->ccallbase = 0;

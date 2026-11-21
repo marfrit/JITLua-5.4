@@ -302,8 +302,10 @@ static void *err_unwind(lua_State *L, void *stopcf, int errcode)
       if (errcode) {
 	ptrdiff_t fofs = savestack(L, frame);
 	/* 5.4: the __close handlers run at the catching level, then the
-	** protected call from C (lj_vm_pcall) counts out. */
-	tbc_closeunwound(L, frame + 1, cf, frame + 1,
+	** protected call from C (lj_vm_pcall) counts out. Their caller is the
+	** C function that made the protected call (PUC luaD_pcall restores
+	** L->ci before closing), not the frames being discarded. */
+	tbc_closeunwound(L, frame + 1, cf, frame_prevd(frame) + 1,
 			 L->ccallnest > 0 ? L->ccallnest - 1 : 0);
 	err_ccallout(L);
 	frame = restorestack(L, fofs);  /* Handlers may grow the stack. */

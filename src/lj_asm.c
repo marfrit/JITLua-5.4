@@ -1212,7 +1212,7 @@ static void asm_gc_check(ASMState *as, int loophead);
 
 /* Charge per dropped allocation, and the largest charge per pass (an arm64
 ** 12-bit immediate). */
-#define GC_VDEBT_ALLOC	32
+#define GC_VDEBT_ALLOC	8
 #define GC_VDEBT_MAX	4095
 
 /* An allocation that the trace drops (unused, or sunk into the snapshots)

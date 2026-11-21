@@ -888,7 +888,7 @@ LUALIB_API const char *luaL_checklstring(lua_State *L, int idx, size_t *len)
   GCstr *s;
   if (LJ_LIKELY(tvisstr(o))) {
     s = strV(o);
-  } else if (tvisnumber(o)) {
+  } else if (tvisnumber(o) || tvisi64(o)) {  /* ADR-001b: box converts */
     lj_gc_check(L);
     o = index2adr(L, idx);  /* GC may move the stack. */
     s = lj_strfmt_number(L, o);

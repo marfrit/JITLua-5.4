@@ -200,7 +200,9 @@ GCstr *lj_lib_checkstr(lua_State *L, int narg)
   if (o < L->top) {
     if (LJ_LIKELY(tvisstr(o))) {
       return strV(o);
-    } else if (tvisnumber(o)) {
+    } else if (tvisnumber(o) || tvisi64(o)) {
+      /* 5.4: a boxed integer is a number like any other (PUC
+      ** luaL_checklstring converts it with lua_tolstring). */
       GCstr *s = lj_strfmt_number(L, o);
       setstrV(L, o, s);
       return s;

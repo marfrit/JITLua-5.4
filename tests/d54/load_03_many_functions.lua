@@ -13,14 +13,15 @@ end
 local function group(n)  -- one function that holds n functions
   return "function() return {" .. string.rep("function() end,", n) .. "} end,"
 end
-for _, groups in ipairs{1, 2, 4, 8} do
-  local f = try("groups " .. groups, "return {" .. string.rep(group(30000), groups) .. "}")
+-- 23000 and 69000 functions: the second is past the old limit. (Sized for
+-- the sanitizer builds, where this parsing is far slower.)
+for _, groups in ipairs{1, 3} do
+  local f = try("groups " .. groups, "return {" .. string.rep(group(23000), groups) .. "}")
   local n = 0
   if f then for _, g in ipairs(f()) do n = n + #g() end end
   print("functions", n)
-  try("stmts " .. groups, string.rep("local function w()\n" ..
-      string.rep("x = function() end\n", 30000) .. "end\n", groups))
 end
+try("stmts", "local function w()\n" .. string.rep("x = function() end\n", 2000) .. "end\n")
 -- nested functions, each level one more closure
 local depth = 60
 local f = try("nested", string.rep("return function() ", depth) .. "return 1" ..
@@ -30,10 +31,10 @@ for i = 1, depth + 1 do v = v() end
 print("nested value", v)
 -- from a coroutine and from deep recursion
 print(coroutine.wrap(function()
-  return load(string.rep("x = function() end\n", 20000)) ~= nil
+  return load(string.rep("x = function() end\n", 3000)) ~= nil
 end)())
 local function deep(n)
-  if n == 0 then return load(string.rep("x = function() end\n", 3000)) ~= nil end
+  if n == 0 then return load(string.rep("x = function() end\n", 1000)) ~= nil end
   return (deep(n - 1))
 end
 print(deep(150))

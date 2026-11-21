@@ -339,6 +339,7 @@ enum {
   UDTYPE_FFI_CLIB,	/* FFI C library namespace. */
   UDTYPE_BUFFER,	/* String buffer. */
   UDTYPE_I64BOX,	/* Boxed interned 64-bit integer (ADR-001b). Not user-visible. */
+  UDTYPE_FORSTATE,	/* Wide numeric 'for' loop state (Lua 5.4). Not user-visible. */
   UDTYPE__MAX
 };
 
@@ -353,6 +354,18 @@ enum {
 ** new tag: the VM's 17-bit form drops the tag's bit 0). */
 #define tvisi64(o)	(tvisudata(o) && udataV(o)->udtype == UDTYPE_I64BOX)
 #define i64V(o)		check_exp(tvisi64(o), *(int64_t *)uddata(udataV(o)))
+/* Wide numeric 'for' loop state (Lua 5.4, lj_meta.c). Not user-visible. */
+#define tvisforstate(o) \
+  (tvisudata(o) && udataV(o)->udtype == UDTYPE_FORSTATE)
+/* State of a wide numeric 'for' loop (Lua 5.4, lj_meta.c): PUC's forprep
+** values plus the loop body address the VM fills in on entry (a JFORL has
+** no body target of its own: its jump field holds the trace number). */
+typedef struct ForState {
+  int64_t idx;	/* internal index (current control variable) */
+  uint64_t count;	/* remaining iterations after the current one */
+  int64_t step;
+  const void *body;	/* BCIns * of the loop body, set by FORI */
+} ForState;
 /* 5.4 user values live behind the (8-byte aligned) payload. */
 #define uduvofs(len)	(((len)+7u)&~7u)
 #define uduvs(u)	((TValue *)((char *)uddata(u)+uduvofs((u)->len)))

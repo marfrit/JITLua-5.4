@@ -125,14 +125,22 @@ LUA_API int lua_status(lua_State *L)
 
 LUA_API int lua_checkstack(lua_State *L, int size)
 {
-  if (size > LUAI_MAXCSTACK || (L->top - L->base + size) > LUAI_MAXCSTACK) {
-    return 0;  /* Stack overflow. */
-  } else if (size > 0) {
+  /* 5.4 lua_checkstack: the stack may grow up to its maximum (PUC
+  ** luaD_growstack, LUAI_MAXSTACK), not only by LUAI_MAXCSTACK slots per
+  ** C function as in 5.1. Here that maximum is LJ_STACK_MAX (LUAI_MAXSTACK
+  ** of this tree): lj_state_growstack grows the stack to top + size plus one
+  ** slot and LJ_STACK_EXTRA, and raises a stack overflow from that size on,
+  ** so a request that cannot fit is refused before it is made. */
+  if (size > 0) {
     int avail = (int)(mref(L->maxstack, TValue) - L->top);
-    if (size > avail &&
-	lj_state_cpgrowstack(L, (MSize)(size - avail)) != LUA_OK) {
-      L->top--;
-      return 0;  /* Out of memory. */
+    if (size > avail) {
+      if ((uint64_t)(L->top - tvref(L->stack)) + (uint64_t)size + 1 +
+	  LJ_STACK_EXTRA >= (uint64_t)LUAI_MAXSTACK)
+	return 0;  /* Stack overflow. */
+      if (lj_state_cpgrowstack(L, (MSize)(size - avail)) != LUA_OK) {
+	L->top--;
+	return 0;  /* Out of memory. */
+      }
     }
   }
   return 1;

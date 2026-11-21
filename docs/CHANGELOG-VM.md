@@ -953,6 +953,19 @@ target x86_64 (GC64) and arm64.
   the empty table, on x86_64 and aarch64 at `-O0`..`-O3`, and the assert
   build stopped in `rec_check_slots`. The recorder records the `nil`.
   `tests/d54/iter_03_ipairs_aux_results.lua` (mode B, all opt levels).
+- `lua_load` and `lua_dump` had their Lua 5.1 signatures: a C module written
+  for Lua 5.4 that calls `lua_load(L, reader, data, chunkname, mode)` or
+  `lua_dump(L, writer, data, strip)` did not compile. Both have the
+  signatures of PUC 5.4.9's `lua.h` now; `mode` is the one `load` takes,
+  `strip` leaves the debug information out like `string.dump(f, true)`.
+  `lua_loadx` remains, with the same arguments. `lua_pushfstring`,
+  `lua_pushvfstring` and `luaL_error` did not know `%I` (a `lua_Integer`,
+  passed as `LUAI_UACINT`) and `%U` (a code point, written as UTF-8): the
+  result was `?` and the rest of the format was dropped
+  (`luaL_error(L, "n=%I s=%s", ...)` gave `n=?`). They are formatted as
+  `lobject.c` `luaO_pushvfstring` does. Evidence: puc-code, measured-here on
+  x86_64 and aarch64. `tests/capi/api54.c`, built against both libraries
+  with identical output.
 
 ## Known JIT/performance rows (not semantic divergences)
 

@@ -989,11 +989,16 @@ static LoopEvent rec_for(jit_State *J, const BCIns *fori, int isforl)
   }
 
   ev = rec_for_iter(&op, iv, isforl);
-  /* PUC forprep enters a float loop unless the start is past the limit, so
-  ** an unordered comparison (NaN limit) enters it, as the interpreter's FORI
-  ** does. The FORL test stays ordered. */
-  if (!isforl && t == IRT_NUM && ev != LOOPEV_LEAVE)
-    op = rec_for_direction(&iv[FORL_STEP]) ? IR_ULE : IR_UGE;
+  /* A NaN limit met at runtime (one seen while recording aborts above):
+  ** PUC forprep enters a float loop unless the start is past the limit, so
+  ** FORI enters on an unordered comparison, as the interpreter's FORI does;
+  ** FORL continues only on an ordered one, so the guard that the loop is
+  ** left must hold for an unordered comparison as well. */
+  if (t == IRT_NUM) {
+    int d = rec_for_direction(&iv[FORL_STEP]);
+    if (!isforl && ev != LOOPEV_LEAVE) op = d ? IR_ULE : IR_UGE;
+    else if (isforl && ev == LOOPEV_LEAVE) op = d ? IR_UGT : IR_ULT;
+  }
   if (ev == LOOPEV_LEAVE) {
     J->maxslot = ra+FORL_EXT+1;
     J->pc = fori+1;

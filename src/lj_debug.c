@@ -148,6 +148,11 @@ static BCLine debug_frameline(lua_State *L, GCfunc *fn, cTValue *nextframe)
     GCproto *pt = funcproto(fn);
     lj_assertL(pc <= pt->sizebc, "PC out of range");
     if (!proto_lineinfo(pt)) return -1;  /* 5.4: no line info, no line. */
+    /* 5.4: a frame at its function header (a call hook) is at its first
+    ** instruction in PUC (ldo.c luaD_hookcall sees savedpc there, a vararg
+    ** function's hook runs after OP_VARARGPREP), so currentline is the line
+    ** of the first instruction, not linedefined. */
+    if (pc == 0 && pt->sizebc > 1) pc = 1;
     return lj_debug_line(pt, pc);
   }
   return -1;

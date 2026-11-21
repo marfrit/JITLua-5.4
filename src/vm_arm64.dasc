@@ -597,18 +597,28 @@ static void build_subroutines(BuildCtx *ctx)
   |
   |  // Resume after yield (like a return).
   |  str L, GL->cur_L
+  |    init_constants
+  |     strb wzr, L->status
+  |     st_vmstate ST_INTERP
+  |  ldrb TMP1w, GL->hookmask
+  |  tbnz TMP1w, #LUA_HOOKRET, >8
+  |7:
   |  mov RA, BASE
   |   ldp BASE, CARG1, L->base
-  |    init_constants
   |  ldr PC, [BASE, FRAME_PC]
-  |     strb wzr, L->status
   |   sub RC, CARG1, BASE
   |  ands CARG1, PC, #FRAME_TYPE
   |   add RC, RC, #8
-  |     st_vmstate ST_INTERP
   |   str RCw, SAVE_MULTRES
   |  beq ->BC_RET_Z
   |  b ->vm_return
+  |
+  |8:  // 5.4: return hook of the C function that yielded, at resume time.
+  |  mov CARG1, L
+  |  mov CARG2, BASE
+  |  bl extern lj_dispatch_yret		// (lua_State *L, TValue *res)
+  |  mov BASE, CRET1			// Results, moved if the stack grew.
+  |  b <7
   |
   |->vm_pcall:				// Setup protected C frame and enter VM.
   |  // (lua_State *L, TValue *base, int nres1, ptrdiff_t ef)

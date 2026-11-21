@@ -562,6 +562,31 @@ TValue * LJ_FASTCALL lj_dispatch_pret(lua_State *L, TValue *res, int n,
   return res;
 }
 
+/* Return hook of a C function that yielded (coroutine.yield, or a C
+** function ending in lua_yield). PUC finishes that call when the coroutine
+** is resumed (ldo.c resume -> luaD_poscall -> rethook), so the event fires
+** here, from vm_resume, with the values passed to resume as the transfer
+** values: they are at res..L->top, L->base is the yielding function's base
+** and its function slot is intact. A yield from a hook left a pseudo-frame
+** with the thread in that slot instead: that is no call to finish. Returns
+** res, which moves if the hook grew the stack.
+*/
+TValue * LJ_FASTCALL lj_dispatch_yret(lua_State *L, TValue *res)
+{
+  global_State *g = G(L);
+  setmref(L->hookff, NULL);  /* The note of the yield's call hook is stale. */
+  if ((g->hookmask & LUA_MASKRET) && !hook_active(g) &&
+      tvisfunc(L->base-1-LJ_FR2)) {
+    ERRNO_SAVE
+    ptrdiff_t resofs = savestack(L, res);
+    MSize n = (MSize)(L->top - res);
+    callhook(L, LUA_HOOKRET, -1, n ? (MSize)(res - L->base) + 1 : 0, n);
+    res = restorestack(L, resofs);
+    ERRNO_RESTORE
+  }
+  return res;
+}
+
 int LJ_FASTCALL lj_dispatch_cret(lua_State *L, int n)
 {
   /* n >= 0: a negative count is a yield, whose pending slots lua_yield

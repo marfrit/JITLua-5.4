@@ -645,6 +645,9 @@ static void build_subroutines(BuildCtx *ctx)
   |  mov [DISPATCH+DISPATCH_GL(cur_L)], L:RB
   |  set_vmstate INTERP
   |  mov byte L:RB->status, RDL
+  |  test byte [DISPATCH+DISPATCH_GL(hookmask)], LUA_MASKRET
+  |  jnz >8
+  |7:
   |  mov BASE, L:RB->base
   |  mov RD, L:RB->top
   |  sub RD, RA
@@ -656,6 +659,14 @@ static void build_subroutines(BuildCtx *ctx)
   |  test PCd, FRAME_TYPE
   |  jz ->BC_RET_Z
   |  jmp ->vm_return
+  |
+  |8:  // 5.4: return hook of the C function that yielded, at resume time.
+  |  mov CARG2, RA			// Caveat: CARG1 may be RA.
+  |  mov CARG1, L:RB
+  |  call extern lj_dispatch_yret	// (lua_State *L, TValue *res)
+  |  mov RA, RC				// Results, moved if the stack grew.
+  |  mov L:RB, SAVE_L
+  |  jmp <7
   |
   |->vm_pcall:				// Setup protected C frame and enter VM.
   |  // (lua_State *L, TValue *base, int nres1, ptrdiff_t ef)

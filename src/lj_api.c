@@ -1906,7 +1906,9 @@ LUA_API int lua_yield(lua_State *L, int nresults)
       L->cframe = NULL;
       L->status = LUA_YIELD;
       return -1;
-    } else {  /* Yield from hook: add a pseudo-frame. */
+    } else if (tvisfunc(L->base-1-LJ_FR2) &&
+	       isluafunc(funcV(L->base-1-LJ_FR2))) {
+      /* Yield from hook: add a pseudo-frame. */
       TValue *top = L->top;
       hook_leave(g);
       (top++)->u64 = cframe_multres(cf);
@@ -1926,6 +1928,9 @@ LUA_API int lua_yield(lua_State *L, int nresults)
       lj_vm_unwind_c(cf, LUA_YIELD);
 #endif
     }
+    /* A hook running for a C function (its call or return event, also the
+    ** return event of a yield that vm_resume fires) has no bytecode position
+    ** that lj_cont_hook could continue at: refused like any other C call. */
   }
   /* 5.4 wording: inside a coroutine the yield is blocked by a C-call
   ** boundary (pcall of a C function, a sort/gsub callback); only the main

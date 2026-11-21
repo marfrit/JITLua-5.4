@@ -15,8 +15,8 @@ Platforms: all VM and JIT changes target **x86_64 (GC64) and arm64** on Linux,
 the two tested platforms. The other LuaJIT backends (x86, arm, ppc, mips and
 non-GC64 builds) are not maintained and may lack individual 5.4 changes.
 The Lua 5.4 numeric-`for` rules are implemented in the x86_64 and arm64 VMs
-only; the other backends compile but keep LuaJIT's 2.1 coercion and would
-misread a wide loop's state object.
+only; the other backends compile but keep LuaJIT's 2.1 coercion and do not
+run a wide integer loop (they have no `vmeta_forl` path).
 For x86_64 without GC64 that is concrete: `src/Makefile` picks `vm_x86.dasc`
 (the VM for 32 bit GC references) whenever `LJ_FR2` is off, and that VM has no
 handler for `BC_IDIV`, `BC_KI64`, `BC_TBC` or `BC_TBCCLO` and no `cont_tbc` or
@@ -67,6 +67,39 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   "final count" lines), so its modes cannot match; the
   message it asserts on line 29 ("error in error handling") is fixed
   (`tests/d54/err_11_errerr_msg.lua`). Rows in `tests/known-different.tsv`.
+- `FORK` The hidden `(for state)` slots of a numeric `for` loop, as
+  `debug.getlocal` shows them. PUC 5.4.9 keeps the index, the remaining
+  iteration count and the step of an integer loop there (`lvm.c` `forprep`);
+  this VM keeps the index, the converted limit and the step, because the
+  int32 fast paths of FORI/FORL and the compiled loops compare against the
+  limit, and a count in a wide loop would be a new boxed integer on every
+  iteration. In a wide loop whose index fits int32 while the limit or the
+  step does not (`for i = 1, math.huge`), the index slot holds the index as
+  a float, which keeps the int32 path away from it; the control variable is
+  an integer as in PUC. All three slots are numbers in every loop kind, and
+  copying all three between two running loops gives PUC's iterations
+  (measured-here, x86_64 and arm64, `-joff`/`-jon`,
+  `tests/d54/for_03_wide_state.lua`).
+- `IMPL-DEFINED` Writing one `(for state)` slot with `debug.setlocal` to a
+  value of another kind. PUC reads the slots without a type check and
+  reinterprets the raw bits of its `TValue` union (`lvm.c` `OP_FORLOOP`,
+  `floatforloop`): a float loop whose step becomes an integer runs with the
+  bit pattern of the float limit as its count. A NaN-boxed VM has no such
+  union, so that result cannot be reproduced. Here the loop continues with
+  what the slots say as numbers: a float step makes a float loop (the FP
+  path reads the other two slots as floats; a non-float there compares as
+  NaN and ends the loop); an
+  integer step an integer loop whose index must be an integer or an
+  integral float and whose limit is converted like `forprep` does;
+  otherwise `bad 'for' <what> (number expected, got <type>)`,
+  `'for' step is zero` or `number has no integer representation`. No slot
+  value is ever followed as a pointer. Two shapes keep LuaJIT's behaviour:
+  an int32 index written next to a limit or step outside int32 is run by
+  the int32 path, which reads only the low words of the other two slots;
+  and a compiled small loop keeps a constant limit and step in the trace.
+  Evidence: puc-code (`lvm.c` `OP_FORLOOP`), measured-here (x86_64 and
+  arm64, `-joff`/`-jon`, `-O0`..`-O3`, `tests/d54/for_04_forged_state.lua`,
+  mode B only: there is no PUC result to compare).
 - `IMPL-DEFINED` String arithmetic is part of the VM's arithmetic fallback;
   the string metatable has no `__add`, `__sub`, ... entries (PUC implements
   the coercion through them, so there it can be inspected and replaced).

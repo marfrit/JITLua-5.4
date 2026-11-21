@@ -107,3 +107,108 @@ a hot loop (> 200 iterations) of each kind under `-jon`, so trace exits and
 the NYI abort are exercised; a wide loop with a `break` and with a `goto`
 out; a coroutine yield inside a wide loop. Endless-loop risks get an
 iteration guard in the test, never a timeout.
+
+## Revision: plain slots instead of a state object (2026-11-21)
+
+The first implementation kept a wide loop's state (index, count, step, body
+address) in a private userdata in `FOR_IDX`. A pre-push review found that
+the debug library could reach it: `debug.setlocal` on the step slot of a
+float loop sent FORL to `lj_meta_forl`, which read the float in `FOR_IDX` as
+the state object (SIGSEGV and a write through a forged pointer, both
+architectures, `-joff` and `-jon`); a state copied into another loop jumped
+to the body address of a different function; `debug.getlocal` showed the
+object as a userdata; and every loop start allocated it.
+
+Now the slots hold plain numbers, as PUC's do:
+
+| slot | small integer | wide integer | float |
+|---|---|---|---|
+| `FOR_IDX` | int32 index | index, canonical (an int32 index as a float, see below) | float index |
+| `FOR_STOP` | int32 limit | converted limit, canonical | float limit |
+| `FOR_STEP` | int32 step | step, canonical | float step |
+
+The int32 FORL path takes an int32 `FOR_IDX` as its only witness and reads
+the other two slots by their low words, so a wide loop whose index fits
+int32 while the limit or step does not stores the index as a float (exact).
+FORL reaches its FP path for every wide loop (`FOR_IDX` is no int32), finds
+an integer step there and calls `lj_meta_forl`, which reads the three slots
+as they are, decides with an overflow-free limit test (the same iterations
+as PUC's precomputed count), writes the canonical control variable and the
+index and returns the body PC, taken from the FORL instruction itself (for a
+JFORL from the trace's start instruction). When index, limit and step all fit
+int32 again it stores them in the int32 form and the int32 path takes over,
+which is exact for such values. Values written through the debug library are
+handled by the same code; the rules are in `docs/DIFFERENCES.md`.
+
+The recorder no longer calls `lj_meta_for` before the FORI executes (that
+call converted the slots in place and made the trace load the converted
+types). `lj_meta_forkind` classifies without side effects, and the trace
+converts like `forprep`: floor/ceil for a float limit of an integer loop
+under a range guard, `tonumber` (including `CONV num.i64`) for a float loop.
+A zero-trip loop is recorded as a guarded skip, a float FORI enters on an
+unordered comparison like the interpreter. The FORL/loop-start recorder
+aborts unless the slots are all int32 or all floats.
+
+### Measurement (2026-11-21)
+
+One interleaved job per architecture, the tree before this revision against
+it, median of 7, seconds of `os.clock` per shape (base/head > 1: faster):
+
+| shape | mode | x86_64 base | head | b/h | arm64 base | head | b/h |
+|---|---|---:|---:|---:|---:|---:|---:|
+| int32 loop, 1e8 | -joff | 0.827 | 0.827 | 1.00 | 0.426 | 0.412 | 1.04 |
+| int32 loop, 1e8 | -jon | 0.068 | 0.069 | 0.99 | 0.026 | 0.026 | 1.00 |
+| float loop, 1e8 | -joff | 3.243 | 3.070 | 1.06 | 0.552 | 0.551 | 1.00 |
+| float loop, 1e8 | -jon | 0.284 | 0.284 | 1.00 | 0.060 | 0.060 | 1.00 |
+| `1, #t/2`, odd `#t` | -jon | 0.394 | 0.0156 | 25.2 | 0.235 | 0.0058 | 40.6 |
+| zero-trip inner loop | -jon | 0.0604 | 0.0023 | 26.3 | 0.0245 | 0.0011 | 22.3 |
+| `1, math.huge` + break | -jon | 0.527 | 0.586 | 0.90 | 0.102 | 0.105 | 0.98 |
+| `1, 1e10` + break | -jon | 0.526 | 0.585 | 0.90 | 0.100 | 0.104 | 0.96 |
+| wide `1<<40`, 3e6 | -jon | 0.0746 | 0.0906 | 0.82 | 0.0149 | 0.0161 | 0.93 |
+
+Under `-joff` the last three shapes measure the same as under `-jon` (they
+are never recorded, in either tree), and the half-limit and zero-trip shapes
+are unchanged (x86_64 0.413/0.413 and 0.060/0.060 s). The wide C path
+costs about 6 ns more per iteration on x86_64 (a GC check and the slot
+reads that replace the state object's fields); the int32 and float fast
+paths are unchanged.
+
+## Next step: huge limits on the int32 path (design, not implemented)
+
+`for i = 1, math.huge` and `for i = 1, 1e10` are wide loops because the
+clipped limit lies outside int32; the interpreter calls `lj_meta_forl` on
+every iteration and the loop is never compiled. Most such loops end with a
+`break` long before the index leaves int32. Plan:
+
+1. FORI (C, `lj_meta_for`): int32 start and step, limit beyond int32 on the
+   far side of the start (step > 0: above `INT32_MAX`; step < 0: below
+   `INT32_MIN`). Store the clip value `C = INT32_MAX - step` (or
+   `INT32_MIN - step`) in `FOR_STOP` as int32, push `{slot offset, real
+   limit}` on a per-thread list (like the pending `<close>` list, after
+   dropping every entry at or above this slot: those loops are gone), and
+   enter the body directly (status WIDE: re-executing the FORI would come
+   back here).
+2. FORI/JFORI fast paths: a limit equal to `C` for the current step goes to
+   `vmeta_for` (once per loop start), which drops the stale entries of the
+   slot and enters the body, so only a loop that went through step 1 can
+   leave the int32 path with that limit.
+3. FORL/IFORL/JFORL int32 paths: unchanged per iteration. On the exit edge
+   (index passed the limit) compare the limit with `C`; equal -> a stub
+   calls C, which pops the slot's entry if there is one and continues the
+   loop as a wide loop from the new index (slots rewritten in the wide form,
+   jump to the body), otherwise it is a genuine exit. With `C + step <=
+   INT32_MAX` the int32 add never overflows, and `rec_for_check`'s overflow
+   guard passes, so the loop can be compiled.
+4. Recorder: a loop trace whose limit is `C` gets its loop-exit snapshot at
+   the FORL itself with the index before the increment (not after the loop),
+   so a trace exit re-executes the FORL in the interpreter, which takes the
+   exit edge of step 3. Re-executing the FORL is equivalent for every
+   activation, clipped or not. A FORI recorded inside another trace with a
+   clipped limit stays NYI (it would need a call that pushes the entry).
+5. Semantics unchanged: integer control variable, PUC's iteration count;
+   the only new state is the list entry, which never holds a GC object.
+
+Risks: the exit edge exists in three opcodes and two backends; the snapshot
+change touches the loop-exit path of every compiled numeric loop with that
+limit; a forged `C` limit through the debug library can pick up a stale
+entry (no memory hazard, an arbitrary count as for the other forged slots).

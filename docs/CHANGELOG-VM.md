@@ -737,6 +737,134 @@ target x86_64 (GC64) and arm64.
   (`tests/d54/err_16_operand_names.lua`). `errors.lua` now passes every
   assertion; only its printed stack-overflow depth differs (rows in
   `tests/known-different.tsv`).
+- `table.concat` on a table with `__index`/`__len` builds its result in a
+  `luaL_Buffer` of the call, as PUC's `tconcat`/`addfield` do (ltablib.c).
+  The generic path appended to the global temp buffer and kept the partial
+  result there across `lua_geti`, so an `__index` that used the buffer
+  itself (`..`, `string.format`, a nested `table.concat`) overwrote it
+  ("v1,v2,v3" came out as "v3v3"), and one that only allocated could let the
+  atomic phase free it (`table.concat(p, "", 1, 50)` wrong in 300 of 300
+  runs on both arches). Plain tables keep the temp-buffer fast path, which
+  calls no metamethod (`tests/d54/tbl_08_concat_mm_buffer.lua`).
+- `table.concat` calls `__len` first, also when an end is given, and before
+  the separator and the bounds are checked (ltablib.c `tconcat`: `aux_getn`,
+  then `luaL_optlstring`/`luaL_optinteger`): a `__len` returning 1.5 raises
+  "object length is not an integer" with an explicit end, and a bad
+  separator is reported after one `__len` call. For a plain table the raw
+  length is not observable and is still taken only without an end
+  (`tests/d54/tbl_10_concat_len_order.lua`).
+- `table.remove(t, nil)` removes the last element: the position is read with
+  `luaL_optinteger` as in PUC's `tremove`, on the plain-table and the
+  metamethod path; before, any second argument had to be a number
+  (`tests/d54/tbl_09_remove_nilpos.lua`).
+- `collectgarbage` reads its second argument only for "step", "setpause",
+  "setstepmul", "generational" and "incremental" (lbaselib.c
+  `luaB_collectgarbage`); `collectgarbage("collect", 1.5)`,
+  `("count", {})` and `("isrunning", "x")` succeed as in PUC instead of
+  raising an argument error (`tests/d54/gc_14_collectgarbage_args.lua`).
+- A file handle created while `registry["FILE*"]` is not a table has no
+  metatable, as with PUC's `luaL_setmetatable`; `io_file_new` read the entry
+  with `tabV` unchecked and crashed (bus error) after
+  `debug.getregistry()["FILE*"] = nil`. Another table there becomes the
+  handle's metatable. Operand errors name a handle by its metatable's
+  `__name` like any userdata (`lj_err_typename` no longer fixes "FILE*" for
+  the handle kind), so such a handle is "userdata" or the other table's
+  `__name` there, as in PUC (`tests/d54/io_05_filehandle_registry.lua`).
+- `debug.getinfo` rejects an option string that starts with '>' with
+  "invalid option '>'" before it looks at the function or level, and makes
+  room on the inspected thread's stack first (ldblib.c `db_getinfo`:
+  `checkstack`, `luaL_argcheck`). The '>' went on to `lj_debug_getinfo`,
+  which then took a function from, and popped it off, the stack of the
+  thread being inspected; a '>' elsewhere is an invalid option of
+  `lua_getinfo` (`tests/d54/debug_13_getinfo_gt.lua`).
+- `debug.setcstacklimit` exists, as in PUC 5.4.9 (ldblib.c
+  `db_setcstacklimit`): it checks its argument with `luaL_checkinteger` and
+  returns what `lua_setcstacklimit` returns, `LUAI_MAXCCALLS` (200), without
+  changing a limit (lstate.c); the C function was present, the library entry
+  was not (`tests/d54/dbg_setcstacklimit.lua`).
+- `math.max`/`math.min` in compiled code keep the running best unless an
+  argument is strictly greater/smaller, like the interpreter and PUC
+  (lmathlib.c, `lua_compare` with `LUA_OPLT`): `max(nan, 1.0)` is nan,
+  `max(1.0, nan)` 1.0, `min(0.0, -0.0)` 0.0, `min(-0.0, 0.0)` -0.0. `IR_MIN`
+  and `IR_MAX` yield their second operand when the comparison is false or
+  unordered in the constant folder (`lj_vm_foldarith`) and in both backends
+  (x86_64 `MINSD`/`MAXSD`, arm64 `FCMP`+`FCSEL`), and the recorder passed
+  the best first; it now emits `IR_MIN/IR_MAX(arg, best)` for floats.
+  Integer lists keep the best first (equal integers are the same value, and
+  the arm64 loop keeps the running best in its register that way)
+  (`tests/d54/math_04_minmax_jit_order.lua`).
+- `string.format` raises its errors in PUC's order (lstrlib.c
+  `str_format`): a missing argument ("no value") before the conversion is
+  parsed, so `("%5")` and `("%")` report the argument; for `d i u o x X e E
+  f g G` the argument check before the specification check (`("%#d", {})`
+  is "number expected, got table"), for `c a A p` the specification first.
+  A format that ends after '%' or its flags and width is "invalid
+  conversion '%5' to 'format'", the message of PUC's empty conversion.
+  `%c` casts the integer to `int` like PUC (`2^32+65` is "A"; it was
+  clamped to `0x7fffffff`), with the exact integer check of
+  `luaL_checkinteger`; the recorder now traces `%c` only for int32
+  arguments, since its float conversion neither checked nor cut the value
+  (`tests/d54/fmt_05_error_order.lua`).
+- Operand names of long field chains no longer recurse. PUC's `isEnv`
+  (ldebug.c) names the indexed table with `basicgetobjname` (locals,
+  upvalues, constants, moves; no table reads), and `rname` names a
+  register key the same way. `lj_debug_slotname` used the full search for
+  both, one recursion per `TGETS` link, so the error of
+  `local x = t.a.a ... a.c()` with 100000 links overflowed the C stack
+  (segmentation fault on both arches), and `debug_condwrite` rescanned the
+  jumps from the first instruction at every link. The search now has a
+  basic mode for the table and the key of `TGETS`/`TGETV`, and the last
+  writer of a slot and its jump filter come from one forward pass
+  (`debug_findsetreg`, PUC `findsetreg`/`filterpc`) instead of a backward
+  walk plus a separate jump scan; every name stays as it was
+  (`err_16_operand_names.lua`, `debug_06_names.lua`). A chain of
+  100000 links is named in about the time PUC needs; a chain of `MOV`s
+  still costs one pass per move, as in PUC
+  (`tests/d54/debug_12_slotname_chain.lua`).
+- `lua_checkstack` lets the stack grow up to its maximum, as PUC's does
+  (lapi.c, `luaD_growstack`), instead of capping every C function at
+  `LUAI_MAXCSTACK` (8000) slots as in 5.1, and `string.byte` checks its
+  result count with `luaL_checkstack` like PUC's `str_byte` instead of the
+  same cap: `table.unpack({}, 1, 10000)`, `string.byte` and
+  `utf8.codepoint` over 20000 characters return all values. A request that
+  cannot fit below `LJ_STACK_MAX` is refused before the stack grows, so it
+  fails with the caller's message ("too many results to unpack") and never
+  as a stack overflow (`tests/d54/tbl_11_unpack_many.lua`). The limit itself
+  is the stack-depth row of `docs/DIFFERENCES.md`.
+- `lua_isstring` is true for a 5.4 integer held in the int64 box (outside
+  the inline range), as for every number in PUC (lapi.c `cvt2str`). The
+  library code that asks it refused such values: a `string.gsub`
+  replacement of `1 << 60` (function or table) raised "invalid replacement
+  value (a number)", and a `__tostring` returning one raised "'__tostring'
+  must return a string" in `luaL_tolstring` (`print`)
+  (`tests/d54/i64_09_isstring_box.lua`).
+- `string.format` in compiled code raises what the interpreter raises for
+  the integer conversions: the recorder converted a float argument of
+  `%d %i %u %o %x %X` with the truncating call, so a loop compiled for 1.0
+  returned 0, -9223372036854775808 and the like for 0.5, inf, nan or 2^63
+  instead of "number has no integer representation". A float argument of
+  those conversions and a missing argument now leave the call to the
+  interpreter (`tests/d54/fmt_06_jit_int_args.lua`).
+- `lua_len` (and `luaL_len`) of a userdata without `__len` raises "attempt
+  to get length of a FILE* value" (the name from `__name`), as PUC's
+  `luaV_objlen` does; it returned the userdata's block size, so
+  `table.unpack(io.stdout)` gave 24 nils. `lua_rawlen` keeps the block size,
+  as in PUC; the other `luaL_len` callers (the table library) already
+  refused a userdata without the table-like metamethods
+  (`tests/d54/tbl_12_len_userdata.lua`).
+- The io library recognises a file handle by its metatable, as PUC does
+  (liolib.c `tolstream`/`tofile` with `luaL_checkudata`, `io_type` with
+  `luaL_testudata`): the metatable must be the current
+  `registry["FILE*"]`. Every method, `__gc`/`__close`/`__tostring`,
+  `io.close`, `io.input`/`io.output` with a handle and `io.type` check it
+  (`io_isfile` in `src/lib_io.c`); `io.close()` and `io.lines()` check the
+  default file as PUC's `tofile` does, while `io.read`/`io.write` use it
+  unchecked (`getiofile`). A handle made while the entry was nil, one whose
+  metatable was replaced, or one left behind when the entry was replaced is
+  no longer a file: "FILE* expected, got userdata" and `io.type` nil instead
+  of reading, writing and closing it. The recorder of `f:write`/`f:flush`
+  guards the handle's metatable and the registry entry, so a compiled loop
+  leaves the trace when either changes (`tests/d54/io_06_handle_identity.lua`).
 
 ## Known JIT/performance rows (not semantic divergences)
 

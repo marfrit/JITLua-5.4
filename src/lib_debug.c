@@ -116,6 +116,14 @@ LJLIB_CF(debug_getinfo)
   int arg, opt_f = 0, opt_L = 0;
   lua_State *L1 = getthread(L, &arg);
   const char *options = luaL_optstring(L, arg+2, "flnSrtu");
+  /* 5.4 db_getinfo: room for the results on the other thread's stack, then
+  ** a leading '>' is rejected before the function or level is looked at; it
+  ** would make lua_getinfo take (and pop) a function from the stack of the
+  ** inspected thread. A '>' later in the string is an invalid option. */
+  if (L != L1 && !lua_checkstack(L1, 3))
+    luaL_error(L, "stack overflow");
+  if (options[0] == '>')
+    luaL_argerror(L, arg+2, "invalid option '>'");
   /* 5.4 db_getinfo: a function is checked first; anything else is a stack
   ** level via luaL_checkinteger (so a table gives "number expected, got
   ** table" and 1.5 gives "number has no integer representation"). */
@@ -271,6 +279,16 @@ LJLIB_CF(debug_upvaluejoin)
   L->top = L->base+4;
   lua_upvaluejoin(L, 1, lj_lib_checkint(L, 2), 3, lj_lib_checkint(L, 4));
   return 0;
+}
+
+/* 5.4.9 ldblib.c db_setcstacklimit: kept for compatibility. The argument is
+** checked with luaL_checkinteger; the result is what lua_setcstacklimit
+** returns, LUAI_MAXCCALLS, and no limit changes (lstate.c). */
+LJLIB_CF(debug_setcstacklimit)
+{
+  int limit = (int)luaL_checkinteger(L, 1);
+  lua_pushinteger(L, lua_setcstacklimit(L, (unsigned int)limit));
+  return 1;
 }
 
 #if LJ_52

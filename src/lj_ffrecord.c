@@ -954,11 +954,19 @@ static void LJ_FASTCALL recff_math_minmax(jit_State *J, RecordFFData *rd)
   }
   tr = J->base[0];
   for (i = 1; J->base[i] != 0; i++) {
-    /* IR_MIN/IR_MAX with best first: false comparison keeps the first operand,
-    ** matching PUC on ties, NaN and signed zero. Uniform types only (above),
-    ** so the winning subtype survives. */
-    tr = emitir(IRT(op, tref_isinteger(tr) ? IRT_INT : IRT_NUM),
-		tr, J->base[i]);
+    /* PUC keeps the running best unless the next argument is strictly
+    ** smaller (min) or greater (max). IR_MIN(a, b) is a < b ? a : b and
+    ** IR_MAX(a, b) is a > b ? a : b: an unordered or equal comparison yields
+    ** the second operand, in the constant folder (lj_vm_foldarith) and in
+    ** both backends (x86 MINSD/MAXSD, arm64 FCMP+FCSEL). So the new argument
+    ** goes first and the best second: NaN and signed zeros then follow PUC.
+    ** Equal integers are the same value, so integer lists keep the best
+    ** first, which lets the backends keep a running best in its register.
+    ** Uniform types only (above), so the winning subtype survives. */
+    if (tref_isinteger(tr))
+      tr = emitir(IRTI(op), tr, J->base[i]);
+    else
+      tr = emitir(IRTN(op), J->base[i], tr);
   }
   J->base[0] = tr;
 }
@@ -1335,6 +1343,10 @@ static void recff_format(jit_State *J, RecordFFData *rd, TRef hdr, int sbufx)
   lj_strfmt_init(&fs, strdata(fmt), fmt->len);
   while ((sf = lj_strfmt_parse(&fs)) != STRFMT_EOF) {  /* Parse format. */
     TRef tra = sf == STRFMT_LIT ? 0 : J->base[++arg];
+    if (sf != STRFMT_LIT && !tra) {  /* "no value": the interpreter raises. */
+      recff_nyiu(J, rd);
+      return;
+    }
     TRef trsf = lj_ir_kint(J, (int32_t)sf);
     IRCallID id;
     switch (STRFMT_TYPE(sf)) {
@@ -1363,7 +1375,11 @@ static void recff_format(jit_State *J, RecordFFData *rd, TRef hdr, int sbufx)
 	  break;
 	}
 #endif
-	goto handle_num;
+	/* 5.4 luaL_checkinteger: a float needs an exact integer value, else
+	** "number has no integer representation"; the truncating conversion
+	** call does not check. Interpreter. */
+	recff_nyiu(J, rd);
+	return;
       }
       if (sf == STRFMT_INT) { /* Shortcut for plain %d. */
 	tr = emitir(IRTG(IR_BUFPUT, IRT_PGC), tr,
@@ -1385,7 +1401,6 @@ static void recff_format(jit_State *J, RecordFFData *rd, TRef hdr, int sbufx)
       goto handle_int;
     case STRFMT_NUM:
       id = IRCALL_lj_strfmt_putfnum;
-    handle_num:
       tra = lj_ir_tonum(J, tra);
       tr = lj_ir_call(J, id, tr, trsf, tra);
       if (LJ_SOFTFP32) lj_needsplit(J);
@@ -1415,7 +1430,12 @@ static void recff_format(jit_State *J, RecordFFData *rd, TRef hdr, int sbufx)
 	tr = lj_ir_call(J, IRCALL_lj_strfmt_putfstr, tr, trsf, tra);
       break;
     case STRFMT_CHAR:
-      tra = lj_opt_narrow_toint(J, tra);
+      /* 5.4: %c takes an exact integer and cuts it to int (PUC lstrlib.c);
+      ** the float conversion would neither check nor cut. Interpreter. */
+      if (!tref_isinteger(tra)) {
+	recff_nyiu(J, rd);
+	return;
+      }
       if (sf == STRFMT_CHAR)  /* Shortcut for plain %c. */
 	tr = emitir(IRTG(IR_BUFPUT, IRT_PGC), tr,
 		    emitir(IRT(IR_TOSTR, IRT_STR), tra, IRTOSTR_CHAR));
@@ -1867,17 +1887,38 @@ static void LJ_FASTCALL recff_table_clear(jit_State *J, RecordFFData *rd)
 /* Get FILE* for I/O function. Any I/O error aborts recording, so there's
 ** no need to encode the alternate cases for any of the guards.
 */
-static TRef recff_io_fp(jit_State *J, TRef *udp, int32_t id)
+static TRef recff_io_fp(jit_State *J, RecordFFData *rd, TRef *udp, int32_t id)
 {
   TRef tr, ud, fp;
-  if (id) {  /* io.func() */
+  if (id) {  /* io.func(): the default file, unchecked like PUC getiofile */
     ud = lj_ir_ggfload(J, IRT_UDATA, GG_OFS(g.gcroot[id]));
   } else {  /* fp:method() */
+    GCtab *reg = tabV(registry(J->L)), *mt;
+    GCstr *key = lj_str_newlit(J->L, "FILE*");
+    cTValue *fmt;
+    GCudata *u;
+    RecordIndex ix;
     ud = J->base[0];
     if (!tref_isudata(ud))
       lj_trace_err(J, LJ_TRERR_BADTYPE);
     tr = emitir(IRT(IR_FLOAD, IRT_U8), ud, IRFL_UDATA_UDTYPE);
     emitir(IRTGI(IR_EQ), tr, lj_ir_kint(J, UDTYPE_IO_FILE));
+    /* 5.4 tofile (luaL_checkudata): the handle's metatable must be the
+    ** current registry["FILE*"]. Guard the metatable and the registry
+    ** entry; anything else is left to the interpreter, which raises. */
+    u = udataV(&rd->argv[0]);
+    mt = tabref(u->metatable);
+    fmt = lj_tab_getstr(reg, key);
+    if (u->udtype != UDTYPE_IO_FILE || mt == NULL ||
+	!(fmt && tvistab(fmt) && tabV(fmt) == mt))
+      lj_trace_err(J, LJ_TRERR_BADTYPE);
+    tr = emitir(IRT(IR_FLOAD, IRT_TAB), ud, IRFL_UDATA_META);
+    emitir(IRTG(IR_EQ, IRT_TAB), tr, lj_ir_ktab(J, mt));
+    ix.tab = lj_ir_ktab(J, reg); settabV(J->L, &ix.tabv, reg);
+    ix.key = lj_ir_kstr(J, key); setstrV(J->L, &ix.keyv, key);
+    ix.val = 0; ix.idxchain = 0;
+    tr = lj_record_idx(J, &ix);
+    emitir(IRTG(IR_EQ, IRT_TAB), tr, lj_ir_ktab(J, mt));
   }
   *udp = ud;
   fp = emitir(IRT(IR_FLOAD, IRT_PTR), ud, IRFL_UDATA_FILE);
@@ -1887,7 +1928,7 @@ static TRef recff_io_fp(jit_State *J, TRef *udp, int32_t id)
 
 static void LJ_FASTCALL recff_io_write(jit_State *J, RecordFFData *rd)
 {
-  TRef ud, fp = recff_io_fp(J, &ud, rd->data);
+  TRef ud, fp = recff_io_fp(J, rd, &ud, rd->data);
   TRef zero = lj_ir_kint(J, 0);
   TRef one = lj_ir_kint(J, 1);
   ptrdiff_t i = rd->data == 0 ? 1 : 0;
@@ -1919,7 +1960,7 @@ static void LJ_FASTCALL recff_io_write(jit_State *J, RecordFFData *rd)
 
 static void LJ_FASTCALL recff_io_flush(jit_State *J, RecordFFData *rd)
 {
-  TRef ud, fp = recff_io_fp(J, &ud, rd->data);
+  TRef ud, fp = recff_io_fp(J, rd, &ud, rd->data);
   TRef tr = lj_ir_call(J, IRCALL_fflush, fp);
   if (results_wanted(J) != 0)  /* Check result only if not ignored. */
     emitir(IRTGI(IR_EQ), tr, lj_ir_kint(J, 0));

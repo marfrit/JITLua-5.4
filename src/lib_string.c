@@ -54,9 +54,9 @@ LJLIB_ASM(string_byte)		LJLIB_REC(string_range 0)
   if (start > stop) return FFH_RES(0);  /* Empty interval: return no results. */
   start--;
   n = stop - start;
-  if ((uint32_t)n > LUAI_MAXCSTACK)
-    lj_err_caller(L, LJ_ERR_STRSLC);
-  lj_state_checkstack(L, (MSize)n);
+  /* PUC str_byte: luaL_checkstack(L, n, "string slice too long"), so the
+  ** limit is the stack size, not LUAI_MAXCSTACK. */
+  luaL_checkstack(L, n, "string slice too long");
   p = (const unsigned char *)strdata(s) + start;
   for (i = 0; i < n; i++)
     setintV(L->base + i-1-LJ_FR2, p[i]);

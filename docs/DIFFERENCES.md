@@ -67,6 +67,17 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   "final count" lines), so its modes cannot match; the
   message it asserts on line 29 ("error in error handling") is fixed
   (`tests/d54/err_11_errerr_msg.lua`). Rows in `tests/known-different.tsv`.
+  The same limit bounds how many values a C function can push:
+  `lua_checkstack` (and through it `table.unpack`, `string.byte`,
+  `utf8.codepoint`, `luaL_checkstack`) grows the stack up to `LJ_STACK_MAX`
+  in all, so `table.unpack({}, 1, 50000)` works here, while 70000 values
+  fail with "too many results to unpack", where PUC accepts up to about
+  1000000 (`tests/d54/tbl_11_unpack_many.lua`; evidence: puc-code lapi.c
+  `lua_checkstack`/ldo.c `luaD_growstack`, measured-here on x86_64 and
+  arm64). A vararg call copies its arguments once more, so passing such a
+  list on through `...` needs twice the slots. The 16-bit frame offset that
+  `lua_getstack` keeps in `i_ci` is one of the places that rely on stacks
+  below 64K slots.
 - `IMPL-DEFINED` String arithmetic is part of the VM's arithmetic fallback;
   the string metatable has no `__add`, `__sub`, ... entries (PUC implements
   the coercion through them, so there it can be inspected and replaced).

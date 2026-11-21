@@ -125,14 +125,22 @@ LUA_API int lua_status(lua_State *L)
 
 LUA_API int lua_checkstack(lua_State *L, int size)
 {
-  if (size > LUAI_MAXCSTACK || (L->top - L->base + size) > LUAI_MAXCSTACK) {
-    return 0;  /* Stack overflow. */
-  } else if (size > 0) {
+  /* 5.4 lua_checkstack: the stack may grow up to its maximum (PUC
+  ** luaD_growstack, LUAI_MAXSTACK), not only by LUAI_MAXCSTACK slots per
+  ** C function as in 5.1. Here that maximum is LJ_STACK_MAX (LUAI_MAXSTACK
+  ** of this tree): lj_state_growstack grows the stack to top + size plus one
+  ** slot and LJ_STACK_EXTRA, and raises a stack overflow from that size on,
+  ** so a request that cannot fit is refused before it is made. */
+  if (size > 0) {
     int avail = (int)(mref(L->maxstack, TValue) - L->top);
-    if (size > avail &&
-	lj_state_cpgrowstack(L, (MSize)(size - avail)) != LUA_OK) {
-      L->top--;
-      return 0;  /* Out of memory. */
+    if (size > avail) {
+      if ((uint64_t)(L->top - tvref(L->stack)) + (uint64_t)size + 1 +
+	  LJ_STACK_EXTRA >= (uint64_t)LUAI_MAXSTACK)
+	return 0;  /* Stack overflow. */
+      if (lj_state_cpgrowstack(L, (MSize)(size - avail)) != LUA_OK) {
+	L->top--;
+	return 0;  /* Out of memory. */
+      }
     }
   }
   return 1;
@@ -374,7 +382,7 @@ LUA_API int lua_isnumber(lua_State *L, int idx)
 LUA_API int lua_isstring(lua_State *L, int idx)
 {
   cTValue *o = index2adr(L, idx);
-  return (tvisstr(o) || tvisnumber(o));
+  return (tvisstr(o) || tvisnumber(o) || tvisi64(o));  /* ADR-001b box */
 }
 
 LUA_API int lua_isuserdata(lua_State *L, int idx)
@@ -583,12 +591,12 @@ LUA_API void lua_len(lua_State *L, int idx)
       L->top = base+2;
       lua_call(L, 1, 1);
     } else {
-      if (tvistab(o))
-	setint64V(L->top, (int64_t)lj_tab_len(tabV(o)));
-      else if (tvisi64(o))  /* 5.4: a number without __len has no length */
+      /* 5.4 luaV_objlen: a userdata without __len has no length ("attempt
+      ** to get length of a FILE* value"), and neither has a number without
+      ** __len (the int64 box). Only a table has a primitive length. */
+      if (!tvistab(o))
 	lj_err_optype(L, o, LJ_ERR_OPLEN);
-      else
-	setint64V(L->top, (int64_t)udataV(o)->len);
+      setint64V(L->top, (int64_t)lj_tab_len(tabV(o)));
       incr_top(L);
     }
   } else {

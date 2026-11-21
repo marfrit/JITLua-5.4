@@ -35,7 +35,7 @@ typedef size_t lj_tab_Unsigned;  /* Unsigned counterpart of lua_Integer. */
 #define LJLIB_MODULE_table
 
 /* PUC 5.4.9 ltablib.c table-like rules: the operations an object must
-** define to mimic a table (some functions only need some of them). */
+** define to stand in for a table (some functions only need some of them). */
 #define TAB_R	1		/* read */
 #define TAB_W	2		/* write */
 #define TAB_L	4		/* length */
@@ -201,7 +201,7 @@ LJLIB_CF(table_remove)
     /* Generic path (PUC tremove): element access through the API so
     ** __index/__newindex are honoured; #t via __len. */
     lua_Integer size = luaL_len(L, 1);
-    lua_Integer pos = (L->top > L->base + 1) ? luaL_checkinteger(L, 2) : size;
+    lua_Integer pos = luaL_optinteger(L, 2, size);  /* PUC: nil is absent */
     if (pos != size &&
 	((lj_tab_Unsigned)pos - 1u > (lj_tab_Unsigned)size))
       lj_err_arg(L, 2, LJ_ERR_TABINSPOS);
@@ -215,7 +215,7 @@ LJLIB_CF(table_remove)
     return 1;
   }
   lua_Integer len = luaL_len(L, 1);
-  lua_Integer pos = (L->top > L->base + 1) ? luaL_checkinteger(L, 2) : len;
+  lua_Integer pos = luaL_optinteger(L, 2, len);  /* PUC: nil is absent */
   /* 5.4 tremove: a given pos is validated as (unsigned)pos - 1 <= (unsigned)
   ** size, so pos = size + 1 is allowed (nothing to shift, t[pos] is nil) and
   ** pos 0 or a negative pos with a non-empty table is "position out of
@@ -268,46 +268,70 @@ static int64_t tab_concat_int64(lua_State *L, int narg, int64_t def)
 LJLIB_CF(table_concat)		LJLIB_REC(.)
 {
   GCtab *t = tab_checktab(L, 1, TAB_R | TAB_L);
+  /* PUC tconcat: aux_getn calls __len first, before the separator and the
+  ** bounds are checked, and also when an explicit end is given. For a plain
+  ** table the raw length is not observable, so it is only taken when no end
+  ** is given. */
+  int64_t len = t ? 0 : (int64_t)luaL_len(L, 1);
   GCstr *sep = lj_lib_optstr(L, 2);
   int64_t i = tab_concat_int64(L, 3, 1);
   int64_t e = (L->base+3 < L->top && !tvisnil(L->base+3)) ?
 	      tab_concat_int64(L, 4, 0) :
-	      (int64_t)(t ? lj_tab_len(t) : luaL_len(L, 1));
-  SBuf *sb = lj_buf_tmp_(L);
+	      (t ? (int64_t)lj_tab_len(t) : len);
+  SBuf *sb;
   SBuf *sbx;
   int64_t fail = 0;
-  if (t && i >= -0x7fffffff-1 && i <= 0x7fffffff &&
-      e >= -0x7fffffff-1 && e <= 0x7fffffff) {
-    sbx = lj_buf_puttab(sb, t, sep, (int32_t)i, (int32_t)e);
-    if (LJ_UNLIKELY(!sbx)) fail = (int32_t)(intptr_t)sb->w;
-  } else if (t) {
-    sbx = lj_buf_puttab64(L, sb, t, sep, i, e, &fail);
-  } else {
+  if (!t) {
     /* Generic path (PUC tconcat): element reads through lua_geti so __index
-    ** is honoured; the default end went through __len above. */
+    ** is honoured. The result is built in a luaL_Buffer of this call, as in
+    ** PUC: an __index may run any code, including code that uses or frees
+    ** the global temp buffer (string.format, '..', a nested table.concat, a
+    ** collection), so nothing may stay in that buffer across lua_geti. */
+    luaL_Buffer b;
     MSize seplen = sep ? sep->len : 0;
+    lua_settop(L, 2);  /* The separator stays anchored in slot 2. */
+    luaL_buffinit(L, &b);
     if (i <= e) {
       int64_t j;
       for (j = i; ; j++) {
-	char *w;
 	cTValue *o;
 	lua_geti(L, 1, j);
-	o = L->top - 1;  /* Stays on the stack (GC anchor) until it is copied. */
-	if (LJ_UNLIKELY(!lj_buf_puttab_elem(sb, o, seplen, &w))) {
+	o = L->top - 1;
+	if (LJ_UNLIKELY(!(tvisstr(o) || tvisnumber(o) || tvisi64(o)))) {
 	  GCstr *sidx = lj_strfmt_i64(L, j);
 	  lj_err_callerv(L, LJ_ERR_TABCAT,
 			 lj_obj_itypename[itypemap(o)], strdata(sidx));
 	}
-	L->top--;
-	if (j == e) {
-	  sb->w = w;
-	  break;
+	if (tvisstr(o) && strV(o)->len <= b.size - b.n) {
+	  /* Fits: copy it straight in (what luaL_addvalue does, minus the
+	  ** calls). The value is still on the stack while it is copied. */
+	  memcpy(b.b + b.n, strVdata(o), strV(o)->len);
+	  b.n += strV(o)->len;
+	  L->top--;
+	} else {
+	  luaL_addvalue(&b);
 	}
-	if (seplen) w = lj_buf_wmem(w, strdata(sep), seplen);
-	sb->w = w;
+	if (j == e) break;
+	if (seplen) {
+	  if (seplen <= b.size - b.n) {
+	    memcpy(b.b + b.n, strdata(sep), seplen);
+	    b.n += seplen;
+	  } else {
+	    luaL_addlstring(&b, strdata(sep), seplen);
+	  }
+	}
       }
     }
-    sbx = sb;
+    luaL_pushresult(&b);
+    return 1;
+  }
+  sb = lj_buf_tmp_(L);
+  if (i >= -0x7fffffff-1 && i <= 0x7fffffff &&
+      e >= -0x7fffffff-1 && e <= 0x7fffffff) {
+    sbx = lj_buf_puttab(sb, t, sep, (int32_t)i, (int32_t)e);
+    if (LJ_UNLIKELY(!sbx)) fail = (int32_t)(intptr_t)sb->w;
+  } else {
+    sbx = lj_buf_puttab64(L, sb, t, sep, i, e, &fail);
   }
   if (LJ_UNLIKELY(!sbx)) {  /* Error: bad element type at index 'fail'. */
     TValue k;

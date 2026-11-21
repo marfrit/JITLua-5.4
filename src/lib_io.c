@@ -22,6 +22,7 @@
 #include "lj_err.h"
 #include "lj_buf.h"
 #include "lj_str.h"
+#include "lj_tab.h"
 #include "lj_state.h"
 #include "lj_strfmt.h"
 #include "lj_ff.h"
@@ -52,10 +53,29 @@ static int lj_cf_io_method_close(lua_State *L);  /* luaL_Stream.closef */
 
 /* -- Open/close helpers -------------------------------------------------- */
 
+/* PUC luaL_testudata(L, idx, LUA_FILEHANDLE): a file handle is a userdata
+** whose metatable is the current registry["FILE*"]. A program can remove
+** or replace that entry, or a handle's metatable; then the handle is no
+** longer a file for the io library. The handle kind (an IOFileUD block) is
+** checked as well, since only such a block can be read as a stream here. */
+static int io_isfile(lua_State *L, cTValue *o)
+{
+  GCtab *mt;
+  cTValue *fmt;
+  if (!(tvisudata(o) && udataV(o)->udtype == UDTYPE_IO_FILE))
+    return 0;
+  mt = tabref(udataV(o)->metatable);
+  if (mt == NULL)
+    return 0;
+  fmt = lj_tab_getstr(tabV(registry(L)),
+		      strref(G(L)->gcroot[GCROOT_IO_FILEKEY]));
+  return fmt != NULL && tvistab(fmt) && tabV(fmt) == mt;
+}
+
+/* PUC tolstream (luaL_checkudata). */
 static IOFileUD *io_tofilep(lua_State *L)
 {
-  if (!(L->base < L->top && tvisudata(L->base) &&
-	udataV(L->base)->udtype == UDTYPE_IO_FILE))
+  if (!(L->base < L->top && io_isfile(L, L->base)))
     lj_err_argtype(L, 1, "FILE*");
   return (IOFileUD *)uddata(udataV(L->base));
 }
@@ -109,15 +129,17 @@ static IOFileUD *io_file_new(lua_State *L)
   GCudata *ud;
   GCtab *mt;
   /* 5.4: the metatable is the registered LUA_FILEHANDLE one, with the
-  ** methods under __index only, so rawget(mt, "write") is nil. */
+  ** methods under __index only, so rawget(mt, "write") is nil. A program
+  ** can replace or remove that registry entry: PUC (luaL_setmetatable)
+  ** then sets whatever table is there, or no metatable for nil. */
   lua_getfield(L, LUA_REGISTRYINDEX, LUA_FILEHANDLE);
-  mt = tabV(L->top-1);
+  mt = tvistab(L->top-1) ? tabV(L->top-1) : NULL;
   L->top--;
   iof = (IOFileUD *)lua_newuserdatauv(L, sizeof(IOFileUD), 0);  /* PUC: no user values. */
   ud = udataV(L->top-1);
   ud->udtype = UDTYPE_IO_FILE;
   /* NOBARRIER: The GCudata is new (marked white). */
-  setgcref(ud->metatable, obj2gco(mt));
+  if (mt) setgcref(ud->metatable, obj2gco(mt));
   iof->fp = NULL;
   iof->closef = NULL;
   iof->type = IOFILE_TYPE_FILE;
@@ -617,13 +639,9 @@ LJLIB_CF(io_tmpfile)
 LJLIB_CF(io_close)
 {
   IOFileUD *iof;
-  if (L->base < L->top) {
-    iof = io_tofile(L);
-  } else {
-    iof = IOSTDF_IOF(L, GCROOT_IO_OUTPUT);
-    if (iof->fp == NULL)
-      lj_err_caller(L, LJ_ERR_IOCLFL);
-  }
+  if (L->base == L->top)  /* PUC io_close: the default output, checked */
+    setudataV(L, L->top++, IOSTDF_UD(L, GCROOT_IO_OUTPUT));
+  iof = io_tofile(L);
   return io_file_close(L, iof);
 }
 
@@ -682,9 +700,8 @@ LJLIB_CF(io_lines)
     filetv = *L->base;
     toclose = 1;
   } else {  /* io.lines() iterates over the default input. */
-    if (IOSTDF_IOF(L, GCROOT_IO_INPUT)->fp == NULL)
-      luaL_error(L, "default input file is closed");
     setudataV(L, L->base, IOSTDF_UD(L, GCROOT_IO_INPUT));
+    io_tofile(L);  /* PUC io_lines: tofile, a valid and open handle */
   }
   io_file_lines(L);  /* closure replaces the upvalues on the stack */
   if (toclose) {  /* 5.4: iterator, state, control, to-be-closed file */
@@ -699,7 +716,7 @@ LJLIB_CF(io_lines)
 LJLIB_CF(io_type)
 {
   cTValue *o = lj_lib_checkany(L, 1);
-  if (!(tvisudata(o) && udataV(o)->udtype == UDTYPE_IO_FILE))
+  if (!io_isfile(L, o))  /* PUC io_type: luaL_testudata */
     setnilV(L->top++);
   else if (((IOFileUD *)uddata(udataV(o)))->fp != NULL)
     lua_pushliteral(L, "file");
@@ -754,6 +771,9 @@ LUALIB_API int luaopen_io(lua_State *L)
   lua_setfield(L, -2, "__name");
   copyTV(L, L->top, L->top-1); L->top++;
   lua_setfield(L, LUA_REGISTRYINDEX, LUA_FILEHANDLE);
+  /* The registry key, kept interned for io_isfile. */
+  setgcref(G(L)->gcroot[GCROOT_IO_FILEKEY],
+	   obj2gco(lj_str_newlit(L, LUA_FILEHANDLE)));
   LJ_LIB_REG(L, LUA_IOLIBNAME, io);
   setgcref(G(L)->gcroot[GCROOT_IO_INPUT], io_std_new(L, stdin, "stdin"));
   setgcref(G(L)->gcroot[GCROOT_IO_OUTPUT], io_std_new(L, stdout, "stdout"));

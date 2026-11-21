@@ -579,8 +579,13 @@ LJLIB_CF(collectgarbage)
 {
   int opt = lj_lib_checkopt(L, 1, LUA_GCCOLLECT,  /* ORDER LUA_GC* */
     "\4stop\7restart\7collect\5count\1\377\4step\10setpause\12setstepmul\1\377\11isrunning\x0cgenerational\x0bincremental");
-  int32_t data = lj_lib_optint(L, 2, 0);
-  int32_t data2 = 0, data3 = 0;
+  int32_t data = 0, data2 = 0, data3 = 0;
+  /* PUC luaB_collectgarbage reads argument 2 only for the options that take
+  ** one; any value after "collect", "count", "stop", "restart" or
+  ** "isrunning" is ignored. */
+  if (opt == LUA_GCSTEP || opt == LUA_GCSETPAUSE || opt == LUA_GCSETSTEPMUL ||
+      opt == LUA_GCGEN || opt == LUA_GCINC)
+    data = lj_lib_optint(L, 2, 0);
   if (opt == LUA_GCGEN || opt == LUA_GCINC) {
     data2 = lj_lib_optint(L, 3, 0);
     if (opt == LUA_GCINC) data3 = lj_lib_optint(L, 4, 0);

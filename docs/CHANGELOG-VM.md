@@ -7,6 +7,14 @@ target x86_64 (GC64) and arm64.
 
 ## Language and VM
 
+- `collectgarbage("step", n)` with `n > 0` works off `n` KB of extra debt
+  before it returns, as PUC's `incstep` does, so a larger `n` finishes a cycle
+  in fewer calls and a huge one in a single call (`gc.lua:201/205`); a
+  negative `n` postpones the next collection by that much. The end of a
+  cycle clamps the debt like 5.4 `setpause`: nothing is owed into the next
+  cycle and the threshold never lies below the current total
+  (`tests/d54/gc_10_step_size.lua`, `gc_08_step_return.lua`). The number
+  of basic steps per cycle is still the collector's own work unit.
 - The Lua 5.4 numeric `for` rules, following PUC's `forprep`/`forlimit` and
   `OP_FORLOOP`. `lj_meta_for` decides the loop kind from the initial value
   and the step only: both integers make an integer loop, whose limit is

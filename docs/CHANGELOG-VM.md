@@ -7,6 +7,53 @@ target x86_64 (GC64) and arm64.
 
 ## Language and VM
 
+- 5.4 library and message parity, second group. `ipairs`/`pairs` take any
+  value as PUC's `luaL_checkany` does: the iterator is returned and a
+  non-table fails on the first step ("attempt to index a number value" for a
+  number, "table expected, got number" from `next`); the assembler handlers
+  fall back to the C handler for such values and the recorder aborts the
+  trace instead of keeping the argument as a result
+  (`tests/d54/iter_02_ipairs_pairs_any.lua`). `luaL_checkinteger`/
+  `luaL_optinteger` and `lj_lib_checkint`/`optint` are exact: a number or
+  numeral string without an integer representation raises "number has no
+  integer representation" instead of truncating, covering `string.byte/sub/
+  rep/char`, `%c`, `select`, `tonumber` base, `table.unpack`, `utf8.char`,
+  `math.random(seed)`, `collectgarbage` step and debug levels
+  (`arg_02_integer_representation.lua`). `io.write` renders a float with
+  `LUA_NUMBER_FMT "%.14g"` (`3.0 -> "3"`, `-0.0 -> "-0"`) and its trace path
+  aborts for floats and non-string/non-integer arguments
+  (`io_03_write_number.lua`); the file-handle metatable now has only
+  `__index`/`__gc`/`__close`/`__tostring`/`__name` as direct keys and the
+  methods behind `__index`, as PUC's `createmeta` does
+  (`io_04_file_metatable.lua`). `math.min`/`max` are PUC's `lua_compare`
+  loops: the winning argument keeps its integer/float subtype, a numeric
+  string next to a number raises the compare error, two strings compare
+  lexicographically, ties keep the first argument, NaN and signed zero follow
+  PUC; the assembler fast paths stay all-integer/all-float and send a mixed
+  list to C, with Intel MIN/MAX and ARM `fcsel` keeping the running best on
+  NaN and ties (`math_03_minmax_54.lua`; interleaved medians of 7 on x64 and
+  arm64 show the integer fast path and `ipairs` unchanged, all-float within
+  1%). `collectgarbage("step", n)` follows PUC's debt rule: a negative step
+  only lowers the debt and returns false, true only when a cycle ended
+  (`gc_08_step_return.lua`); a stepmul that stores as 0 does one collector
+  step, never a full collection; `pause`/`stepmul` use PUC's byte/4 storage and
+  return the previous value (1234 -> 208, 5678 -> 556); the defaults stay
+  the measured LuaJIT speed policy 300/200 (PUC 200/100 is IMPL-DEFINED in
+  docs/DIFFERENCES.md, only the first deprecated setter return differs),
+  `incremental` applies pause/stepmul, the standalone interpreter starts
+  generational as `lua.c` does, and the corpus `gc.lua` now completes its
+  JIT arms (interpreted A still has the dead-slot difference)
+  (`gc_09_params.lua`). `load`/`loadfile` echo the requested mode string
+  ("attempt to load a text chunk (mode is 'bx')",
+  `load_02_mode_message.lua`), `setmetatable`'s second argument reports
+  "nil or table expected, got number" (`meta_07_setmetatable_msg.lua`), and
+  `debug.getinfo` checks a function first and then requires an exact integer
+  level (`debug_08_getinfo_arg.lua`). `getfenv`/`setfenv`, `loadstring`, the
+  global `jit`/`bit` tables, the `package.preload` modules and PUC's absent
+  names are documented as additive extensions, with a differential test that
+  only enumerates them through the documented allowlist
+  (`ext_01_extra_names.lua`).
+
 - 5.4 parity in the library and the error messages, five fixes.
   `coroutine.isyieldable([co])` now reports a fresh, suspended and dead
   coroutine as yieldable (it tested the caller's C-frame nesting, which a

@@ -65,16 +65,6 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   "final count" lines), so its modes cannot match; the
   message it asserts on line 29 ("error in error handling") is fixed
   (`tests/d54/err_11_errerr_msg.lua`). Rows in `tests/known-different.tsv`.
-- `PENDING` An integer argument that has no integer value is truncated or
-  saturated instead of raising "number has no integer representation":
-  `("hello"):sub(1.5)` is `"hello"`, `string.char(65.5)` is `"A"`, and a
-  numeric string beyond the int64 range is converted the same way.
-  `string.rep` is the exception in the interpreter, which rejects a
-  non-integral count; compiled code truncates it there too, so a loop
-  recorded with the count 2 returns `"xx"` for 2.5 where the interpreter
-  raises.
-- `PENDING` `math.max` and `math.min` accept numeric strings; PUC compares the
-  arguments as they are and raises "attempt to compare string with number".
 - `PENDING` A numeric `for` loop with an integer start, limit or step outside
   the int32 range runs as a float loop (the VM's loop instructions count in
   int32 or in doubles, and `lj_meta_for` converts such a value). The loop
@@ -134,9 +124,10 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   of such an object and does not end here (the runner bounds the file at
   10 s; `tests/known-different.tsv`). `gc.lua` has the same loops at lines
   63/82/87/92 (`repeat u = {} until finish`, GC1/GC2): PUC finalizes after 39
-  iterations, here the loop does not end, so the file is bounded at 10 s too
-  and everything after line 339 is not exercised in the corpus run;
-  `tests/lib/gc-finloop-repro.lua`.
+  iterations. In the interpreted arm (A) the loop does not end, so the file
+  is bounded at 10 s and everything after line 339 is not exercised there;
+  the JIT arms (B, R) complete the file after the PUC `step` debt/return fix
+  and match PUC. `tests/lib/gc-finloop-repro.lua`.
 - `IMPL-DEFINED` When a weak *value* disappears relative to its finalizer. PUC
   5.4 clears weak values in the atomic phase, before finalizers run, so a
   finalizer of a weakly referenced object already sees the entry gone
@@ -215,26 +206,42 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   `errors.lua`, which the harness skips as a whole because the file needs the
   PUC `T.*` test hooks, so there is no `tests/known-different.tsv` row.
 
+- `IMPL-DEFINED` The default pause/stepmul are LuaJIT's measured speed policy
+  300/200, not PUC's 200/100 (a deliberate tuning decision taken 2026-11-19;
+  not a source semantic). Only the first deprecated `setpause`/`setstepmul`
+  call and an `incremental` call that does not set them observe the defaults;
+  every later call follows PUC's return and application rules exactly
+  (`tests/d54/gc_09_params.lua`). A program that does not depend on the first
+  return of the deprecated setters sees no difference.
 - `FORK` `IMPL-DEFINED` GC mode and the size of a basic step.
-  `collectgarbage("generational")` / `collectgarbage("incremental")` are accepted
-  and report the previous mode as a 5.4 string, but only the mode flag is stored
-  (`lua_gc`, `case LUA_GCGEN: case LUA_GCINC:`, `src/lj_api.c`): the collector
-  stays the inherited incremental one. `collectgarbage("step", 0)` in
-  "generational" mode therefore performs an incremental step, not a minor
-  collection, and PUC's object ages (`old`, `touched1`, `touched2`, `survival`)
-  are not observable. The work of a basic step also differs: `lj_gc_step()` runs
-  `GCSTEPSIZE/100*stepmul` bytes of collector work (~2 KB at the default stepmul
-  200, `src/lj_gc.c`; `LUA_GCSTEP` there is stock LuaJIT, unchanged since
-  2.0.0-beta1). One old all-weak table holding a fresh table: PUC clears the
-  entry after one `step 0` in incremental *and* in generational mode, ours after
-  12; with `collectgarbage("setstepmul", 20000)` ours clears it in one basic step
-  and reports the finished cycle, so only the quantum differs, not the weak-table
-  semantics. The same loop over a ~1.9 MB live heap reports a finished cycle at
-  the first basic step in PUC and at the 808th here. The manual fixes neither the
-  work per basic step nor after how many steps a weak entry dies, so this is a
-  difference and not a defect; a real generational collector is Stage 3 of
-  `docs/gc-newgen-plan.md` and open (`docs/plan.md` P4.1). Measured the same on
-  x86_64 and aarch64, `-joff` and `-jon` alike; repro
+  The standalone interpreter starts in PUC's generational mode (`lua.c` calls
+  `lua_gc(LUA_GCGEN)` after `luaL_openlibs`); a state created with
+  `luaL_newstate` starts incremental, as in PUC's lauxlib. The mode string and
+  the previous-mode return of `collectgarbage("generational")` /
+  `"incremental"` are exact; only the mode flag is stored because this tree
+  has a single incremental collector. PUC's `pause`/`stepmul` parameters are
+  applied with PUC's storage rule (`lgc.h` `setgcparam`: divided by 4 in one
+  byte, `getgcparam`: multiplied by 4), so `setpause`/`setstepmul` return the
+  previous PUC value, including the byte truncation of large values (1234 ->
+  208, 5678 -> 556), and `"incremental", pause, stepmul` applies non-zero
+  values. `FORK`: `incremental`'s `stepsize` and `generational`'s
+  `minormul`/`majormul` are accepted and type-checked, but this collector has
+  no corresponding knobs (single incremental collector; a real generational
+  collector is Stage 3 of `docs/gc-newgen-plan.md`). `restart` resets the debt
+  to 0 as PUC's `lua_gc(LUA_GCRESTART)` does; because LuaJIT paces with a
+  threshold, the threshold still follows the pause policy for the CLI's
+  `-1` restart (total otherwise), rather than PUC's debt-only pacing. The work of a basic step
+  also differs: `lj_gc_step()` runs `GCSTEPSIZE/100*stepmul*4` bytes of
+  collector work (~2 KB at default stepmul 200, `src/lj_gc.c`), while PUC's
+  basic step is a fixed-size PUC work unit. A stepmul that stores as 0 (PUC
+  `setstepmul` value 1..3) still does one collector step, like PUC's
+  `incstep` `| 1`, never a full collection. A weak entry in an old all-weak
+  table therefore dies after more steps here; with a large
+  `collectgarbage("setstepmul", ...)` it dies in one basic step and reports
+  the finished cycle, so only the quantum differs, not the weak-table
+  semantics. The manual fixes neither quantum nor PUC's object ages (`old`,
+  `touched1`, `touched2`, `survival`), which are not observable here. Measured
+  the same on x86_64 and aarch64, `-joff` and `-jon`; repro
   `tests/lib/gc-step-quantum-repro.lua`, in the harness the mode-A row of
   `tests/corpus/puc54/gengc.lua` (its assert at line 122) in
   `tests/known-different.tsv`.
@@ -313,7 +320,13 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   and JITLua headers for this fork (`tests/ref/build-puc54-libs.sh`), and each
   arm loads only its own build.
 - `EXTENSION` `lua_getfenv`/`setfenv` remain present as LuaJIT extensions;
-  PUC 5.4 removed them.
+  PUC 5.4 removed them, and the Lua-level `getfenv`/`setfenv`, `loadstring`,
+  the global `jit`/`bit` tables and the `package.preload` modules (`ffi`,
+  `jit.profile`, `jit.util`, `string.buffer`, `table.clear`, `table.new`)
+  are additive. A 5.4 program that reads named globals or named modules sees
+  PUC behavior; only code that enumerates all globals or all preload modules
+  observes them, and every such extra is in the documented set
+  (`tests/d54/ext_01_extra_names.lua`).
 
 ### Removed from stock LuaJIT 2.1
 - `REMOVED` The Lua 5.1 leftovers are not in the default build: `gcinfo`,
@@ -376,6 +389,7 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   300/200 (time-first, measured on both arches in
   `docs/notes/knuc-phase-align-2026-11.md`); `memory` sets pause 100 / stepmul 200
   (the Stage 0(a) row in `docs/gc-newgen-plan.md`), the RSS-first setting.
-  Runtime `collectgarbage("setpause" / "setstepmul")` overrides either. The
-  pause default is a deliberate divergence from stock LuaJIT 2.1's 200/200; it
+  Runtime `collectgarbage("setpause" / "setstepmul")` overrides either, and
+  the `-G`/`LUAJIT_GC` request restores the opt-in policy. The `speed` value is
+  a deliberate divergence from stock LuaJIT 2.1's 200/200; it
   buys stock-parity k-nucleotide and a faster binary-trees for more peak RSS.

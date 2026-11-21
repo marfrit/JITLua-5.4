@@ -20,10 +20,10 @@ Status as measured, not a compatibility claim:
 
 - Differential gates against PUC Lua 5.4.9 pass on the tested platforms.
   Measured on Linux arm64 and x86_64, identical on both, on the `tests/d54`
-  edge-case corpus: A+B **342 PASS / 0 FAIL / 4 XFAIL**, JIT optimization
-  levels 0–3 **732**, R (dump/reload round-trip) **175**, the assertion build
-  (`LUA_USE_ASSERT` + `LUA_USE_APICHECK`) **183**, GC stress (pause 0 in every
-  arm) **187**; the ASan/UBSan run of A+B+R is **517 PASS / 0 FAIL / 4
+  edge-case corpus: A+B **419 PASS / 0 FAIL / 4 XFAIL**, JIT optimization
+  levels 0–3 **888**, R (dump/reload round-trip) **200**, the assertion build
+  (`LUA_USE_ASSERT` + `LUA_USE_APICHECK`) **222**, GC stress (pause 0 in every
+  arm) **210**; the ASan/UBSan run of A+B+R is **619 PASS / 0 FAIL / 4
   XFAIL**; C API checks **258 + 92 + 18** plus the `udfinal` probe, which
   prints the same counters as the PUC binary.
 - The C API is **source-compatible** with PUC Lua 5.4, **not
@@ -31,8 +31,8 @@ Status as measured, not a compatibility claim:
   A module built against PUC's headers that calls `luaL_checkversion` (as
   `luaL_newlib` does) is rejected at load.
 - Full corpus (PUC 5.4.9 test suite plus `tests/d54`) with `--strict`, the
-  exact command of the public CI: **592 PASS / 0 FAIL / 16 XFAIL / 3 SKIP /
-  0 TIMEOUT** (217 tests, 608 jobs). Every XFAIL has its reason in
+  exact command of the public CI: **696 PASS / 0 FAIL / 14 XFAIL / 3 SKIP /
+  0 TIMEOUT** (256 tests, 710 jobs). Every XFAIL has its reason in
   [tests/known-different.tsv](tests/known-different.tsv), and every row there
   is described in [docs/DIFFERENCES.md](docs/DIFFERENCES.md).
 - Every file of the PUC suite runs except three that exist only for the

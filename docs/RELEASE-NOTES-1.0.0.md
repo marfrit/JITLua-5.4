@@ -18,10 +18,10 @@ supported by Mike Pall (see [README.md](../README.md)).
   layout).
 - LuaJIT's FFI, `jit.*` and `bit.*` are kept.
 - Verification against PUC Lua 5.4.9, identical on Linux arm64 and x86_64:
-  `tests/d54` A+B 342 PASS / 0 FAIL / 4 XFAIL, JIT optimization levels 0-3
-  732, dump/reload 175, assertion build 183, GC stress 187, ASan/UBSan A+B+R
-  517 PASS / 0 FAIL / 4 XFAIL; full corpus (PUC 5.4.9 test suite plus
-  `tests/d54`) with `--strict` 592 PASS / 0 FAIL / 16 XFAIL / 3 SKIP /
+  `tests/d54` A+B 419 PASS / 0 FAIL / 4 XFAIL, JIT optimization levels 0-3
+  888, dump/reload 200, assertion build 222, GC stress 210, ASan/UBSan A+B+R
+  619 PASS / 0 FAIL / 4 XFAIL; full corpus (PUC 5.4.9 test suite plus
+  `tests/d54`) with `--strict` 696 PASS / 0 FAIL / 14 XFAIL / 3 SKIP /
   0 TIMEOUT. No open row in `tests/known-bad.tsv`.
 - Performance: against stock LuaJIT 2.1 the classic benchmarks are within
   10 % on both architectures, except two readings of workloads that run for

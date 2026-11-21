@@ -2,7 +2,7 @@
 
 > This is the original mission paper dated 2026-11-14. The current status is in [README.md](README.md).
 
-Status (2026-11-21, release 1.0.0): the Lua 5.4 language and C API port is implemented and differentially gated on Linux arm64 and x86_64, with identical counts on both. `tests/d54`: A+B 342 PASS / 0 FAIL / 4 XFAIL, JIT optimization levels 0-3 732, R 175, assertion build 183, GC stress 187, ASan/UBSan A+B+R 517 PASS / 0 FAIL / 4 XFAIL. Full corpus with `--strict`: 592 PASS / 0 FAIL / 16 XFAIL / 3 SKIP / 0 TIMEOUT. No open row in tests/known-bad.tsv. Remaining differences are in docs/DIFFERENCES.md. The 30-day fuzz criterion of M6 is not met and is not a gate for 1.0.0 (see "Decisions" below). The text of this paper below is the original of 2026-11-14.
+Status (2026-11-21, release 1.0.0): the Lua 5.4 language and C API port is implemented and differentially gated on Linux arm64 and x86_64, with identical counts on both. `tests/d54`: A+B 419 PASS / 0 FAIL / 4 XFAIL, JIT optimization levels 0-3 888, R 200, assertion build 222, GC stress 210, ASan/UBSan A+B+R 619 PASS / 0 FAIL / 4 XFAIL. Full corpus with `--strict`: 696 PASS / 0 FAIL / 14 XFAIL / 3 SKIP / 0 TIMEOUT. No open row in tests/known-bad.tsv. Remaining differences are in docs/DIFFERENCES.md. The 30-day fuzz criterion of M6 is not met and is not a gate for 1.0.0 (see "Decisions" below). The text of this paper below is the original of 2026-11-14.
 Date: 2026-11-14
 Base: LuaJIT 2.1 (official tree, `https://github.com/LuaJIT/LuaJIT`, tag v2.1)
 Target language/ABI: PUC-Rio Lua 5.4 (5.4.4/5.4.7 semantics)

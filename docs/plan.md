@@ -17,13 +17,13 @@ Platforms: Linux x86_64 (GC64) and Linux arm64.
 
 Verification, identical on both architectures (README.md has the full list):
 
-- `tests/d54` differential gates against PUC Lua 5.4.9: A+B 342 PASS / 0 FAIL
-  / 4 XFAIL; JIT optimization levels 0–3: 732; dump/reload round-trip (R):
-  175; assertion build: 183; GC stress: 187; ASan/UBSan A+B+R: 517 PASS /
+- `tests/d54` differential gates against PUC Lua 5.4.9: A+B 419 PASS / 0 FAIL
+  / 4 XFAIL; JIT optimization levels 0–3: 888; dump/reload round-trip (R):
+  200; assertion build: 222; GC stress: 210; ASan/UBSan A+B+R: 619 PASS /
   0 FAIL / 4 XFAIL; C API checks 258 + 92 + 18 and the `udfinal` probe.
 - Full corpus (PUC 5.4.9 test suite plus `tests/d54`) with `--strict`, the
-  public CI command: 592 PASS / 0 FAIL / 16 XFAIL / 3 SKIP / 0 TIMEOUT
-  (217 tests, 608 jobs). Every XFAIL is a row in
+  public CI command: 696 PASS / 0 FAIL / 14 XFAIL / 3 SKIP / 0 TIMEOUT
+  (256 tests, 710 jobs). Every XFAIL is a row in
   `tests/known-different.tsv` and in DIFFERENCES.md.
 - `tests/known-bad.tsv`: no open defect.
 - Classic benchmarks against stock LuaJIT 2.1 (`docs/perf-report-1.0.0.md`):

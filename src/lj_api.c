@@ -2080,7 +2080,9 @@ LUA_API int lua_gc(lua_State *L, int what, ...)
     break;
     }
   case LUA_GCCOLLECT:
-    lj_gc_fullgc(L);  /* like PUC's luaC_fullgc: the user stop flag stays */
+    /* Like PUC's luaC_fullgc: the user stop flag stays, and gc_setpause
+    ** keeps the threshold parked while it is set. */
+    lj_gc_fullgc(L);
     break;
   case LUA_GCCOUNT:
     res = (int)(g->gc.total >> 10);
@@ -2100,9 +2102,12 @@ LUA_API int lua_gc(lua_State *L, int what, ...)
       res = lj_gc_step(L) > 0;
     } else {  /* add 'data' to the total debt */
       /* PUC's GCdebt: what is owed plus the allocation beyond the threshold
-      ** (negative while below it). */
+      ** (negative while below it). While the user stop holds, the threshold
+      ** is parked at LJ_MAX_MEM and PUC's luaC_step keeps GCdebt near zero
+      ** (it sets -2000 at every check), so only what is owed counts. */
       int64_t owed = (int64_t)data * 1024 + (int64_t)g->gc.debt;
-      debt = owed + ((int64_t)g->gc.total - (int64_t)g->gc.threshold);
+      debt = owed + (stopped ? 0 :
+		     ((int64_t)g->gc.total - (int64_t)g->gc.threshold));
       if (debt > 0) {
 	/* Worked off before the call returns (lgc.c incstep loops while the
 	** debt lasts): one lj_gc_step pays GCSTEPSIZE bytes of debt, so 'data'
@@ -2121,6 +2126,9 @@ LUA_API int lua_gc(lua_State *L, int what, ...)
       }
     }
     g->gc.stopped = stopped;
+    /* The step may have ended a cycle or moved the threshold: while stopped,
+    ** no automatic step may follow (lapi.c restores gcstp). */
+    if (stopped) g->gc.threshold = LJ_MAX_MEM;
     break;
   }
   case LUA_GCSETPAUSE: {

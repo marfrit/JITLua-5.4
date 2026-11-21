@@ -390,6 +390,8 @@ static int gc_mayclear(cTValue *o, int val);
 /* Mark a string object. */
 #define gc_mark_str(s)		((s)->marked &= (uint8_t)~LJ_GC_WHITES)
 
+static void gc_eph_marked(global_State *g, GCobj *o);
+
 /* Mark a white GCobj. */
 static void gc_mark(global_State *g, GCobj *o)
 {
@@ -397,6 +399,8 @@ static void gc_mark(global_State *g, GCobj *o)
   lj_assertG(iswhite(o), "mark of non-white object");
   lj_assertG(!isdead(g, o), "mark of dead object");
   white2gray(o);
+  if (LJ_UNLIKELY(g->gceph != NULL))  /* Ephemeron convergence in atomic. */
+    gc_eph_marked(g, o);
   if (LJ_UNLIKELY(gct == ~LJ_TUDATA)) {
     GCtab *mt = tabref(gco2ud(o)->metatable);
     gray2black(o);  /* Userdata are never gray. */
@@ -991,11 +995,208 @@ static int gc_ephemeron_pass(global_State *g)
   return marked;
 }
 
-/* PUC lgc.c convergeephemerons: repeat until no new mark. The direction
-** inversion PUC uses is only a speed-up; correctness needs the fixpoint. */
+/* Ephemeron index for the convergence (atomic phase only).
+**
+** PUC lgc.c convergeephemerons traverses every ephemeron table again until no
+** new value is marked. When an entry's key is reached only through another
+** entry's value, a chain of N entries needs one pass per link unless the
+** hash order happens to follow the chain (PUC's pointer hash of consecutive
+** allocations often does, LuaJIT's mixed hash does not): O(N^2) work in one
+** atomic step. The fixpoint does not depend on the order the entries are
+** visited in, so here the pending entries (white key, white value) are
+** indexed by their key once. While the index is active, gc_mark reports every
+** object it marks; the entries of a key that turns gray are queued, and their
+** values are marked from the queue. Every entry is queued and marked at most
+** once. The index is a temporary allocation; if the allocator refuses it,
+** the plain passes run to the fixpoint instead.
+*/
+#define GCEPH_NONE	(~(uint32_t)0)
+
+typedef struct GCEphEnt {
+  TValue *val;		/* Value slot of a pending entry. */
+  uint32_t next;	/* Next entry of the same key, or of the ready queue. */
+} GCEphEnt;
+
+typedef struct GCEphKey {
+  GCobj *key;		/* NULL: free slot. */
+  uint32_t head, tail;	/* Pending entries of the key; GCEPH_NONE when queued. */
+} GCEphKey;
+
+typedef struct GCEph {
+  GCEphKey *key;	/* Open-addressing hash of the pending keys. */
+  GCEphEnt *ent;	/* Pending entries. */
+  uint32_t kmask, nkey;
+  uint32_t nent, szent;
+  uint32_t ready;	/* Queue of entries whose key is marked. */
+  GCobj *seen;		/* Weak list head when the index was last extended. */
+} GCEph;
+
+static LJ_AINLINE uint32_t gc_eph_hash(GCobj *o)
+{
+  uint64_t p = (uint64_t)(uintptr_t)o;
+  uint32_t h = (uint32_t)(p >> 3) ^ (uint32_t)(p >> 32);
+  h *= 0x9e3779b1u;
+  return h ^ (h >> 15);
+}
+
+/* gc_mark hook: o turned gray. Queue the pending entries keyed by o. */
+static void gc_eph_marked(global_State *g, GCobj *o)
+{
+  GCEph *e = g->gceph;
+  uint32_t i = gc_eph_hash(o) & e->kmask;
+  GCEphKey *k;
+  while ((k = &e->key[i])->key != NULL) {
+    if (k->key == o) {
+      if (k->head != GCEPH_NONE) {
+	e->ent[k->tail].next = e->ready;
+	e->ready = k->head;
+	k->head = k->tail = GCEPH_NONE;
+      }
+      return;
+    }
+    i = (i + 1) & e->kmask;
+  }
+}
+
+/* Insert a key slot (the key is not in the table). */
+static GCEphKey *gc_eph_slot(GCEph *e, GCobj *o)
+{
+  uint32_t i = gc_eph_hash(o) & e->kmask;
+  while (e->key[i].key != NULL && e->key[i].key != o)
+    i = (i + 1) & e->kmask;
+  return &e->key[i];
+}
+
+/* Grow the key hash to nsz slots, dropping keys that are already queued. */
+static int gc_eph_rehash(global_State *g, GCEph *e, uint32_t nsz)
+{
+  GCEphKey *ok = e->key, *nk;
+  uint32_t i, osz = ok ? e->kmask + 1 : 0;
+  nk = (GCEphKey *)g->allocf(g->allocd, NULL, 0, nsz * sizeof(GCEphKey));
+  if (nk == NULL) return 0;
+  memset(nk, 0, nsz * sizeof(GCEphKey));
+  e->key = nk;
+  e->kmask = nsz - 1;
+  e->nkey = 0;
+  for (i = 0; i < osz; i++)
+    if (ok[i].key != NULL && ok[i].head != GCEPH_NONE) {
+      *gc_eph_slot(e, ok[i].key) = ok[i];
+      e->nkey++;
+    }
+  if (ok) g->allocf(g->allocd, ok, osz * sizeof(GCEphKey), 0);
+  return 1;
+}
+
+/* Add a pending entry: key o is white, *val a white object. */
+static int gc_eph_add(global_State *g, GCEph *e, GCobj *o, TValue *val)
+{
+  GCEphKey *k;
+  uint32_t idx;
+  if (e->nent == e->szent) {
+    uint32_t nsz = e->szent * 2;
+    GCEphEnt *ne;
+    if (nsz <= e->szent) return 0;
+    ne = (GCEphEnt *)g->allocf(g->allocd, e->ent, e->szent * sizeof(GCEphEnt),
+			       nsz * sizeof(GCEphEnt));
+    if (ne == NULL) return 0;
+    e->ent = ne;
+    e->szent = nsz;
+  }
+  if ((e->nkey + 1) * 2 > e->kmask + 1 && !gc_eph_rehash(g, e, (e->kmask+1)*2))
+    return 0;
+  k = gc_eph_slot(e, o);
+  if (k->key == NULL) {
+    k->key = o;
+    k->head = k->tail = GCEPH_NONE;
+    e->nkey++;
+  }
+  idx = e->nent++;
+  e->ent[idx].val = val;
+  e->ent[idx].next = GCEPH_NONE;
+  if (k->head == GCEPH_NONE) {
+    k->head = idx;
+  } else {
+    e->ent[k->tail].next = idx;
+  }
+  k->tail = idx;
+  return 1;
+}
+
+/* Index the white-key entries of one ephemeron table; mark the values of
+** entries whose key is marked already (or can never be cleared). */
+static int gc_eph_addtab(global_State *g, GCEph *e, GCtab *t)
+{
+  Node *node = noderef(t->node);
+  MSize i, hmask = t->hmask;
+  for (i = 0; i <= hmask; i++) {
+    Node *n = &node[i];
+    if (tvisnil(&n->val) || !tviswhite(&n->val)) continue;
+    if (!gc_mayclear(&n->key, 0)) {
+      gc_marktv(g, &n->val);
+    } else if (!gc_eph_add(g, e, gcV(&n->key), &n->val)) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
+#define gc_iseph(t) \
+  (((t)->marked & (LJ_GC_WEAKKEY|LJ_GC_WEAKVAL)) == LJ_GC_WEAKKEY)
+
+/* Converge with the index. Returns 0 if an allocation failed; the marks made
+** so far stay valid (they are all reachable), the caller finishes the
+** fixpoint with plain passes. */
+static int gc_eph_converge(global_State *g)
+{
+  GCEph e;
+  int ok = 0;
+  memset(&e, 0, sizeof(e));
+  e.ready = GCEPH_NONE;
+  e.szent = 256;
+  e.ent = (GCEphEnt *)g->allocf(g->allocd, NULL, 0, e.szent*sizeof(GCEphEnt));
+  if (e.ent == NULL || !gc_eph_rehash(g, &e, 512))
+    goto done;
+  g->gceph = &e;
+  for (;;) {
+    GCobj *head = gcref(g->gc.weak), *o;
+    /* Index the ephemeron tables linked to the weak list since last time. */
+    for (o = head; o != e.seen; o = gcref(gco2tab(o)->gclist)) {
+      GCtab *t = gco2tab(o);
+      if (gc_iseph(t) && t->hmask > 0 && !gc_eph_addtab(g, &e, t))
+	goto done;
+    }
+    e.seen = head;
+    if (e.ready == GCEPH_NONE && gcref(g->gc.gray) == NULL)
+      break;  /* Nothing queued, nothing to propagate, no new table. */
+    while (e.ready != GCEPH_NONE) {
+      uint32_t i = e.ready;
+      e.ready = e.ent[i].next;
+      gc_marktv(g, e.ent[i].val);
+    }
+    gc_propagate_gray(g);
+  }
+  ok = 1;
+done:
+  g->gceph = NULL;
+  if (e.ent) g->allocf(g->allocd, e.ent, e.szent * sizeof(GCEphEnt), 0);
+  if (e.key) g->allocf(g->allocd, e.key, (e.kmask+1) * sizeof(GCEphKey), 0);
+  return ok;
+}
+
+/* PUC lgc.c convergeephemerons: repeat until no new mark. Most programs reach
+** the fixpoint in one or two plain passes; a longer run of dependent entries
+** switches to the index above. */
 static void gc_converge_ephemerons(global_State *g)
 {
-  while (gc_ephemeron_pass(g))
+  int n;
+  for (n = 0; n < 2; n++) {
+    if (!gc_ephemeron_pass(g))
+      return;
+    gc_propagate_gray(g);
+  }
+  if (gc_eph_converge(g))
+    return;
+  while (gc_ephemeron_pass(g))  /* No memory for the index. */
     gc_propagate_gray(g);
 }
 
@@ -1334,6 +1535,8 @@ static void gc_setpause(global_State *g)
   GCSize t = (g->gc.estimate/100) * (g->gc.pause * 4);
   g->gc.threshold = t > g->gc.total ? t : g->gc.total;
   g->gc.debt = 0;
+  if (g->gc.stopped)  /* PUC GCSTPUSR: no automatic step until "restart". */
+    g->gc.threshold = LJ_MAX_MEM;
 }
 
 int LJ_FASTCALL lj_gc_step(lua_State *L)
@@ -1344,6 +1547,12 @@ int LJ_FASTCALL lj_gc_step(lua_State *L)
 #ifdef LUAJIT_GC_STATS
   uint64_t gcstats_t0 = gcstats_now();
 #endif
+  if (LJ_UNLIKELY(g->gc.stopped)) {
+    /* 5.4 lgc.c luaC_step does nothing while the user stopped the collector
+    ** (lua_gc clears the flag for an explicit step). Keep it parked. */
+    g->gc.threshold = LJ_MAX_MEM;
+    return -1;
+  }
   setvmstate(g, GC);
   lim = (GCSTEPSIZE/100) * (g->gc.stepmul * 4);
   if (lim == 0)
@@ -1389,85 +1598,20 @@ void lj_gc_step_top(lua_State *L, TValue *top)
 #if LJ_TARGET_ARM64 || (LJ_TARGET_X86ORX64 && LJ_GC64)
 /* GC64 targets pass a 64-bit pak: traceno(16), loop-head flag(16), steps(32). */
 
-/* Stale values left in the stack slots above the live range are roots while
-** the interpreter has not overwritten them, and a trace never writes them
-** (a store to a dead local is not recorded at all): a compiled loop that
-** waits for such a value to be collected would wait forever. This is called
-** for a GC check at the start bytecode of the trace. Slots that are read by
-** any bytecode from the start pc onward (including loop control slots) keep
-** their value; every other slot is dead at the start pc and is cleared, as
-** PUC's checkGC narrows the top and the atomic phase nils the dead slice.
-** Slots an open upvalue points to are kept, as the snapshot use/def analysis
-** does.
+/* A weak trace runs with stale values in the stack slots above its live
+** range: the interpreter left them there and the trace never writes them.
+** They are below L->top, so they are GC roots, and a compiled loop that
+** waits for a weak entry to be collected would wait forever. This is called
+** for a GC check at the start bytecode of the root trace. If that is a loop
+** bytecode, every slot above the loop's own variables is dead at that point,
+** so clear them before the step.
+**
+** Only weak traces do this. A trace of any other loop keeps the stale values
+** alive until it exits (IMPL-DEFINED, docs/DIFFERENCES.md): a liveness bound
+** derived from a bytecode scan at every step misjudged loops whose exits jump
+** back to an enclosing loop (an inner `break` threaded to the outer back edge,
+** a `goto` to a `repeat`) and cleared live locals of the outer body.
 */
-/* Mark slots read by bytecode in [from,to) and, when wr is not NULL, slots
-** it writes. Opcode modes follow the snapshot analysis in lj_snap.c. */
-static void gc_jit_scan(GCproto *pt, BCPos from, BCPos to,
-			uint8_t *rd, uint8_t *wr)
-{
-  const BCIns *bc = proto_bc(pt);
-  BCReg fs = pt->framesize;
-  BCPos i, e;
-  BCReg sr;
-#define RD(x) do { if (rd && (x) < fs) rd[x] = 1; } while (0)
-#define WR(x) do { if (wr && (x) < fs) wr[x] = 1; } while (0)
-  for (i = from; i < to && i < pt->sizebc; i++) {
-    BCIns ins = bc[i];
-    BCOp op = bc_op(ins);
-    switch (bcmode_b(op)) {
-    case BCMvar: RD(bc_b(ins)); break;
-    default: break;
-    }
-    switch (bcmode_c(op)) {
-    case BCMvar: RD(bc_c(ins)); break;
-    case BCMrbase:  /* Only BC_CAT uses RC rbase: operands B..C. */
-      for (sr = bc_b(ins); sr <= bc_c(ins); sr++) RD(sr);
-      break;
-    default: break;
-    }
-    switch (bcmode_a(op)) {
-    case BCMvar: RD(bc_a(ins)); break;
-    case BCMdst:  /* ISTC/ISFC only copy conditionally: not a write. */
-      if (op != BC_ISTC && op != BC_ISFC) WR(bc_a(ins));
-      break;
-    case BCMbase:
-      if (op >= BC_CALLM && op <= BC_ITERN) {
-	BCReg top = (op == BC_CALLM || op == BC_CALLMT || bc_c(ins) == 0) ?
-	  fs : (BCReg)(bc_a(ins) + bc_c(ins) + LJ_FR2);
-	sr = bc_a(ins) - ((op == BC_ITERC || op == BC_ITERN) ? 3 : 0);
-	for (; sr < top; sr++) RD(sr);
-      } else if (op == BC_TSETM) {
-	for (sr = bc_a(ins) - 1; sr < fs; sr++) RD(sr);
-      }
-      break;
-    default: break;
-    }
-    /* A closure reads the parent slots it captures (as upvalues). */
-    if (op == BC_FNEW) {
-      GCproto *cpt = gco2pt(proto_kgc(pt, ~(ptrdiff_t)bc_d(ins)));
-      const uint16_t *uv = proto_uv(cpt);
-      MSize j;
-      for (j = 0; j < cpt->sizeuv; j++)
-	if ((uv[j] & PROTO_UV_LOCAL)) RD((BCReg)(uv[j] & 0xff));
-    }
-    /* Loop control slots are read by the FORI/FORL/ITERL bytecode itself. */
-    if (op == BC_FORI || op == BC_JFORI) {
-      for (sr = bc_a(ins); sr < bc_a(ins) + 3; sr++) RD(sr);
-    } else if (op >= BC_FORL && op <= BC_JFORL) {
-      for (e = bc_a(ins) + FORL_EXT + 1, sr = bc_a(ins); sr < e; sr++) RD(sr);
-    } else if (op >= BC_ITERL && op <= BC_JITERL) {
-      for (e = bc_a(ins) + 4, sr = bc_a(ins); sr < e; sr++) RD(sr);
-    } else if (bc_isret(op)) {
-      BCReg top = (op == BC_RETM) ? fs : (BCReg)(bc_a(ins) + bc_d(ins));
-      for (sr = bc_a(ins); sr < top; sr++) RD(sr);
-    }
-    if (op == BC_KNIL)
-      for (sr = bc_a(ins); sr <= bc_d(ins); sr++) WR(sr);
-  }
-#undef RD
-#undef WR
-}
-
 static void gc_jit_cleardead(global_State *g, lua_State *L, TraceNo traceno)
 {
   jit_State *J = G2J(g);
@@ -1478,68 +1622,28 @@ static void gc_jit_cleardead(global_State *g, lua_State *L, TraceNo traceno)
     return;
   T = traceref(J, traceno);
   lj_assertG(T != NULL, "no trace %d in GC step", (int)traceno);
-  if (T == NULL)
-    return;
-  if (T->root != 0 && (T = traceref(J, T->root)) == NULL)
-    return;
-  {
-    GCproto *pt = gco2pt(gcref(T->startpt));
-    const BCIns *startpc = mref(T->startpc, const BCIns);
-    const BCIns *bc = proto_bc(pt);
-    BCPos startpos = proto_bcpos(pt, startpc);
-    BCPos i, back = NO_JMP, bstart = startpos;
-    BCReg nlive = 0, fs = pt->framesize;
-    uint8_t rd[LJ_MAX_SLOTS], wr[LJ_MAX_SLOTS], ra[LJ_MAX_SLOTS];
-    BCReg s, top = (BCReg)(L->top - L->base);
-    BCOp sop = bc_op(T->startins);
-    if (top > fs) top = fs;
-    /* Find the loop back edge and the live lower bound of its control
-    ** slots. A trace starts at the first bytecode of the loop body, which
-    ** is not necessarily the loop instruction. */
-    if (sop >= BC_LOOP && sop <= BC_JLOOP) {
-      nlive = bc_a(T->startins);
-      bstart = startpos + 1;
+  if (T != NULL && T->weak) {
+    BCIns ins;
+    BCReg nlive;  /* Number of live slots at the loop head. */
+    TValue *o;
+    if (T->root != 0 && (T = traceref(J, T->root)) == NULL)
+      return;
+    ins = T->startins;
+    switch (bc_op(ins)) {
+    case BC_LOOP: case BC_ITERN:
+      nlive = bc_a(ins);
+      break;
+    case BC_FORL:
+      nlive = bc_a(ins) + FORL_EXT + 1;
+      break;
+    case BC_ITERL:  /* The preceding ITERC/ITERN has the result count. */
+      nlive = bc_a(ins) + bc_b(mref(T->startpc, const BCIns)[-1]) - 1;
+      break;
+    default:  /* Function, return or stitched start: no bound known. */
+      return;
     }
-    for (i = startpos + 1; i < pt->sizebc; i++) {
-      BCOp op = bc_op(bc[i]);
-      if (op >= BC_FORL && op <= BC_JFORL) {
-	back = i; nlive = bc_a(bc[i]) + FORL_EXT + 1; break;
-      }
-      if (op >= BC_ITERL && op <= BC_JITERL) {
-	back = i; nlive = bc_a(bc[i]) + 4; break;
-      }
-      if (op == BC_JMP) {
-	ptrdiff_t tgt = (ptrdiff_t)i + 1 + bc_j(bc[i]);
-	if (tgt <= (ptrdiff_t)startpos) {
-	  back = i;
-	  if (tgt >= 0 && bc_op(bc[tgt]) >= BC_LOOP && bc_op(bc[tgt]) <= BC_JLOOP)
-	    nlive = bc_a(bc[tgt]);
-	  break;
-	}
-      }
-      if (bc_isret(op)) return;  /* A return before any back edge: not a loop. */
-    }
-    if (back == NO_JMP) return;
-    memset(rd, 0, fs); memset(wr, 0, fs); memset(ra, 0, fs);
-    gc_jit_scan(pt, bstart, back + 1, rd, wr);
-    /* Reads outside the body: after the back edge, and before the start pc
-    ** (an enclosing loop runs that code again after this loop exits). */
-    gc_jit_scan(pt, 0, bstart, ra, NULL);
-    gc_jit_scan(pt, back + 1, pt->sizebc, ra, NULL);
-    for (s = 0; s < top; s++) {
-      GCobj *uv;
-      /* Slots at and above the loop's own registers are dead at the head.
-      ** Below them, a slot written in the body and read by no bytecode of
-      ** the function (and captured by no closure) is dead there too: the
-      ** trace keeps the stored value in a register, so the stack slot still
-      ** holds the stale one. */
-      int dead = (sop >= BC_LOOP && sop <= BC_JLOOP && s >= nlive) ||
-	 (wr[s] && !rd[s] && !ra[s]);
-      if (dead)
-	for (uv = gcref(L->openupval); uv != NULL; uv = gcnext(uv))
-	  if (uvval(gco2uv(uv)) == L->base + s) { dead = 0; break; }
-      if (dead) setnilV(L->base + s);
-    }
+    for (o = L->base + nlive; o < L->top; o++)
+      setnilV(o);
   }
 }
 

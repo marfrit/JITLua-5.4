@@ -36,7 +36,11 @@
 /* If you perform *any* kind of private modifications to the bytecode itself
 ** or to the dump format, you *must* set BCDUMP_VERSION to 0x80 or higher.
 */
-#define BCDUMP_VERSION		0x84	/* LuaJIT-5.4 fork: I64BOX/I64 tab kinds + 5.4 bytecode */
+/* LuaJIT-5.4 fork: 0x84 added the I64BOX/I64 table kinds and the 5.4
+** bytecode; 0x85 keeps TNEW/TDUP/FNEW at the free register, where the VM
+** takes dst+1 as the live top of their GC check (older dumps would lose
+** live locals above the destination). */
+#define BCDUMP_VERSION		0x85
 
 /* Compatibility flags. */
 #define BCDUMP_F_BE		0x01

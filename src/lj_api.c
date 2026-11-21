@@ -591,12 +591,12 @@ LUA_API void lua_len(lua_State *L, int idx)
       L->top = base+2;
       lua_call(L, 1, 1);
     } else {
-      if (tvistab(o))
-	setint64V(L->top, (int64_t)lj_tab_len(tabV(o)));
-      else if (tvisi64(o))  /* 5.4: a number without __len has no length */
+      /* 5.4 luaV_objlen: a userdata without __len has no length ("attempt
+      ** to get length of a FILE* value"), and neither has a number without
+      ** __len (the int64 box). Only a table has a primitive length. */
+      if (!tvistab(o))
 	lj_err_optype(L, o, LJ_ERR_OPLEN);
-      else
-	setint64V(L->top, (int64_t)udataV(o)->len);
+      setint64V(L->top, (int64_t)lj_tab_len(tabV(o)));
       incr_top(L);
     }
   } else {

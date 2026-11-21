@@ -698,6 +698,11 @@ target x86_64 (GC64) and arm64.
   `luaL_optinteger` as in PUC's `tremove`, on the plain-table and the
   metamethod path; before, any second argument had to be a number
   (`tests/d54/tbl_09_remove_nilpos.lua`).
+- `collectgarbage` reads its second argument only for "step", "setpause",
+  "setstepmul", "generational" and "incremental" (lbaselib.c
+  `luaB_collectgarbage`); `collectgarbage("collect", 1.5)`,
+  `("count", {})` and `("isrunning", "x")` succeed as in PUC instead of
+  raising an argument error (`tests/d54/gc_14_collectgarbage_args.lua`).
 
 ## Known JIT/performance rows (not semantic divergences)
 

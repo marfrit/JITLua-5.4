@@ -588,6 +588,19 @@ target x86_64 (GC64) and arm64.
   call hook) had no name for `t[2]()`. The parser now folds `-0` to the
   integer constant 0 (only the float `-0.0` must stay unfolded), so `t[-0]`
   is an integer-key index as in PUC (`tests/d54/debug_10_index_names.lua`).
+- Error-path `__close` handlers when the error passes a C function (a
+  `table.sort` comparator, a `string.gsub` replacement) on its way to the
+  frame that closes the pending variables. With external unwinding the C
+  frame's unwinding step closed the slots above it at once if a protected
+  call from C caught the error, so the discarded Lua frames below the C
+  function were debug levels of the handlers; without a catcher (a coroutine
+  dying that way) it dropped the slots, so `coroutine.close` and the error
+  close of `coroutine.wrap` never called their handlers. The C frame now
+  keeps them registered (`unwindstack_keep`) for every catcher: pcall from
+  the VM, `lua_pcall`/`lua_cpcall` at their own level (the handler's caller
+  is the C function that made the protected call, PUC `luaD_pcall`) and
+  `coroutine.close` for a dead thread (`tests/d54/close_11_errpath_cfunc.lua`).
+  A yield through a C frame keeps its old path.
 
 ## Known JIT/performance rows (not semantic divergences)
 

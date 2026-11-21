@@ -117,16 +117,6 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   vs 0.24 KB on x86_64 and aarch64). `tests/lib/gc-count-weak-repro.lua`.
 - `FORK` A stripped dump keeps no `linedefined`/`lastlinedefined` (both are 0
   after loading it); PUC's stripped dumps keep them (`db.lua` line 1002).
-- `PENDING` Debug levels inside an error-path `__close` handler in one shape
-  left: the error passes a C function (say a `table.sort` comparator) and is
-  caught by a protected call made from C (`lua_pcall`). The handlers of the
-  slots above that C function run inside the unwinder at the C function's
-  frame, so the Lua frames between it and the protected call are levels below
-  them; PUC shows the C function that made the protected call. Under
-  `pcall`/`xpcall` called from Lua, in `coroutine.close`, the error close of
-  `coroutine.wrap` and a protected call from C without a C function in
-  between the levels match PUC (`tests/d54/close_09_errpath_cont.lua`,
-  `tests/d54/close_10_errpath_levels.lua`).
 - `FORK` C functions that marked a slot with `lua_toclose` and then yield close
   that slot at yield time, not when the frame "returns" after the resume: with
   no C continuation frame there is no later point to run `__close`. PUC keeps

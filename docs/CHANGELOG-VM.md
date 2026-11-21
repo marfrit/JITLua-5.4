@@ -771,6 +771,13 @@ target x86_64 (GC64) and arm64.
   fails with the caller's message ("too many results to unpack") and never
   as a stack overflow (`tests/d54/tbl_11_unpack_many.lua`). The limit itself
   is the stack-depth row of `docs/DIFFERENCES.md`.
+- `lua_isstring` is true for a 5.4 integer held in the int64 box (outside
+  the inline range), as for every number in PUC (lapi.c `cvt2str`). The
+  library code that asks it refused such values: a `string.gsub`
+  replacement of `1 << 60` (function or table) raised "invalid replacement
+  value (a number)", and a `__tostring` returning one raised "'__tostring'
+  must return a string" in `luaL_tolstring` (`print`)
+  (`tests/d54/i64_09_isstring_box.lua`).
 
 ## Known JIT/performance rows (not semantic divergences)
 

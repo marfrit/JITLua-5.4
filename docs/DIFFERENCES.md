@@ -197,7 +197,9 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   longer ones fail to load with "control structure too long" (for example
   32767 `break`s in one loop body, or 40000 backward `goto`s to one label).
   PUC's signed jump operand has 25 bits. Same reason as the constants: the
-  16-bit jump operand of the bytecode format.
+  16-bit jump operand of the bytecode format. Only jumps that are long in
+  the code itself count: a jump to a jump is threaded to the final target
+  only where that distance fits.
 
 - `IMPL-DEFINED` The default pause/stepmul are LuaJIT's measured speed policy
   300/200, not PUC's 200/100 (a deliberate tuning decision taken 2026-11-19;

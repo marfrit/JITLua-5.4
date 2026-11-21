@@ -646,6 +646,15 @@ target x86_64 (GC64) and arm64.
   stepped over in a scratch copy, it differs from PUC only in the IMPL-DEFINED
   operand names (lines 176, 190, 191, 301) and the printed stack-overflow
   depth.
+- Chains of short jumps failed to load. `bcemit_jmp` let the pending jumps
+  to the current instruction join the list of the JMP it emitted there, so
+  they took that JMP's final target; 33000 `do goto l; ::l:: end` blocks
+  (each goto lands right before the next one) were all patched to the last
+  label and failed with "control structure too long", where PUC loads them.
+  Pending jumps now land on the new JMP like on any other instruction, and
+  `fs_fixup_bc` threads a JMP to a JMP through to the final target (up to
+  eight hops) where that distance fits the 16-bit operand
+  (`tests/d54/parse_05_jump_chains.lua`).
 
 ## Known JIT/performance rows (not semantic divergences)
 

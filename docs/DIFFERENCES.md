@@ -125,14 +125,6 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   function: PUC calls the return hook for the Lua caller after the C function
   returns; here the caller returns through the continuation without a hook
   event, as it did when the frame was replaced.
-- `IMPL-DEFINED` When a weak *value* disappears relative to its finalizer. PUC
-  5.4 clears weak values in the atomic phase, before finalizers run, so a
-  finalizer of a weakly referenced object already sees the entry gone
-  (`gc.lua:323`: inside `__gc`, `C.key == nil`). LuaJIT clears weak values
-  during sweep, after the finalizers, so the finalizer sees the object still
-  present in the weak table; after the next full collection both sides agree.
-  The manual does not order these two steps; measured the same on x86_64 and
-  aarch64, `tests/lib/gc-weak-finalizer-repro.lua`.
 - `IMPL-DEFINED` Ephemeron convergence. PUC 5.4 uses the converged ephemeron
   marking (`luaC_ephemeron`), so an ephemeron table whose keys point to values
   that die loses those entries in the same cycle; here the weak-key algorithm

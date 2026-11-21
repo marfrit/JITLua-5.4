@@ -80,7 +80,7 @@ fi
 # Loader stack effect (loadstack.c) and the 5.4 signatures and formats of
 # lua_load, lua_dump and lua_pushfstring (api54.c). Same source against both
 # libraries; the PUC output is the oracle and the two must be identical.
-for t in loadstack; do
+for t in loadstack api54; do
   $CC $CFLAGS -I"$SRC" "$ROOT/tests/capi/$t.c" -o "$OUT/$t" \
     "$LIB" $LDFLAGS -lm -ldl
   echo "== $t (JITLua-5.4) =="

@@ -694,6 +694,10 @@ target x86_64 (GC64) and arm64.
   separator is reported after one `__len` call. For a plain table the raw
   length is not observable and is still taken only without an end
   (`tests/d54/tbl_10_concat_len_order.lua`).
+- `table.remove(t, nil)` removes the last element: the position is read with
+  `luaL_optinteger` as in PUC's `tremove`, on the plain-table and the
+  metamethod path; before, any second argument had to be a number
+  (`tests/d54/tbl_09_remove_nilpos.lua`).
 
 ## Known JIT/performance rows (not semantic divergences)
 

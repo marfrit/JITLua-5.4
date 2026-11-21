@@ -344,6 +344,8 @@ static void gcstats_cycle_hook(global_State *g)
 #define GCSWEEPCOST	10
 #define GCFINALIZECOST	100
 
+static int gc_mayclear(cTValue *o, int val);
+
 /* Stage-1 precursor: the string sweep is a pointer chase over the interned
 ** strings -- the optional stats build measures 60-91 ns per string visited,
 ** i.e. one cache miss each -- while the bucket array itself is walked in
@@ -632,8 +634,18 @@ static int gc_traverse_tab(global_State *g, GCtab *t)
       Node *n = &node[i];
       if (!tvisnil(&n->val)) {  /* Mark non-empty slot. */
 	lj_assertG(!tvisnil(&n->key), "mark of nil key in non-empty slot");
-	if (!(weak & LJ_GC_WEAKKEY) || tvisi64(&n->key)) gc_marktv(g, &n->key);
-	if (!(weak & LJ_GC_WEAKVAL) || tvisi64(&n->val)) gc_marktv(g, &n->val);
+	if (weak == LJ_GC_WEAKKEY) {
+	  /* Ephemeron: the value is marked only when the key is (or never can
+	  ** be) cleared; a string key is marked by gc_mayclear and counts as
+	  ** marked, a boxed 5.4 integer key is marked here. */
+	  if (tvisi64(&n->key)) gc_marktv(g, &n->key);
+	  if (!gc_mayclear(&n->key, 0) && tvisgcv(&n->val) &&
+	      iswhite(gcV(&n->val)))
+	    gc_marktv(g, &n->val);
+	} else {
+	  if (!(weak & LJ_GC_WEAKKEY) || tvisi64(&n->key)) gc_marktv(g, &n->key);
+	  if (!(weak & LJ_GC_WEAKVAL) || tvisi64(&n->val)) gc_marktv(g, &n->val);
+	}
       }
     }
   }
@@ -952,6 +964,42 @@ static void gc_clearweak_keys(global_State *g, GCobj *o)
   }
 }
 
+/* One ephemeron convergence pass: mark a weak-key table's value when its key
+** is already marked (or can never be cleared: a string key is marked by
+** gc_mayclear, numbers/booleans are not collectable, the boxed integer key
+** is marked). Ephemeron tables are WEAKKEY without WEAKVAL. */
+static int gc_ephemeron_pass(global_State *g)
+{
+  GCobj *o = gcref(g->gc.weak);
+  int marked = 0;
+  while (o != NULL) {
+    GCtab *t = gco2tab(o);
+    if ((t->marked & LJ_GC_WEAKKEY) && !(t->marked & LJ_GC_WEAKVAL) &&
+	t->hmask > 0) {
+      Node *node = noderef(t->node);
+      MSize i, hmask = t->hmask;
+      for (i = 0; i <= hmask; i++) {
+	Node *n = &node[i];
+	if (!tvisnil(&n->val) && tvisgcv(&n->val) &&
+	    iswhite(gcV(&n->val)) && !gc_mayclear(&n->key, 0)) {
+	  gc_marktv(g, &n->val);
+	  marked = 1;
+	}
+      }
+    }
+    o = gcref(t->gclist);
+  }
+  return marked;
+}
+
+/* PUC lgc.c convergeephemerons: repeat until no new mark. The direction
+** inversion PUC uses is only a speed-up; correctness needs the fixpoint. */
+static void gc_converge_ephemerons(global_State *g)
+{
+  while (gc_ephemeron_pass(g))
+    gc_propagate_gray(g);
+}
+
 /* Call a userdata or cdata finalizer. */
 static void gc_call_finalizer(global_State *g, lua_State *L,
 			      cTValue *mo, GCobj *o)
@@ -1130,6 +1178,8 @@ static void atomic(global_State *g, lua_State *L)
   setgcrefnull(g->gc.grayagain);
   gc_propagate_gray(g);  /* Propagate it. */
 
+  gc_converge_ephemerons(g);  /* PUC: converge before clearing weak values. */
+
   /* PUC lgc.c atomic: clear weak values before checking finalizers, so the
   ** finalizer of a weakly referenced object sees the entry gone. The saved
   ** head is PUC's origweak: only tables re-linked by the resurrection marks
@@ -1140,6 +1190,7 @@ static void atomic(global_State *g, lua_State *L)
   udsize = lj_gc_separateudata(g, 0);  /* Separate userdata to be finalized. */
   gc_mark_mmudata(g);  /* Mark them. */
   udsize += gc_propagate_gray(g);  /* And propagate the marks. */
+  gc_converge_ephemerons(g);  /* PUC: converge again after resurrection marks. */
 
   /* All marking done: clear dead ephemeron/allweak keys, then the values of
   ** the weak tables that resurrection linked again (PUC clearbykeys, then

@@ -131,6 +131,7 @@ local sp5 = package.searchpath("m", dir .. "/?.lua", ".", "/")
 print("searchpath-dirsep|ok=" .. tostring(sp5 ~= nil) .. "|" .. norm(repr(sp5)))
 
 os.remove(modpath)
+os.remove(dir)  -- the directory is empty now
 local flm3 = require("m")  -- cached: no file access needed
 print("file-mod-after-remove|same=" .. tostring(flm3 == flm))
 package.path = oldpath

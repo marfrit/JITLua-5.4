@@ -9,7 +9,7 @@ local function run(name, data)
   local ok, res
   if chunk then ok, res = pcall(chunk) else ok, res = false, err:gsub("^.-:%d+: ", "") end
   os.remove(p)
-  print(name, ok, type(res), type(res) == "string" and res:gsub(os.tmpname(), "TMP") or res)
+  print(name, ok, type(res), type(res) == "string" and res:gsub((p:gsub("%p", "%%%0")), "TMP") or res)
 end
 run("bom", "\239\187\191print(3)")
 run("shebang", "#!/usr/bin/lua\nprint(4)")

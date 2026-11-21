@@ -1181,6 +1181,39 @@ void lj_meta_forunclip(lua_State *L, TValue *o)
   }
 }
 
+#if LJ_HASJIT
+/* A recorded FORI starts a clipped loop: the trace calls here with the base
+** slot of FOR_IDX (relative to the base the trace runs on), the int32 start
+** and step and the converted limit. The entry is pushed and 1 returned if
+** lj_meta_for would start this loop in the clipped form; otherwise nothing
+** is changed and 0 sends the trace back to the interpreter's FORI. The
+** trace then holds the three slots in the clipped form itself. */
+int lj_meta_forclipi(lua_State *L, int32_t slot, int32_t init, int32_t step,
+		     int64_t limit)
+{
+  int32_t cv;
+  if (step == 0 || for_fits32(limit)) return 0;
+  cv = for_clipv(step);
+  if (step > 0 ? (limit < init || init > cv) : (limit > init || init < cv))
+    return 0;
+  forclip_push(L, (int32_t)savestack(L, tvref(G(L)->jit_base) + slot), limit);
+  return 1;
+}
+
+/* The same for a float limit, converted like forlimit does. */
+int lj_meta_forclipn(lua_State *L, int32_t slot, int32_t init, int32_t step,
+		     lua_Number nlimit)
+{
+  int64_t limit;
+  if (!for_flttoint(nlimit, &limit, step < 0)) {
+    if (!(step > 0 ? nlimit > 0 : nlimit < 0)) return 0;  /* Skip or NaN. */
+    limit = step > 0 ? (int64_t)0x7fffffffffffffffLL :
+		       (int64_t)(-0x7fffffffffffffffLL - 1);
+  }
+  return lj_meta_forclipi(L, slot, init, step, limit);
+}
+#endif
+
 int LJ_FASTCALL lj_meta_for(lua_State *L, TValue *o)
 {
   int64_t init, step;
@@ -1251,9 +1284,29 @@ int lj_meta_forkind(lua_State *L, cTValue *o, TValue *out)
   int64_t init, step, limit;
   if (for_isint(o) && for_isint(o+2) && for_toint(o, &init, 0) &&
       for_toint(o+2, &step, 0)) {
-    if (step == 0 || !for_tointeger(L, o+1, &limit, step < 0) ||
-	!(for_fits32(init) && for_fits32(step) && for_fits32(limit)) ||
-	(int32_t)limit == for_clipv((int32_t)step))  /* Clipped or alike. */
+    if (step == 0 || !for_fits32(init) || !for_fits32(step))
+      return LJ_FOR_WIDE;
+    if (!for_tointeger(L, o+1, &limit, step < 0)) {
+      /* A float beyond the integer range on the side the loop runs to is
+      ** PUC's clipped limit (forlimit); NaN or the other side skips. */
+      if (!tvisnum(o+1) || !(step > 0 ? numV(o+1) > 0 : numV(o+1) < 0))
+	return LJ_FOR_WIDE;
+      limit = step > 0 ? (int64_t)0x7fffffffffffffffLL :
+			 (int64_t)(-0x7fffffffffffffffLL - 1);
+    }
+    if (!for_fits32(limit)) {
+      /* The loop lj_meta_for starts in the clipped form (not a skipped
+      ** one, not one that starts beyond the clip value). */
+      int32_t cv = for_clipv((int32_t)step);
+      if (tvisstr(o+1)) return LJ_FOR_WIDE;  /* Left to the interpreter. */
+      if (step > 0 ? (limit < init || init > cv) : (limit > init || init < cv))
+	return LJ_FOR_WIDE;
+      setintV(out, (int32_t)init);
+      setintV(out+1, cv);
+      setintV(out+2, (int32_t)step);
+      return LJ_FOR_CLIP;
+    }
+    if ((int32_t)limit == for_clipv((int32_t)step))  /* Alike: started in C. */
       return LJ_FOR_WIDE;
     setintV(out, (int32_t)init);
     setintV(out+1, (int32_t)limit);

@@ -1039,12 +1039,42 @@ static LoopEvent rec_for(jit_State *J, const BCIns *fori, int isforl)
     ** of an integer loop, guarded to fit int32 (a limit that does not makes
     ** a wide loop: the guard exits to the interpreter). The loop kind itself
     ** follows from the IR types of the start and the step. */
-    if (lj_meta_forkind(J->L, tv, cv) != LJ_FOR_RETRY) {
+    int kind = lj_meta_forkind(J->L, tv, cv);
+    if (kind != LJ_FOR_RETRY && kind != LJ_FOR_CLIP) {
       setintV(&J->errinfo, BC_FORI);
       lj_trace_err_info(J, LJ_TRERR_NYIBC);
     }
     t = tvisint(&cv[FORL_IDX]) ? IRT_INT : IRT_NUM;
     dir = rec_for_direction(&cv[FORL_STEP]);
+    if (kind == LJ_FOR_CLIP) {
+      /* An int32 start and step with a limit beyond int32: the loop starts
+      ** in the clipped form (lj_meta.c). The helper does what lj_meta_for
+      ** does for it, keeping the real limit in the thread's list; it returns
+      ** zero without a side effect for any other loop, and the guard exits
+      ** to the interpreter's FORI. The trace holds the clip value as the
+      ** limit, so every exit inside the loop restores the clipped form. */
+      TRef lim, ok, step;
+      for (i = FORL_IDX; i <= FORL_STEP; i++)
+	if (!tr[i]) sload(J, ra+i);
+      lim = tr[FORL_STOP];
+      if (!(tref_isintany(tr[FORL_IDX]) && tref_isintany(tr[FORL_STEP]) &&
+	    (tref_isnum(lim) || tref_isi64(lim)))) {
+	setintV(&J->errinfo, BC_FORI);
+	lj_trace_err_info(J, LJ_TRERR_NYIBC);
+      }
+      tr[FORL_IDX] = fori_conv(J, tr[FORL_IDX], IRT_INT);
+      tr[FORL_STEP] = step = fori_conv(J, tr[FORL_STEP], IRT_INT);
+      if (!tref_isk(step))  /* The clip value depends on the direction. */
+	emitir(IRTGI(dir ? IR_GT : IR_LT), step, lj_ir_kint(J, 0));
+      ok = lj_ir_call(J, tref_isnum(lim) ? IRCALL_lj_meta_forclipn :
+					  IRCALL_lj_meta_forclipi,
+		      lj_ir_kint(J, (int32_t)(J->baseslot + ra) - (1+LJ_FR2)),
+		      tr[FORL_IDX], step, lim);
+      emitir(IRTGI(IR_NE), ok, lj_ir_kint(J, 0));
+      tr[FORL_STOP] = emitir(IRTI(IR_SUB),
+			     lj_ir_kint(J, (int32_t)(dir ? 0x7fffffff :
+							   0x80000000)), step);
+    } else
     for (i = FORL_IDX; i <= FORL_STEP; i++) {
       if (!tr[i]) sload(J, ra+i);
       lj_assertJ(tref_isnumber_str(tr[i]) || tref_isi64(tr[i]),
@@ -1058,7 +1088,8 @@ static LoopEvent rec_for(jit_State *J, const BCIns *fori, int isforl)
     }
     tr[FORL_EXT] = tr[FORL_IDX];
     stop = tr[FORL_STOP];
-    rec_for_check(J, t, dir, stop, tr[FORL_STEP], 2);
+    if (kind != LJ_FOR_CLIP)
+      rec_for_check(J, t, dir, stop, tr[FORL_STEP], 2);
     iv = cv;
   }
 

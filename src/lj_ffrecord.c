@@ -1887,17 +1887,38 @@ static void LJ_FASTCALL recff_table_clear(jit_State *J, RecordFFData *rd)
 /* Get FILE* for I/O function. Any I/O error aborts recording, so there's
 ** no need to encode the alternate cases for any of the guards.
 */
-static TRef recff_io_fp(jit_State *J, TRef *udp, int32_t id)
+static TRef recff_io_fp(jit_State *J, RecordFFData *rd, TRef *udp, int32_t id)
 {
   TRef tr, ud, fp;
-  if (id) {  /* io.func() */
+  if (id) {  /* io.func(): the default file, unchecked like PUC getiofile */
     ud = lj_ir_ggfload(J, IRT_UDATA, GG_OFS(g.gcroot[id]));
   } else {  /* fp:method() */
+    GCtab *reg = tabV(registry(J->L)), *mt;
+    GCstr *key = lj_str_newlit(J->L, "FILE*");
+    cTValue *fmt;
+    GCudata *u;
+    RecordIndex ix;
     ud = J->base[0];
     if (!tref_isudata(ud))
       lj_trace_err(J, LJ_TRERR_BADTYPE);
     tr = emitir(IRT(IR_FLOAD, IRT_U8), ud, IRFL_UDATA_UDTYPE);
     emitir(IRTGI(IR_EQ), tr, lj_ir_kint(J, UDTYPE_IO_FILE));
+    /* 5.4 tofile (luaL_checkudata): the handle's metatable must be the
+    ** current registry["FILE*"]. Guard the metatable and the registry
+    ** entry; anything else is left to the interpreter, which raises. */
+    u = udataV(&rd->argv[0]);
+    mt = tabref(u->metatable);
+    fmt = lj_tab_getstr(reg, key);
+    if (u->udtype != UDTYPE_IO_FILE || mt == NULL ||
+	!(fmt && tvistab(fmt) && tabV(fmt) == mt))
+      lj_trace_err(J, LJ_TRERR_BADTYPE);
+    tr = emitir(IRT(IR_FLOAD, IRT_TAB), ud, IRFL_UDATA_META);
+    emitir(IRTG(IR_EQ, IRT_TAB), tr, lj_ir_ktab(J, mt));
+    ix.tab = lj_ir_ktab(J, reg); settabV(J->L, &ix.tabv, reg);
+    ix.key = lj_ir_kstr(J, key); setstrV(J->L, &ix.keyv, key);
+    ix.val = 0; ix.idxchain = 0;
+    tr = lj_record_idx(J, &ix);
+    emitir(IRTG(IR_EQ, IRT_TAB), tr, lj_ir_ktab(J, mt));
   }
   *udp = ud;
   fp = emitir(IRT(IR_FLOAD, IRT_PTR), ud, IRFL_UDATA_FILE);
@@ -1907,7 +1928,7 @@ static TRef recff_io_fp(jit_State *J, TRef *udp, int32_t id)
 
 static void LJ_FASTCALL recff_io_write(jit_State *J, RecordFFData *rd)
 {
-  TRef ud, fp = recff_io_fp(J, &ud, rd->data);
+  TRef ud, fp = recff_io_fp(J, rd, &ud, rd->data);
   TRef zero = lj_ir_kint(J, 0);
   TRef one = lj_ir_kint(J, 1);
   ptrdiff_t i = rd->data == 0 ? 1 : 0;
@@ -1939,7 +1960,7 @@ static void LJ_FASTCALL recff_io_write(jit_State *J, RecordFFData *rd)
 
 static void LJ_FASTCALL recff_io_flush(jit_State *J, RecordFFData *rd)
 {
-  TRef ud, fp = recff_io_fp(J, &ud, rd->data);
+  TRef ud, fp = recff_io_fp(J, rd, &ud, rd->data);
   TRef tr = lj_ir_call(J, IRCALL_fflush, fp);
   if (results_wanted(J) != 0)  /* Check result only if not ignored. */
     emitir(IRTGI(IR_EQ), tr, lj_ir_kint(J, 0));

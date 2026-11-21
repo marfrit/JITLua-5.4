@@ -22,6 +22,7 @@
 #include "lj_err.h"
 #include "lj_buf.h"
 #include "lj_str.h"
+#include "lj_tab.h"
 #include "lj_state.h"
 #include "lj_strfmt.h"
 #include "lj_ff.h"
@@ -52,10 +53,28 @@ static int lj_cf_io_method_close(lua_State *L);  /* luaL_Stream.closef */
 
 /* -- Open/close helpers -------------------------------------------------- */
 
+/* PUC luaL_testudata(L, idx, LUA_FILEHANDLE): a file handle is a userdata
+** whose metatable is the current registry["FILE*"]. A program can remove
+** or replace that entry, or a handle's metatable; then the handle is no
+** longer a file for the io library. The handle kind (an IOFileUD block) is
+** checked as well, since only such a block can be read as a stream here. */
+static int io_isfile(lua_State *L, cTValue *o)
+{
+  GCtab *mt;
+  cTValue *fmt;
+  if (!(tvisudata(o) && udataV(o)->udtype == UDTYPE_IO_FILE))
+    return 0;
+  mt = tabref(udataV(o)->metatable);
+  if (mt == NULL)
+    return 0;
+  fmt = lj_tab_getstr(tabV(registry(L)), lj_str_newlit(L, LUA_FILEHANDLE));
+  return fmt != NULL && tvistab(fmt) && tabV(fmt) == mt;
+}
+
+/* PUC tolstream (luaL_checkudata). */
 static IOFileUD *io_tofilep(lua_State *L)
 {
-  if (!(L->base < L->top && tvisudata(L->base) &&
-	udataV(L->base)->udtype == UDTYPE_IO_FILE))
+  if (!(L->base < L->top && io_isfile(L, L->base)))
     lj_err_argtype(L, 1, "FILE*");
   return (IOFileUD *)uddata(udataV(L->base));
 }
@@ -619,13 +638,9 @@ LJLIB_CF(io_tmpfile)
 LJLIB_CF(io_close)
 {
   IOFileUD *iof;
-  if (L->base < L->top) {
-    iof = io_tofile(L);
-  } else {
-    iof = IOSTDF_IOF(L, GCROOT_IO_OUTPUT);
-    if (iof->fp == NULL)
-      lj_err_caller(L, LJ_ERR_IOCLFL);
-  }
+  if (L->base == L->top)  /* PUC io_close: the default output, checked */
+    setudataV(L, L->top++, IOSTDF_UD(L, GCROOT_IO_OUTPUT));
+  iof = io_tofile(L);
   return io_file_close(L, iof);
 }
 
@@ -684,9 +699,8 @@ LJLIB_CF(io_lines)
     filetv = *L->base;
     toclose = 1;
   } else {  /* io.lines() iterates over the default input. */
-    if (IOSTDF_IOF(L, GCROOT_IO_INPUT)->fp == NULL)
-      luaL_error(L, "default input file is closed");
     setudataV(L, L->base, IOSTDF_UD(L, GCROOT_IO_INPUT));
+    io_tofile(L);  /* PUC io_lines: tofile, a valid and open handle */
   }
   io_file_lines(L);  /* closure replaces the upvalues on the stack */
   if (toclose) {  /* 5.4: iterator, state, control, to-be-closed file */
@@ -701,7 +715,7 @@ LJLIB_CF(io_lines)
 LJLIB_CF(io_type)
 {
   cTValue *o = lj_lib_checkany(L, 1);
-  if (!(tvisudata(o) && udataV(o)->udtype == UDTYPE_IO_FILE))
+  if (!io_isfile(L, o))  /* PUC io_type: luaL_testudata */
     setnilV(L->top++);
   else if (((IOFileUD *)uddata(udataV(o)))->fp != NULL)
     lua_pushliteral(L, "file");

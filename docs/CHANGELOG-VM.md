@@ -711,6 +711,13 @@ target x86_64 (GC64) and arm64.
   `__name` like any userdata (`lj_err_typename` no longer fixes "FILE*" for
   the handle kind), so such a handle is "userdata" or the other table's
   `__name` there, as in PUC (`tests/d54/io_05_filehandle_registry.lua`).
+- `debug.getinfo` rejects an option string that starts with '>' with
+  "invalid option '>'" before it looks at the function or level, and makes
+  room on the inspected thread's stack first (ldblib.c `db_getinfo`:
+  `checkstack`, `luaL_argcheck`). The '>' went on to `lj_debug_getinfo`,
+  which then took a function from, and popped it off, the stack of the
+  thread being inspected; a '>' elsewhere is an invalid option of
+  `lua_getinfo` (`tests/d54/debug_13_getinfo_gt.lua`).
 
 ## Known JIT/performance rows (not semantic divergences)
 

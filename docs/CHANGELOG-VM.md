@@ -461,6 +461,14 @@ target x86_64 (GC64) and arm64.
   `lua_pcall` from C, `coroutine.close` and the wrap error path keep the C
   loop, which PUC runs without yields as well
   (`tests/d54/close_09_errpath_cont.lua`; both backends).
+- The label and goto limit of the parser. PUC keeps the visible labels and the
+  pending gotos (forward `goto`s and `break`s until their label) in two lists
+  of at most 32767 entries (`lparser.c` newlabelentry) and fails past that
+  with "too many labels/gotos (limit is 32767)", a runtime error without a
+  source position; the end of a loop adds its "break" label for a moment.
+  This parser had no such limit (only the shared variable stack). Two counters
+  in `LexState` follow PUC's lists, with the same message
+  (`tests/d54/parse_03_label_limit.lua`).
 - `__tostring` must return a string (5.4 `luaL_tolstring`). The
   conversion paths `tostring()`, `print()`, `string.format("%s")`, the C API
   `luaL_tolstring` and the standalone message handler now enforce it: a string

@@ -207,6 +207,26 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   with `LJ_ERR_XLIMM/XLIMF`), and `tests/d54/parse_02_limit_msgs.lua` prints
   the whole set; the depth at which a nesting shape is refused is the part that
   cannot match, because PUC measures it in C frames. `errors.lua:646` reads it.
+- `IMPL-DEFINED` Constants per function: at most 65536 numbers and 65536
+  other constants (strings, nested functions, table templates) in one
+  function, "too many constants (limit is 65536) in main function"; PUC
+  allows 33554431 ("too many constants (limit is 33554431)", `lcode.c` addk,
+  `MAXARG_Ax`). The bytecode addresses a constant with a 16-bit operand
+  (`BCMAX_D`); PUC reaches its larger table through `OP_LOADKX` +
+  `OP_EXTRAARG`. Matching it would mean wider constant operands in the
+  bytecode format, both VMs, the recorder and the dump format.
+- `IMPL-DEFINED` Jump distance: a jump may span at most 32767 instructions;
+  longer ones fail to load with "control structure too long" (for example
+  32767 `break`s in one loop body, or 40000 backward `goto`s to one label).
+  PUC's signed jump operand has 25 bits. Same reason as the constants: the
+  16-bit jump operand of the bytecode format.
+- `PENDING` Local variable declarations: PUC allows 32767 declarations per
+  function ("too many local variables (limit is 32767)", `lparser.c`
+  registerlocalvar, `SHRT_MAX`; 200 of them active at a time). This parser
+  keeps every declared local, label and goto of the functions being parsed on
+  one variable stack of 65281 entries ("chunk has more than 65281 local
+  variables"): 70000 locals in closed blocks fail with a different message
+  here, and many labels or backward gotos count against the same stack.
 
 - `FORK` `IMPL-DEFINED` GC mode and the size of a basic step.
   `collectgarbage("generational")` / `collectgarbage("incremental")` are accepted

@@ -59,9 +59,6 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
     or `xpcall` called from Lua the handlers run after the C stack is
     unwound, as in PUC.
   - FFI callbacks are not counted.
-- `PENDING` `collectgarbage()` (and `lua_gc`) called from a finalizer runs a
-  nested collection, finalizers included; PUC ignores the call there. The
-  nesting ends at the C-call bound.
 - `IMPL-DEFINED` Stack-overflow depth: PUC grows to `LUAI_MAXSTACK`
   (1000000 slots, plus the error stack) before failing, this tree caps at
   `LJ_STACK_MAX` (plus `LJ_STACK_ERREX` for the handler), so a recursive

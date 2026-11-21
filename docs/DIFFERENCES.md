@@ -200,7 +200,7 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
 
 ### Removed from stock LuaJIT 2.1
 - `REMOVED` The Lua 5.1 leftovers are not in the default build: `gcinfo`,
-  `loadstring`, `module`, `newproxy` and `unpack` in `_G`; `foreach`,
+  `module`, `newproxy` and `unpack` in `_G`; `foreach`,
   `foreachi`, `getn` and `maxn` in `table`; `loaders` (the alias of
   `searchers`) and `seeall` in `package`. None of them is Lua 5.4 — 5.4 has
   `load`, `table.unpack`, `collectgarbage("count")`, `pairs`/`#` and
@@ -218,12 +218,10 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   `tests/lib/compat51build-d54.sh` (a `tests/ci-box.sh` stage on both
   arches); the two d54 files that build userdata with `newproxy`
   (`env_07_udenv`, `udfin_01_close`) report a skip in the default build and
-  run in that stage. The one downstream cost measured: Penlight 1.14 decides
-  "this is LuaJIT" from `tostring(assert)` containing `builtin` and then
-  probes with `loadstring(...)`, so its app/class scripts stop with rc=1 in
-  the default build (a `tests/corpus-ext/known-diff.tsv` row) and are
-  byte-identical to PUC again with the switch on — that library is part of
-  the compat stage.
+  run in that stage. `loadstring` stays in every build: Penlight 1.14
+  decides "this is LuaJIT" from `tostring(assert)` containing `builtin` and
+  then probes with `loadstring(...)`; without it its app/class scripts stop
+  with rc=1.
 
 ### Kept LuaJIT extensions
 - `EXTENSION` `jit.*`, `bit.*`, `ffi`/cdata, `bcsave`, `-j`/`-O`/`-b` options.

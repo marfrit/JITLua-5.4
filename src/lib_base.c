@@ -530,13 +530,14 @@ LJLIB_CF(load)
   }
 }
 
-/* Lua 5.1 name: 5.4 has load. Only with -DLUAJIT_ENABLE_51COMPAT. */
-#if LJ_51COMPAT
+/* Lua 5.1 name for load, kept in every build: Penlight's pl/compat.lua
+** probes with loadstring once it decides it runs on LuaJIT (the other Lua 5.1
+** leftovers are behind -DLUAJIT_ENABLE_51COMPAT).
+*/
 LJLIB_CF(loadstring)
 {
   return lj_cf_load(L);
 }
-#endif
 
 LJLIB_CF(dofile)
 {

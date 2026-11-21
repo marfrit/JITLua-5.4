@@ -10,7 +10,7 @@
 --! switch-on build (tests/lib/compat51-check.lua).
 
 local base = {
-  "gcinfo", "loadstring", "module", "newproxy", "unpack",
+  "gcinfo", "module", "newproxy", "unpack",
 }
 local tab = { "foreach", "foreachi", "getn", "maxn" }
 local pkg = { "loaders", "seeall" }

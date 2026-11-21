@@ -68,10 +68,10 @@ The build enables dual-number mode with `XCFLAGS += -DLUAJIT_NUMMODE=2` in
 so the define disappears and `src/lj_arch.h` stops the build with a `#error`.
 Put your own preprocessor defines in **`CFLAGS`**, never in `XCFLAGS`.
 
-The Lua 5.1 leftovers (`unpack`, `loadstring`, `gcinfo`, `newproxy`, `module`,
+The Lua 5.1 leftovers (`unpack`, `gcinfo`, `newproxy`, `module`,
 `table.getn`/`foreach`/`foreachi`/`maxn`, `package.loaders`/`seeall`) are not in
 the default build; `make CFLAGS=-DLUAJIT_ENABLE_51COMPAT` builds them back
-(`docs/DIFFERENCES.md`).
+(`docs/DIFFERENCES.md`). `loadstring` stays in every build, for Penlight.
 
 ## GC policy mode
 

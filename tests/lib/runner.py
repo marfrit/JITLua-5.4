@@ -225,7 +225,7 @@ def directives(path, text):
     return d
 
 
-def discover(corpus_dirs, filters, include_heavy=False):
+def discover(corpus_dirs, filters, include_heavy=False, excludes=()):
     tests = []
     for c in corpus_dirs:
         base = ROOT / c
@@ -237,6 +237,8 @@ def discover(corpus_dirs, filters, include_heavy=False):
                 continue
             if rel.endswith("/puc54/heavy.lua") and not include_heavy:
                 continue  # RLIMIT_AS-capped, explicit --include-heavy stage only.
+            if rel in excludes:
+                continue  # explicit --exclude (the gate tiers keep slow files for the full run)
             if filters and not any(fnmatch.fnmatch(rel, f) or f in rel for f in filters):
                 continue
             tests.append(p)
@@ -516,6 +518,8 @@ def main():
                     help="corpus dir relative to repo root (repeatable)")
     ap.add_argument("--filter", action="append", default=[],
                     help="only tests whose repo-relative path matches (glob or substring)")
+    ap.add_argument("--exclude", action="append", default=[],
+                    help="repo-relative test path to leave out (repeatable; exact match)")
     ap.add_argument("--luajit", default=str(ROOT / "src" / "luajit"))
     ap.add_argument("--ref", default=str(ROOT / "tests" / "ref" / "bin" / "lua54ref"))
     ap.add_argument("--luac", default=str(ROOT / "tests" / "ref" / "bin" / "luac54ref"),
@@ -560,7 +564,7 @@ def main():
         sys.exit("error: %s not found -- run tests/ref/fetch-ref.sh" % ref)
 
     corpus = opts.corpus or DEFAULT_CORPUS
-    tests = discover(corpus, opts.filter, opts.include_heavy)
+    tests = discover(corpus, opts.filter, opts.include_heavy, set(opts.exclude))
     if opts.list:
         for p in tests:
             print(p.relative_to(ROOT).as_posix())

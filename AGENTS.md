@@ -99,6 +99,14 @@ repository's history:
   `n`; nothing noticed until another branch let `gc.lua` run past the loop
   that used to stop it. Gate the merged tree, not only the branches.
 
+## Which gate, when
+
+`tests/gate.sh --tier quick|touch|full` (see `tests/README.md`): **quick** after
+edits (new and changed tests, modes A+B); **touch --base HEAD** before each
+commit (adds the stages the changed files call for; one architecture, on a
+box); **full** on both architectures only before a review and before a push.
+A quick or touch pass is not a substitute for full before a review or push.
+
 Reading the record costs minutes. Not reading it costs days and, in a JIT,
 silently wrong code.
 

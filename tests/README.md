@@ -20,6 +20,37 @@ package build without one prints
 `check: PUC 5.4.9 reference unavailable (...); running mode B only` and falls
 back to mode B (JIT against interpreter) rather than failing on a download.
 
+## Tiered gate
+`tests/gate.sh --tier quick|touch|full [--base <rev>] [--dry-run]` picks the
+stages from the files that changed against the base.
+
+| tier | when | runs |
+|---|---|---|
+| quick | after edits | build; harness modes A+B on the new or changed corpus tests (a three-test smoke set when none changed) |
+| touch | before each commit (`--base HEAD`) | quick + the stages the changed sources call for (table below); one architecture |
+| full | before a review and before a push, both architectures | `tests/ci-box.sh`, `tests/ci-local.sh --sanitizers-only`, strict `--mode all` harness; stage counts printed at the end |
+
+Touch mapping (the single table is `classify()` in `tests/gate.sh`):
+
+| changed | extra stages |
+|---|---|
+| `lj_record*` `lj_snap*` `lj_opt_*` `lj_asm*` `lj_trace*` `lj_ir*` `lj_crecord*` `lj_ffrecord*` `lj_dispatch*` `lj_mcode*` `lj_target*` | mode B opt 0-3 (d54), assert build, Penlight part of corpus-ext, JIT tooling smoke |
+| `vm_*.dasc` | the JIT stages above except Penlight, plus mode A and GC stress |
+| `lj_gc*` `lj_tab*` `lj_alloc*` | GC policy modes, GC stress |
+| `lj_parse*` `lj_lex*` `lj_bc*` | mode R (d54), parser/lexer/loader tests |
+| `lib_*` `lj_lib*` | strict mode A over the corpus, 5.1-compat build |
+| `lib_aux.c`, `lj_api*` `lj_load*` `lj_cconv*` `lj_ccall*` `lj_cdata*` `lj_cparse*` `lj_ctype*` `lj_clib*`, public headers, `lib_ffi.c` | C API tests (plus mode A) |
+| `lj_meta*` `lj_func*` `lj_state*` `lj_err*` `lj_debug*` `lj_str*` `lj_buf*` and similar runtime | modes A, B, R, GC stress, C API |
+| corpus tests, `docs/`, `*.md` | tests only (quick) / nothing |
+| anything else (Makefile, `lj_obj.h`, `lj_def.h`, `lj_arch.h`, `src/host`, ...) | escalates to full |
+
+Base: `--base`, else `$GATE_BASE`, else the merge-base with the upstream, else
+the commit the branch was created from. `--base HEAD` means only the pending
+change. Tests listed in `tests/gate-heavy.txt` (several seconds on a fast box,
+minutes on x86_64) run only in full. A box copy has no `.git`: set
+`GATE_REMOTE` (or `--remote`) to the box wrapper command and the selection is
+made locally and handed over. `--dry-run` prints the selection.
+
 ## Modes
 | mode | comparison | proves |
 |---|---|---|

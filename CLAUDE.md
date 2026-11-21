@@ -61,7 +61,10 @@ Every commit lands where anyone can read it:
   entry goes into `docs/CHANGELOG-VM.md`.
 - Commits in that order (test, src, docs). Subject = content. The body says
   which model implemented it, with `Co-Authored-By` lines.
-- Gates on both architectures before a merge: `sh tests/ci-box.sh`,
+- Tiered gate, `tests/gate.sh --tier quick|touch|full` (details in
+  `tests/README.md`): `quick` after edits, `touch --base HEAD` before each
+  commit (one architecture, on a box), `full` on both architectures only before
+  a review and before a push. `full` is the whole chain: `sh tests/ci-box.sh`,
   `sh tests/ci-local.sh --sanitizers-only`, and the strict CI command
   `tests/harness.sh --mode all --timeout 120 --strict`. Gate the merged tree,
   not only the branches.

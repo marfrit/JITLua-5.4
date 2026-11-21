@@ -7,6 +7,27 @@ target x86_64 (GC64) and arm64.
 
 ## Language and VM
 
+- Integer `for` loops with an int32 initial value and step and a limit
+  beyond int32 (`for i = 1, math.huge`, `1, 1e10`, `1, math.maxinteger`,
+  the descending mirrors) run on the int32 path while the index fits and are
+  compiled. Since the 5.4 rework they were wide loops: one C call per
+  iteration and never recorded (x86_64 `-jon` 0.586 s where the 2.1 coercion
+  to a float loop took 0.011 s). `lj_meta_for` stores the clip value
+  `INT32_MAX - step` (`INT32_MIN - step`) in the limit slot and keeps the
+  real limit in a per-thread list keyed by the slot; the exit edge of the
+  int32 FORL paths (x86_64 and arm64) asks `lj_meta_forclip` when the limit
+  equals the clip value, which continues a clipped loop as a wide loop.
+  FORI/JFORI send a limit equal to the clip value to C once per loop start,
+  a recorded FORI guards against it, and every guard of a compiled integer
+  FORL exits to the FORL with the index before the increment (a snapshot
+  entry flag, `SNAP_FORDEC`, restores the incremented index minus the step,
+  so the loop code is unchanged), so the interpreter decides.
+  PUC's iterations and integer control variable are unchanged; the debug
+  library sees and writes such a loop in its wide form, as before. Recorder:
+  a widened 47-bit constant limit is no longer read as its low word
+  (`find_kinit`). `tests/d54/for_07_clip_compiled.lua` (the loops get a
+  trace), `for_08_clip_iterations.lua` (iterations across the int32 bounds).
+  Design and measurements: docs/notes/for-loop-54.md.
 - JIT: a GC check at the head of a compiled inner loop set live locals of
   the enclosing loop body to nil. The generalised dead-slot clearing looked
   for the loop's back edge by scanning forward from the trace's start for the

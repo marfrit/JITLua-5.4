@@ -16,7 +16,8 @@ the two tested platforms. The other LuaJIT backends (x86, arm, ppc, mips and
 non-GC64 builds) are not maintained and may lack individual 5.4 changes.
 The Lua 5.4 numeric-`for` rules are implemented in the x86_64 and arm64 VMs
 only; the other backends compile but keep LuaJIT's 2.1 coercion and do not
-run a wide integer loop (they have no `vmeta_forl` path).
+run a wide integer loop (they have no `vmeta_forl` and `vmeta_forclip`
+paths; a loop with a limit beyond int32 ends at the int32 clip value there).
 For x86_64 without GC64 that is concrete: `src/Makefile` picks `vm_x86.dasc`
 (the VM for 32 bit GC references) whenever `LJ_FR2` is off, and that VM has no
 handler for `BC_IDIV`, `BC_KI64`, `BC_TBC` or `BC_TBCCLO` and no `cont_tbc` or

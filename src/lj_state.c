@@ -39,7 +39,7 @@
 #define LJ_STACK_MAX	LUAI_MAXSTACK	/* Max. stack size. */
 #define LJ_STACK_START	(2*LJ_STACK_MIN)	/* Starting stack size. */
 #define LJ_STACK_MAXEX	(LJ_STACK_MAX + 1 + LJ_STACK_EXTRA)
-#define LJ_STACK_ERREX	(1 + 2*LJ_STACK_MIN)	/* Extra for error handling. */
+#define LJ_STACK_ERREX	(1 + 2*LJ_STACK_MIN + 200)	/* Extra for error handling. */
 
 /* Explanation for LJ_STACK_EXTRA:
 **
@@ -58,8 +58,32 @@
 ** Explanation for LJ_STACK_ERREX:
 **
 ** The 1 is space for the error message, and 2 * LJ_STACK_MIN is for
-** the lj_state_checkstack() call in lj_err_run().
+** the lj_state_checkstack() call in lj_err_run(). The 200 are PUC's error
+** stack (ldo.c ERRORSTACKSIZE = LUAI_MAXSTACK + 200): the message handler of
+** a stack overflow runs in this overdrawn window and needs room for its own
+** calls. Without them a handler such as debug.traceback asks for more stack
+** while the limit is still overdrawn, reaches the 'else' branch below and the
+** error degenerates to "error in error handling" with no frames at all
+** (tests/d54/err_14_stkov_traceback.lua).
 */
+
+/* At the overflow the current Lua frame can already reach past the stack
+** window. Replacing it with a dummy keeps the frame walk from following a
+** framesize that points outside the window, but it also hides that frame from
+** the message location (lj_debug_addloc_rt) and from the traceback. So this
+** is done only when the frame still violates the window after the resize.
+*/
+static void stkover_dummyframe(lua_State *L)
+{
+  if (curr_funcisL(L)) {
+    L->top = curr_topL(L);
+    if (L->top > tvref(L->maxstack)) {
+      /* This can happen when BC_IFUNCF is trying to grow the stack. */
+      L->top = L->base;
+      setframe_gc(L->base - 1 - LJ_FR2, obj2gco(L), LJ_TTHREAD);
+    }
+  }
+}
 
 /* Resize stack slots and adjust pointers in state. */
 static void resizestack(lua_State *L, MSize n)
@@ -124,16 +148,6 @@ void LJ_FASTCALL lj_state_growstack(lua_State *L, MSize need)
       TValue *base = tvref(G(L)->jit_base);
       if (base) L->base = base;
     }
-    if (curr_funcisL(L)) {
-      L->top = curr_topL(L);
-      if (L->top > tvref(L->maxstack)) {
-	/* The current Lua frame violates the stack, so replace it with a
-	** dummy. This can happen when BC_IFUNCF is trying to grow the stack.
-	*/
-	L->top = L->base;
-	setframe_gc(L->base - 1 - LJ_FR2, obj2gco(L), LJ_TTHREAD);
-      }
-    }
     if (L->stacksize <= LJ_STACK_MAXEX) {
       /* An error handler might want to inspect the stack overflow error, but
       ** will need some stack space to run in. We give it a stack size beyond
@@ -141,6 +155,11 @@ void LJ_FASTCALL lj_state_growstack(lua_State *L, MSize need)
       ** calls during unwinding to bring us back to a conventional stack size.
       */
       resizestack(L, LJ_STACK_MAX + LJ_STACK_ERREX);
+      /* The wider window usually fits the frame that just overflowed: keeping
+      ** it lets lj_err_stkov() still find the line for the 'file:line: '
+      ** prefix and lets the traceback list the frame of the overflowing call.
+      */
+      stkover_dummyframe(L);
       lj_err_stkov(L);  /* May invoke an error handler. */
     } else {
       /* If we're here, then the stack overflow error handler is requesting
@@ -149,6 +168,7 @@ void LJ_FASTCALL lj_state_growstack(lua_State *L, MSize need)
       ** failing at ERRORSTACKSIZE) as "error in error handling" (ldo.c
       ** luaD_errerr), not the handler's own stack overflow message.
       */
+      stkover_dummyframe(L);
       GCstr *em = lj_err_str(L, LJ_ERR_ERRERR);  /* Might OOM. */
       setstrV(L, L->top++, em);  /* There is always space to push an error. */
       lj_err_throw(L, LUA_ERRERR);  /* Does not invoke an error handler. */

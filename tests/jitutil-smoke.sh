@@ -32,5 +32,13 @@ for s in $FILES; do
     fi
   done
 done
+# -bl jump targets: every "=> NNNN" names a bytecode position of the function
+# (bc.lua once printed LOOP exits and forward jumps as 2^48-sized numbers).
+n=$((n+1))
+if "$LUAJIT" -bl tests/lib/bclist-fixture.lua >"$TMPF" 2>&1; then
+  "$LUAJIT" tests/lib/bclist-check.lua "$TMPF" || { fail=1; echo "FAIL -bl jump targets"; }
+else
+  fail=1; echo "FAIL -bl tests/lib/bclist-fixture.lua"; tail -5 "$TMPF"
+fi
 printf '== jitutil smoke: %d runs, %s ==\n' "$n" "$([ $fail = 0 ] && echo ok || echo FAILURES)"
 exit $fail

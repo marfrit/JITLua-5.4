@@ -761,17 +761,24 @@ static void bcemit_method(FuncState *fs, ExpDesc *e, ExpDesc *key)
 /* Emit unconditional branch. */
 static BCPos bcemit_jmp(FuncState *fs)
 {
-  BCPos jpc = fs->jpc;
   BCPos j = fs->pc - 1;
   BCIns *ip = &fs->bcbase[j].ins;
-  fs->jpc = NO_JMP;
   if ((int32_t)j >= (int32_t)fs->lasttarget && bc_op(*ip) == BC_UCLO) {
+    BCPos jpc = fs->jpc;  /* Empty: a pending jump makes pc a target. */
+    fs->jpc = NO_JMP;
     setbc_j(ip, NO_JMP);
     fs->lasttarget = j+1;
+    jmp_append(fs, &j, jpc);
   } else {
+    /* The pending jumps to here land on the new JMP, as on any other
+    ** instruction (bcemit_INS). They used to join its list and get its
+    ** final target, but chains of such jumps (many gotos, each to a label
+    ** right before the next goto) then all spanned the whole chain and
+    ** broke the 16-bit jump distance where every source-level jump is
+    ** short. fs_fixup_bc threads jumps to jumps once the distances are
+    ** known. */
     j = bcemit_AJ(fs, BC_JMP, fs->freereg, NO_JMP);
   }
-  jmp_append(fs, &j, jpc);
   return j;
 }
 
@@ -1691,6 +1698,24 @@ static void fs_fixup_bc(FuncState *fs, GCproto *pt, BCIns *bc, MSize n)
   bc[0] = BCINS_AD(op, fs->framesize, 0);
   for (i = 1; i < n; i++)
     bc[i] = base[i].ins;
+  /* Thread a JMP to a JMP through to the final target where that distance
+  ** fits the jump operand (see bcemit_jmp). */
+  for (i = 1; i < n; i++) {
+    if (bc_op(bc[i]) == BC_JMP) {
+      BCPos t = (BCPos)((ptrdiff_t)i+1+bc_j(bc[i])), t0 = t;
+      int hops;
+      for (hops = 0; hops < 8 && t < n && bc_op(bc[t]) == BC_JMP; hops++) {
+	BCPos t2 = (BCPos)((ptrdiff_t)t+1+bc_j(bc[t]));
+	if (t2 == t) break;
+	t = t2;
+      }
+      if (t != t0) {
+	ptrdiff_t delta = (ptrdiff_t)t-(ptrdiff_t)(i+1);
+	if (delta >= -BCBIAS_J && delta <= BCMAX_D-BCBIAS_J)
+	  setbc_j(&bc[i], delta);
+      }
+    }
+  }
 }
 
 /* Fixup upvalues for child prototype, step #2. */

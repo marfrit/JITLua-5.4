@@ -15,6 +15,7 @@
 #include "lj_cconv.h"
 #include "lj_i64.h"
 #include "lj_ccallback.h"
+#include "lauxlib.h"
 
 /* -- Conversion errors --------------------------------------------------- */
 
@@ -54,6 +55,38 @@ LJ_NORET static void cconv_err_initov(CTState *cts, CType *d)
 {
   const char *dst = strdata(lj_ctype_repr(cts->L, ctype_typeid(cts, d), NULL));
   lj_err_callerv(cts->L, LJ_ERR_FFI_INITOV, dst);
+}
+
+/* -- File handles of C modules ------------------------------------------ */
+
+/* The metatable of the io library's file handles (registry["FILE*"]), or
+** NULL without one. */
+GCtab *lj_cconv_filemt(lua_State *L)
+{
+  global_State *g = G(L);
+  if (gcref(g->gcroot[GCROOT_IO_FILEKEY])) {
+    cTValue *tv = lj_tab_getstr(tabV(registry(L)),
+				strref(g->gcroot[GCROOT_IO_FILEKEY]));
+    if (tv && tvistab(tv)) return tabV(tv);
+  }
+  return NULL;
+}
+
+/* Is the plain userdata a luaL_Stream made by a C module? The io library
+** takes such a block as a file handle (lib_io.c io_isfile, same test). */
+int lj_cconv_isstream(lua_State *L, GCudata *ud)
+{
+  GCtab *mt = tabref(ud->metatable);
+  return ud->udtype == UDTYPE_USERDATA && mt != NULL &&
+	 ud->len >= sizeof(luaL_Stream) && mt == lj_cconv_filemt(L);
+}
+
+/* Its FILE pointer, as the io library's own handles convert: NULL once it
+** is closed (closef == NULL, the pointer in 'f' is stale then). */
+void *lj_cconv_streamfile(GCudata *ud)
+{
+  luaL_Stream *p = (luaL_Stream *)uddata(ud);
+  return p->closef ? (void *)p->f : NULL;
 }
 
 /* -- C type compatibility checks ----------------------------------------- */
@@ -633,6 +666,8 @@ void lj_cconv_ct_tv(CTState *cts, CType *d,
       tmpptr = *(void **)tmpptr;
     else if (ud->udtype == UDTYPE_BUFFER)
       tmpptr = ((SBufExt *)tmpptr)->r;
+    else if (lj_cconv_isstream(cts->L, ud))
+      tmpptr = lj_cconv_streamfile(ud);
   } else if (tvislightud(o)) {
     tmpptr = lightudV(cts->g, o);
   } else if (tvisfunc(o)) {

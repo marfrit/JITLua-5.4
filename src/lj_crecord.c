@@ -638,6 +638,17 @@ static TRef crec_ct_tv(jit_State *J, CType *d, TRef dp, TRef sp, cTValue *sval)
 		  ud->udtype == UDTYPE_IO_FILE ? IRFL_UDATA_FILE :
 						 IRFL_SBUF_R);
     } else {
+      /* A luaL_Stream made by a C module converts to its FILE pointer
+      ** (lj_cconv.c): left to the interpreter. Any other userdata is its
+      ** payload address, guarded not to be such a stream. */
+      GCtab *fmt = lj_cconv_filemt(J->L);
+      if (fmt) {
+	TRef trmt;
+	if (lj_cconv_isstream(J->L, ud))
+	  lj_trace_err(J, LJ_TRERR_BADTYPE);
+	trmt = emitir(IRT(IR_FLOAD, IRT_TAB), sp, IRFL_UDATA_META);
+	emitir(IRTG(IR_NE, IRT_TAB), trmt, lj_ir_ktab(J, fmt));
+      }
       sp = emitir(IRT(IR_ADD, IRT_PTR), sp, lj_ir_kintp(J, sizeof(GCudata)));
     }
   } else if (tref_isstr(sp)) {

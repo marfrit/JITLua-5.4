@@ -53,6 +53,9 @@ static LJ_AINLINE uint32_t cconv_idx(CTInfo info)
 #define CCF_ARG(n)	((n) << CCF_ARG_SHIFT)
 #define CCF_GETARG(f)	((f) >> CCF_ARG_SHIFT)
 
+LJ_FUNC GCtab *lj_cconv_filemt(lua_State *L);
+LJ_FUNC int lj_cconv_isstream(lua_State *L, GCudata *ud);
+LJ_FUNC void *lj_cconv_streamfile(GCudata *ud);
 LJ_FUNC int lj_cconv_compatptr(CTState *cts, CType *d, CType *s, CTInfo flags);
 LJ_FUNC void lj_cconv_ct_ct(CTState *cts, CType *d, CType *s,
 			    uint8_t *dp, uint8_t *sp, CTInfo flags);

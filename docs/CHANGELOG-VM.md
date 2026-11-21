@@ -723,6 +723,16 @@ target x86_64 (GC64) and arm64.
   returns what `lua_setcstacklimit` returns, `LUAI_MAXCCALLS` (200), without
   changing a limit (lstate.c); the C function was present, the library entry
   was not (`tests/d54/dbg_setcstacklimit.lua`).
+- `math.max`/`math.min` in compiled code keep the running best unless an
+  argument is strictly greater/smaller, like the interpreter and PUC
+  (lmathlib.c, `lua_compare` with `LUA_OPLT`): `max(nan, 1.0)` is nan,
+  `max(1.0, nan)` 1.0, `min(0.0, -0.0)` 0.0, `min(-0.0, 0.0)` -0.0. `IR_MIN`
+  and `IR_MAX` yield their second operand when the comparison is false or
+  unordered in the constant folder (`lj_vm_foldarith`) and in both backends
+  (x86_64 `MINSD`/`MAXSD`, arm64 `FCMP`+`FCSEL`), and the recorder passed
+  the best first; it now emits `IR_MIN/IR_MAX(arg, best)`. Integer lists are
+  unaffected (equal integers are the same value)
+  (`tests/d54/math_04_minmax_jit_order.lua`).
 
 ## Known JIT/performance rows (not semantic divergences)
 

@@ -1423,6 +1423,21 @@ LJ_NOINLINE void lj_err_arg(lua_State *L, int narg, ErrMsg em)
   err_argmsg(L, narg, err2msg(em));
 }
 
+/* 5.4 luaL_typeerror names a light userdata argument "light userdata"
+** (unless its metatable has a __name); operand errors keep "userdata". */
+static const char *err_argtypename(lua_State *L, cTValue *o)
+{
+  if (tvislightud(o)) {
+    GCtab *mt = tabref(basemt_it(G(L), LJ_TLIGHTUD));
+    if (mt) {
+      cTValue *tv = lj_tab_getstr(mt, lj_str_newlit(L, "__name"));
+      if (tv && tvisstr(tv)) return strVdata(tv);
+    }
+    return "light userdata";
+  }
+  return lj_err_typename(L, o);
+}
+
 /* Typecheck error for arguments. */
 LJ_NOINLINE void lj_err_argtype(lua_State *L, int narg, const char *xname)
 {
@@ -1440,7 +1455,7 @@ LJ_NOINLINE void lj_err_argtype(lua_State *L, int narg, const char *xname)
     }
   } else {
     TValue *o = narg < 0 ? L->top + narg : L->base + narg-1;
-    tname = o < L->top ? lj_err_typename(L, o) : lj_obj_typename[0];
+    tname = o < L->top ? err_argtypename(L, o) : lj_obj_typename[0];
   }
   msg = lj_strfmt_pushf(L, err2msg(LJ_ERR_BADTYPE), xname, tname);
   err_argmsg(L, narg, msg);

@@ -1152,11 +1152,14 @@ static void bcemit_unop(FuncState *fs, BCOp op, ExpDesc *e)
 	  return;
 	} else
 #endif
-	if (expr_isnumk(e) && !expr_numiszero(e)) {  /* Avoid folding to -0. */
+	/* Avoid folding to -0. The integer 0 is its own negation (5.4: -0 is
+	** the constant integer 0, so t[-0] is an integer-key index). */
+	if (expr_isnumk(e) &&
+	    (!expr_numiszero(e) || tvisint(expr_numtv(e)))) {
 	  TValue *o = expr_numtv(e);
 	  if (tvisint(o)) {
 	    int32_t k = intV(o), negk = (int32_t)(~(uint32_t)k+1u);
-	    if (k == negk) {  /* 5.4: -(-2^31) is the integer 2^31. */
+	    if (k == negk && k != 0) {  /* 5.4: -(-2^31) is the integer 2^31. */
 	      setudataV(fs->L, o, lj_i64_box(fs->L, (int64_t)2147483648LL));
 	      e->k = VKCDATA;
 	    } else {

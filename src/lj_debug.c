@@ -382,6 +382,26 @@ restart:
 	    return "method";
 	}
 	return "field";
+      case BC_TGETB:  /* 5.4 OP_GETI: a constant integer key (0..255). */
+	*name = "integer index";
+	return "field";
+      case BC_TGETV: {
+	/* 5.4 OP_GETTABLE/OP_SELF with the key in a register: its name only
+	** if that is a string constant (a key past the constant operand,
+	** loaded by KSTR), else "?" (ldebug.c rname). */
+	const char *kname, *kwhat;
+	BCReg kslot = bc_c(ins);
+	kwhat = lj_debug_slotname(pt, ip, kslot, &kname);
+	*name = (kwhat && *kwhat == 'c') ? kname : "?";  /* "constant" */
+	if (ip-1 > proto_bc(pt)) {  /* Method call: MOV obj, KSTR key, TGETV. */
+	  BCIns insk = ip[-1], insp = ip[-2];
+	  if (bc_op(insk) == BC_KSTR && bc_a(insk) == kslot &&
+	      bc_op(insp) == BC_MOV && bc_a(insp) == ra+1+LJ_FR2 &&
+	      bc_d(insp) == bc_b(ins))
+	    return "method";
+	}
+	return "field";
+	}
       case BC_UGET:
 	/* 5.4 names an upvalue without debug info "?". */
 	*name = proto_uvinfo(pt) ? lj_debug_uvname(pt, bc_d(ins)) : "?";

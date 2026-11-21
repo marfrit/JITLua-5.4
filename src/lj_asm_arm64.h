@@ -2034,7 +2034,15 @@ static void asm_gc_check(ASMState *as, int loophead)
   emit_nm(as, A64I_CMPx, RID_TMP, tmp2);
   emit_getgl(as, tmp2, gc.threshold);
   emit_getgl(as, RID_TMP, gc.total);
+  if (as->gcvdebt) {  /* Charge dropped allocations (asm_gc_vdebt). */
+    MCLabel l_nocharge = emit_label(as);
+    emit_setgl(as, tmp2, gc.threshold);
+    emit_cond_branch(as, CC_LO, l_nocharge);  /* Saturate. */
+    emit_dn(as, (A64I_SUBSx^A64I_K12)|A64F_U12(as->gcvdebt), tmp2, tmp2);
+    emit_getgl(as, tmp2, gc.threshold);
+  }
   as->gcsteps = 0;
+  as->gcvdebt = 0;
   checkmclim(as);
 }
 

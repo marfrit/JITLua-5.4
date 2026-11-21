@@ -83,6 +83,7 @@ typedef struct ASMState {
 
   BCReg topslot;	/* Number of slots for stack check (unless 0). */
   int32_t gcsteps;	/* Accumulated number of GC steps (per section). */
+  int32_t gcvdebt;	/* Bytes of dropped allocations (per section). */
 
   GCtrace *T;		/* Trace to assemble. */
   GCtrace *parent;	/* Parent trace (or NULL). */
@@ -1208,6 +1209,27 @@ static void asm_tdup(ASMState *as, IRIns *ir)
 }
 
 static void asm_gc_check(ASMState *as, int loophead);
+
+/* Charge per dropped allocation, and the largest charge per pass (an arm64
+** 12-bit immediate). */
+#define GC_VDEBT_ALLOC	32
+#define GC_VDEBT_MAX	4095
+
+/* An allocation that the trace drops (unused, or sunk into the snapshots)
+** must still move the collector, as PUC allocates it: otherwise a compiled
+** loop that only creates such garbage never reaches a GC step, and a loop
+** waiting for a finalizer or a weak entry waits forever. The GC check of its
+** section lowers the threshold by a flat charge per dropped allocation on
+** every pass (saturating, collectgarbage("count") is unaffected). The charge
+** is a fraction of a real object, so the collector progresses at a slower
+** pace than for real allocations and most of the sinking gain stays; how
+** many iterations pass before a finalizer runs is not specified anyway. */
+static void asm_gc_vdebt(ASMState *as)
+{
+  as->gcvdebt += GC_VDEBT_ALLOC;
+  if (as->gcvdebt > GC_VDEBT_MAX) as->gcvdebt = GC_VDEBT_MAX;
+  as->gcsteps++;
+}
 
 /* Explicit GC step. */
 static void asm_gcstep(ASMState *as, IRIns *ir)
@@ -2604,6 +2626,7 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
     as->flagmcp = NULL;
     as->topslot = 0;
     as->gcsteps = 0;
+    as->gcvdebt = 0;
     as->sectref = as->loopref;
     as->fuseref = (as->flags & JIT_F_OPT_FUSE) ? as->loopref : FUSE_DISABLED;
     asm_setup_regsp(as);
@@ -2618,9 +2641,16 @@ void lj_asm_trace(jit_State *J, GCtrace *T)
 		 "IR %04d has unsplit 64 bit type",
 		 (int)(ir - as->ir) - REF_BIAS);
       asm_snap_prev(as);
-      if (!ra_used(ir) && !ir_sideeff(ir) && (as->flags & JIT_F_OPT_DCE) &&
-	  !ir_isalloc(ir->o))
-	continue;  /* Dead-code elimination can be soooo easy. */
+      if (!ra_used(ir) && !ir_sideeff(ir) && (as->flags & JIT_F_OPT_DCE)) {
+	if (!ir_isalloc(ir->o))
+	  continue;  /* Dead-code elimination can be soooo easy. */
+	/* A trace that read a weak table keeps its allocations: the bounded
+	** weak-table loops are sized for the pace of real allocations. */
+	if (!as->T->weak) {
+	  asm_gc_vdebt(as);  /* Dropped, but it moves the GC. */
+	  continue;
+	}
+      }
       if (irt_isguard(ir->t))
 	asm_snap_prep(as);
       RA_DBG_REF();

@@ -61,10 +61,11 @@ static void dce_propagate(jit_State *J)
 ** the unused ones with a NOP. Note that compressing the IR to eliminate
 ** the NOPs does not pay off.
 **
-** GC allocations are kept in every trace, as PUC allocates them too: a
-** trace that drops an allocation would not grow the heap, so its loop's GC
-** check could not make progress and a waiting finalizer or weak entry would
-** wait forever (the old weak-only rule was the same argument, narrower).
+** GC allocations are not removed here: the assembler drops an unused (or
+** sunk) allocation itself and charges its size to the GC pace instead
+** (asm_gc_vdebt), as PUC allocates it. A trace that dropped it silently would
+** not move the collector, so a loop waiting for a finalizer or a weak entry
+** would wait forever.
 */
 void lj_opt_dce(jit_State *J)
 {

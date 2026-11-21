@@ -3053,7 +3053,15 @@ static void asm_gc_check(ASMState *as, int loophead)
   emit_sjcc(as, CC_B, l_end);
   emit_opgl(as, XO_ARITH(XOg_CMP), tmp|REX_GC64, gc.threshold);
   emit_getgl(as, tmp, gc.total);
+  if (as->gcvdebt) {  /* Charge dropped allocations (asm_gc_vdebt). */
+    MCLabel l_nocharge = emit_label(as);
+    emit_setgl(as, tmp, gc.threshold);
+    emit_sjcc(as, CC_B, l_nocharge);  /* Saturate: keep a smaller threshold. */
+    emit_gri(as, XG_ARITHi(XOg_SUB), tmp|REX_GC64, as->gcvdebt);
+    emit_getgl(as, tmp, gc.threshold);
+  }
   as->gcsteps = 0;
+  as->gcvdebt = 0;
   checkmclim(as);
 }
 

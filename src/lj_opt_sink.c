@@ -86,12 +86,6 @@ static void sink_mark_ins(jit_State *J)
     switch (ir->o) {
     case IR_BASE:
       return;  /* Finished. */
-    case IR_TNEW: case IR_TDUP:
-      /* PUC allocates every constructor, and the allocation drives the GC
-      ** step that a waiting finalizer or a weak table needs. A trace that
-      ** sinks a dead constructor would make such a loop wait forever. */
-      irt_setmark(ir->t);
-      break;
     case IR_ALOAD: case IR_HLOAD: case IR_XLOAD: case IR_TBAR: case IR_ALEN:
       irt_setmark(IR(ir->op1)->t);  /* Mark ref for remaining loads. */
       break;

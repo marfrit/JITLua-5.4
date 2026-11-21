@@ -302,9 +302,24 @@ LJLIB_CF(table_concat)		LJLIB_REC(.)
 	  lj_err_callerv(L, LJ_ERR_TABCAT,
 			 lj_obj_itypename[itypemap(o)], strdata(sidx));
 	}
-	luaL_addvalue(&b);
+	if (tvisstr(o) && strV(o)->len <= b.size - b.n) {
+	  /* Fits: copy it straight in (what luaL_addvalue does, minus the
+	  ** calls). The value is still on the stack while it is copied. */
+	  memcpy(b.b + b.n, strVdata(o), strV(o)->len);
+	  b.n += strV(o)->len;
+	  L->top--;
+	} else {
+	  luaL_addvalue(&b);
+	}
 	if (j == e) break;
-	if (seplen) luaL_addlstring(&b, strdata(sep), seplen);
+	if (seplen) {
+	  if (seplen <= b.size - b.n) {
+	    memcpy(b.b + b.n, strdata(sep), seplen);
+	    b.n += seplen;
+	  } else {
+	    luaL_addlstring(&b, strdata(sep), seplen);
+	  }
+	}
       }
     }
     luaL_pushresult(&b);

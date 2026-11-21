@@ -158,8 +158,9 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   function's environment table still reads "global" on both sides.
   Only the decoration in brackets differs: the error class, the type text and
   the value reported are the same. PUC's suite checks these lines in
-  `errors.lua`, which the harness skips as a whole because the file needs the
-  PUC `T.*` test hooks, so there is no `tests/known-different.tsv` row.
+  `errors.lua` (176, 190, 191 and 301, the last one a `local _ENV = _ENV`
+  with a key past the constant operand): its mode A row in
+  `tests/known-different.tsv`.
 
 - `IMPL-DEFINED` How deep syntactic nesting may go. PUC has no fixed nesting
   limit: its parser recurses and the C-call bound (`LUAI_MAXCCALLS`, 200) stops
@@ -167,12 +168,20 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   "C stack overflow", and 500 nested `do … end` blocks fail the same way. This
   tree counts nesting with a counter (`synlevel_begin`, `LJ_MAX_XLEVEL`) and
   rejects the expression shapes with its own register/constant limits
-  ("chunk has too many syntax levels", "function or expression too complex
-  near …"). The message *wording* of the shared limits now follows PUC
-  ("too many X (limit is N) in main function", `err_limit` in `src/lj_parse.c`
-  with `LJ_ERR_XLIMM/XLIMF`), and `tests/d54/parse_02_limit_msgs.lua` prints
-  the whole set; the depth at which a nesting shape is refused is the part that
-  cannot match, because PUC measures it in C frames. `errors.lua:646` reads it.
+  ("chunk has too many syntax levels", "function or expression needs too many
+  registers near …"). The message *wording* of the shared limits now follows
+  PUC ("too many X (limit is N) in main function near …", `err_limit` in
+  `src/lj_parse.c` with `LJ_ERR_XLIMM/XLIMF`), and
+  `tests/d54/parse_02_limit_msgs.lua` prints the whole set; the depth at which
+  a nesting shape is refused is the part that cannot match, because PUC
+  measures it in C frames. `errors.lua`'s `testrep` (lines 636-659) accepts
+  both: every message carries "too many" or "overflow".
+- `IMPL-DEFINED` Registers per function: a frame has at most 250 slots here
+  (`LJ_MAX_SLOTS`), PUC's 255 (`MAXREGS`); past that, both fail with
+  "function or expression needs too many registers". Slot numbers are 8 bit
+  in the bytecode operands, the JIT's snapshots and its trace stack
+  (`LJ_MAX_JSLOTS`, also 250), and a call needs its frame link slots (two
+  with `LJ_FR2`) above the last argument, so a frame stops short of 256.
 - `IMPL-DEFINED` How many collection cycles a program triggers. The 5.4 manual
   leaves the pacing to the implementation, and this collector's pause, step
   work and accounting differ (see the basic-step and GC policy rows). The

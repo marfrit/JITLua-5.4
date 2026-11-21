@@ -636,6 +636,16 @@ target x86_64 (GC64) and arm64.
   0.076/0.103/0.103 s), `-joff` faster (2e7 calls, x86_64 1.105 -> 0.688,
   2.011 -> 1.152, 2.426 -> 1.672 s; arm64 0.287 -> 0.208, 0.415 -> 0.211,
   0.286 -> 0.227 s).
+- Two messages of PUC's `errors.lua`. An argument error on a light userdata
+  says "got light userdata" (lauxlib.c `luaL_typeerror`; a `__name` in the
+  light userdata metatable still wins), operand errors keep "userdata"
+  (`err_argtypename` in `lj_err_argtype`). The register limit reads
+  "function or expression needs too many registers" (lcode.c
+  `luaK_checkstack`) instead of "function or expression too complex"
+  (`tests/d54/err_15_lightud_registers.lua`). With them, `errors.lua` runs:
+  stepped over in a scratch copy, it differs from PUC only in the IMPL-DEFINED
+  operand names (lines 176, 190, 191, 301) and the printed stack-overflow
+  depth.
 
 ## Known JIT/performance rows (not semantic divergences)
 

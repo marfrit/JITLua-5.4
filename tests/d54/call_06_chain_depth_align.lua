@@ -14,7 +14,7 @@ for pad = 0, 11 do
     return 1 + self(n + 1)
   end})
   local co = coroutine.wrap(function(...) return pcall(obj, 1) end)
-  local ok, err = co(unpack({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}, 1, pad))
+  local ok, err = co(table.unpack({1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}, 1, pad))
   assert(ok == false and tostring(err):find("stack overflow"), tostring(err))
   lo = (lo == nil or reached < lo) and reached or lo
   hi = (hi == nil or reached > hi) and reached or hi

@@ -373,6 +373,9 @@ static void LJ_FASTCALL recff_rawlen(jit_State *J, RecordFFData *rd)
   UNUSED(rd);
 }
 
+/* Recorder for the 5.1 base library unpack; only with -DLUAJIT_ENABLE_51COMPAT
+** (table.unpack is not a fast function and is not recorded). */
+#if LJ_51COMPAT
 static void LJ_FASTCALL recff_unpack(jit_State *J, RecordFFData *rd)
 {
   TRef trtab, trstart, trend;
@@ -424,6 +427,7 @@ static void LJ_FASTCALL recff_unpack(jit_State *J, RecordFFData *rd)
     rd->nres = 0;
   }
 }
+#endif
 
 /* Determine mode of select() call. */
 int32_t lj_ffrecord_select_mode(jit_State *J, TRef tr, TValue *tv)

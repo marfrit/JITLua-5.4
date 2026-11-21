@@ -17,6 +17,14 @@ local function fail(code, what)
   os.exit(code)
 end
 
+-- newproxy is a 5.1 leftover behind -DLUAJIT_ENABLE_51COMPAT: without the
+-- switch this file has no way to make a userdata, so it reports a skip and the
+-- compat ci-box stage runs it again against the switched build.
+if newproxy == nil then
+  print("skip: needs newproxy")
+  os.exit(0)
+end
+
 -- A finalizable userdata whose finalizer creates another one with the same
 -- __gc, and gives a reachable userdata a __gc metatable on the way.
 local rounds = 0

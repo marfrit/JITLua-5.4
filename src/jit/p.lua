@@ -285,8 +285,16 @@ local function prof_start(mode)
   prof_count2 = {}
   prof_samples = 0
   profile.start(scope:lower()..interval, prof_cb)
-  prof_ud = newproxy(true)
-  getmetatable(prof_ud).__gc = prof_finish
+  -- The sentinel that runs prof_finish at state close. A table with __gc is
+  -- registered as a finalizer at setmetatable time (lj_gc.c), so no proxy
+  -- userdata is needed; newproxy is a 5.1 leftover behind
+  -- -DLUAJIT_ENABLE_51COMPAT and only used where it is present.
+  if newproxy then
+    prof_ud = newproxy(true)
+    getmetatable(prof_ud).__gc = prof_finish
+  else
+    prof_ud = setmetatable({}, {__gc = prof_finish})
+  end
 end
 
 ------------------------------------------------------------------------------

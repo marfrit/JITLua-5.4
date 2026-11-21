@@ -267,6 +267,8 @@ LJLIB_CF(rawlen)		LJLIB_REC(.)
 }
 
 
+/* Lua 5.1 name: 5.4 has table.unpack. Only with -DLUAJIT_ENABLE_51COMPAT. */
+#if LJ_51COMPAT
 LJLIB_CF(unpack)		LJLIB_REC(.)
 {
   GCtab *t = lj_lib_checktab(L, 1);
@@ -291,6 +293,7 @@ LJLIB_CF(unpack)		LJLIB_REC(.)
   } while (1);
   return n;
 }
+#endif
 
 LJLIB_CF(select)		LJLIB_REC(.)
 {
@@ -538,6 +541,10 @@ LJLIB_CF(load)
   }
 }
 
+/* Lua 5.1 name for load, kept in every build: Penlight's pl/compat.lua
+** probes with loadstring once it decides it runs on LuaJIT (the other Lua 5.1
+** leftovers are behind -DLUAJIT_ENABLE_51COMPAT).
+*/
 LJLIB_CF(loadstring)
 {
   return lj_cf_load(L);
@@ -556,11 +563,15 @@ LJLIB_CF(dofile)
 
 /* -- Base library: GC control -------------------------------------------- */
 
+/* Lua 5.1 name: superseded by collectgarbage("count"). Only with
+** -DLUAJIT_ENABLE_51COMPAT. */
+#if LJ_51COMPAT
 LJLIB_CF(gcinfo)
 {
   setintV(L->top++, (int32_t)(G(L)->gc.total >> 10));
   return 1;
 }
+#endif
 
 LJLIB_CF(collectgarbage)
 {
@@ -591,6 +602,9 @@ LJLIB_CF(collectgarbage)
 
 /* -- Base library: miscellaneous functions ------------------------------- */
 
+/* Lua 5.1 proxy userdata: not Lua 5.4 and not a kept extension of this fork.
+** Only with -DLUAJIT_ENABLE_51COMPAT. */
+#if LJ_51COMPAT
 LJLIB_PUSH(top-2)  /* Upvalue holds weak table. */
 LJLIB_CF(newproxy)
 {
@@ -617,6 +631,7 @@ LJLIB_CF(newproxy)
   lua_setmetatable(L, 2);
   return 1;
 }
+#endif
 
 LJLIB_CF(print)
 {
@@ -888,6 +903,7 @@ static void setpc_wrap_aux(lua_State *L, GCfunc *fn)
 
 /* ------------------------------------------------------------------------ */
 
+#if LJ_51COMPAT
 static void newproxy_weaktable(lua_State *L)
 {
   /* NOBARRIER: The table is new (marked white). */
@@ -898,6 +914,7 @@ static void newproxy_weaktable(lua_State *L)
 	    lj_str_newlit(L, "kv"));
   t->nomm = (uint8_t)(~(1u<<MM_mode));
 }
+#endif
 
 LUALIB_API int luaopen_base(lua_State *L)
 {
@@ -911,7 +928,15 @@ LUALIB_API int luaopen_base(lua_State *L)
   ** a state without the base library can parse and record global accesses.
   ** No _G._ENV entry: PUC's _ENV is an upvalue, not a global. */
   lua_pushliteral(L, LUA_VERSION);  /* top-3. */
+#if LJ_51COMPAT
   newproxy_weaktable(L);  /* top-2. */
+#else
+  /* The stack-position upvalue tags in this file address the stack by
+  ** position, so the slot of the newproxy weak table stays reserved when
+  ** newproxy is compiled out (it would otherwise shift the top-3 upvalue of
+  ** warn). */
+  lua_pushnil(L);  /* top-2. */
+#endif
   LJ_LIB_REG(L, "_G", base);
   LJ_LIB_REG(L, LUA_COLIBNAME, coroutine);
   /* 5.4 dofile may yield: the C call boundary of the stock implementation

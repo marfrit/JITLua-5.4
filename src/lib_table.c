@@ -33,6 +33,11 @@ typedef size_t lj_tab_Unsigned;  /* Unsigned counterpart of lua_Integer. */
 
 #define LJLIB_MODULE_table
 
+/* The Lua 5.1 iteration and size helpers: pairs/#/table.unpack cover them in
+** 5.4, so they are not part of the default build. Only with
+** -DLUAJIT_ENABLE_51COMPAT. genlibbc.lua scans the Lua library bodies without
+** a preprocessor, so buildvm_libbc.h keeps their bytecode in both builds. */
+#if LJ_51COMPAT
 LJLIB_LUA(table_foreachi) /*
   function(t, f)
     CHECK_tab(t)
@@ -83,6 +88,7 @@ LJLIB_CF(table_maxn)
   setnumV(L->top-1, m);
   return 1;
 }
+#endif
 
 LJLIB_CF(table_insert)		LJLIB_REC(.)
 {

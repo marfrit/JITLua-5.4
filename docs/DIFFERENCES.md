@@ -150,6 +150,30 @@ Fixed divergences, i.e. former known bugs with their technical notes, are in
   be rebuilt against JITLua's headers (see the source-compatible FORK row
   above).
 
+- `FORK` `IMPL-DEFINED` GC mode and the size of a basic step.
+  `collectgarbage("generational")` / `collectgarbage("incremental")` are accepted
+  and report the previous mode as a 5.4 string, but only the mode flag is stored
+  (`lua_gc`, `case LUA_GCGEN: case LUA_GCINC:`, `src/lj_api.c`): the collector
+  stays the inherited incremental one. `collectgarbage("step", 0)` in
+  "generational" mode therefore performs an incremental step, not a minor
+  collection, and PUC's object ages (`old`, `touched1`, `touched2`, `survival`)
+  are not observable. The work of a basic step also differs: `lj_gc_step()` runs
+  `GCSTEPSIZE/100*stepmul` bytes of collector work (~2 KB at the default stepmul
+  200, `src/lj_gc.c`; `LUA_GCSTEP` there is stock LuaJIT, unchanged since
+  2.0.0-beta1). One old all-weak table holding a fresh table: PUC clears the
+  entry after one `step 0` in incremental *and* in generational mode, ours after
+  12; with `collectgarbage("setstepmul", 20000)` ours clears it in one basic step
+  and reports the finished cycle, so only the quantum differs, not the weak-table
+  semantics. The same loop over a ~1.9 MB live heap reports a finished cycle at
+  the first basic step in PUC and at the 808th here. The manual fixes neither the
+  work per basic step nor after how many steps a weak entry dies, so this is a
+  difference and not a defect; a real generational collector is Stage 3 of
+  `docs/gc-newgen-plan.md` and open (`docs/plan.md` P4.1). Measured the same on
+  x86_64 and aarch64, `-joff` and `-jon` alike; repro
+  `tests/lib/gc-step-quantum-repro.lua`, in the harness the mode-A row of
+  `tests/corpus/puc54/gengc.lua` (its assert at line 122) in
+  `tests/known-different.tsv`.
+
 ### Known JIT/performance rows (not semantic divergences)
 
 - `IMPL-DEFINED` `heavy.lua` runs under a 4 GiB `RLIMIT_AS` cap in the

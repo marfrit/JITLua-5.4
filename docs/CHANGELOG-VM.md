@@ -7,6 +7,13 @@ target x86_64 (GC64) and arm64.
 
 ## Language and VM
 
+- JIT, arm64: `asm_fload` allocated a GPR for a number FLOAD (the NEG/ABS
+  mask in the GG_State) but emitted an FPR load, so it wrote an FPR that was
+  never allocated. arm64 NEG/ABS do not read the mask, so the load is dead and
+  is only assembled with dead-code elimination off (`-O0`, `-O-dce`); a trace
+  with a float unary minus or `math.abs` then could clobber a live FPR.
+  `tests/d54/io_03_write_number.lua` crashed at opt level 0 once its
+  `io.write` loop compiled. The load now gets an FPR.
 - JIT: a compiled call of `ipairs` on a table whose metatable has `__ipairs`
   recorded a call of that metamethod, although Lua 5.4 has none and the
   interpreter's `ipairs` ignores it (`lib_base.c` `ffh_pairs`). The trace
@@ -243,9 +250,11 @@ target x86_64 (GC64) and arm64.
   rep/char`, `%c`, `select`, `tonumber` base, `table.unpack`, `utf8.char`,
   `math.random(seed)`, `collectgarbage` step and debug levels
   (`arg_02_integer_representation.lua`). `io.write` renders a float with
-  `LUA_NUMBER_FMT "%.14g"` (`3.0 -> "3"`, `-0.0 -> "-0"`) and its trace path
-  aborts for floats and non-string/non-integer arguments
-  (`io_03_write_number.lua`); the file-handle metatable now has only
+  `LUA_NUMBER_FMT "%.14g"` (`3.0 -> "3"`, `-0.0 -> "-0"`)
+  (`io_03_write_number.lua`); its trace path records strings, integers and
+  floats (a float through the `G14` mode of `TOSTR`, the same `%.14g` the
+  interpreter uses, `tests/lib/io-write-jit.lua`) and aborts for other
+  arguments, 64-bit integers included; the file-handle metatable now has only
   `__index`/`__gc`/`__close`/`__tostring`/`__name` as direct keys and the
   methods behind `__index`, as PUC's `createmeta` does
   (`io_04_file_metatable.lua`). `math.min`/`max` are PUC's `lua_compare`

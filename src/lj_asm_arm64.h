@@ -1100,7 +1100,8 @@ static A64Ins asm_fxstoreins(IRIns *ir)
 
 static void asm_fload(ASMState *as, IRIns *ir)
 {
-  Reg dest = ra_dest(as, ir, RSET_GPR);
+  /* A num FLOAD (the NEG/ABS mask in the GG_State) is loaded into an FPR. */
+  Reg dest = ra_dest(as, ir, irt_isnum(ir->t) ? RSET_FPR : RSET_GPR);
   Reg idx;
   A64Ins ai = asm_fxloadins(ir);
   int32_t ofs;

@@ -277,6 +277,7 @@ IRFLDEF(FLENUM)
 #define IRTOSTR_INT		0	/* Convert integer to string. */
 #define IRTOSTR_NUM		1	/* Convert number to string. */
 #define IRTOSTR_CHAR		2	/* Convert char value to string. */
+#define IRTOSTR_NUM_G14	3	/* Convert number to string, "%.14g". */
 
 /* -- IR operands --------------------------------------------------------- */
 

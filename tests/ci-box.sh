@@ -87,6 +87,7 @@ stage 'tail -20' sh tests/lib/compat51build-d54.sh
 echo "=== lib checks ==="
 for j in -joff -jon; do timeout 120 ./src/luajit $j tests/lib/bit-checkint.lua || exit 1; done
 for j in -joff -jon; do timeout 120 ./src/luajit $j tests/lib/ffrec-54.lua || exit 1; done
+for j in -joff -jon; do timeout 120 ./src/luajit $j tests/lib/io-write-jit.lua || exit 1; done
 for j in -joff -jon; do timeout 120 ./src/luajit $j tests/lib/env-noflush.lua || exit 1; done
 # x64 math.random/negative-int-key JIT bug (known-bad math B): hangs on the
 # buggy build, so bound it.

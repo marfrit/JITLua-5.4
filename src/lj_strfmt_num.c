@@ -624,6 +624,17 @@ SBuf *lj_strfmt_putfnum(SBuf *sb, SFormat sf, lua_Number n)
 
 /* -- Conversions to strings ---------------------------------------------- */
 
+#if LJ_HASJIT
+/* Convert number to string for io.write: %.14g with no ".0" suffix
+** (3.0 -> "3", -0.0 -> "-0"), matching the interpreter's io path. */
+GCstr * LJ_FASTCALL lj_strfmt_num_g14(lua_State *L, cTValue *o)
+{
+  char buf[STRFMT_MAXBUF_NUM];
+  MSize len = (MSize)(lj_strfmt_wfnum(NULL, STRFMT_G14, o->n, buf) - buf);
+  return lj_str_new(L, buf, len);
+}
+#endif
+
 /* Convert number to string. */
 GCstr * LJ_FASTCALL lj_strfmt_num(lua_State *L, cTValue *o)
 {

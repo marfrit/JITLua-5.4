@@ -295,7 +295,7 @@ local litname = {
   ["FPMATH"] = vmdef.irfpm,
   ["TMPREF"] = { [0] = "", "IN", "OUT", "INOUT", "", "", "OUT2", "INOUT2" },
   ["BUFHDR"] = { [0] = "RESET", "APPEND", "WRITE" },
-  ["TOSTR "] = { [0] = "INT", "NUM", "CHAR" },
+  ["TOSTR "] = { [0] = "INT", "NUM", "CHAR", "G14" },
 }
 
 local function ctlsub(c)

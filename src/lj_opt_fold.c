@@ -958,7 +958,9 @@ LJFOLDF(kfold_conv_knum_u64_num)
 LJFOLD(TOSTR KNUM any)
 LJFOLDF(kfold_tostr_knum)
 {
-  return lj_ir_kstr(J, lj_strfmt_num(J->L, ir_knum(fleft)));
+  return lj_ir_kstr(J, fins->op2 == IRTOSTR_NUM_G14 ?
+		       lj_strfmt_num_g14(J->L, ir_knum(fleft)) :
+		       lj_strfmt_num(J->L, ir_knum(fleft)));
 }
 
 LJFOLD(TOSTR KINT any)

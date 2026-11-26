@@ -132,6 +132,7 @@ LJ_FUNC GCstr * LJ_FASTCALL lj_strfmt_i64(lua_State *L, int64_t k);
 LJ_FUNCA GCstr * LJ_FASTCALL lj_strfmt_num(lua_State *L, cTValue *o);
 LJ_FUNCA GCstr * LJ_FASTCALL lj_strfmt_number(lua_State *L, cTValue *o);
 #if LJ_HASJIT
+LJ_FUNC GCstr * LJ_FASTCALL lj_strfmt_num_g14(lua_State *L, cTValue *o);
 LJ_FUNC GCstr * LJ_FASTCALL lj_strfmt_char(lua_State *L, int c);
 #endif
 LJ_FUNC GCstr * LJ_FASTCALL lj_strfmt_obj(lua_State *L, cTValue *o);

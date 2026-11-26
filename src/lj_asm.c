@@ -1289,7 +1289,10 @@ static void asm_bufput(ASMState *as, IRIns *ir)
       ci = &lj_ir_callinfo[IRCALL_lj_buf_putchar];
     }
   } else if (mayfuse(as, ir->op2) && ra_noreg(irs->r)) {
-    if (irs->o == IR_TOSTR) {  /* Fuse number to string conversions. */
+    /* Fuse number to string conversions (not the io.write G14 mode). */
+    if (irs->o == IR_TOSTR &&
+	(irs->op2 == IRTOSTR_NUM || irs->op2 == IRTOSTR_INT ||
+	 irs->op2 == IRTOSTR_CHAR)) {
       if (irs->op2 == IRTOSTR_NUM) {
 	args[1] = ASMREF_TMP1;  /* TValue * */
 	ci = &lj_ir_callinfo[IRCALL_lj_strfmt_putnum];
@@ -1338,9 +1341,10 @@ static void asm_tostr(ASMState *as, IRIns *ir)
   asm_snap_prep(as);
   args[0] = ASMREF_L;
   as->gcsteps++;
-  if (ir->op2 == IRTOSTR_NUM) {
+  if (ir->op2 == IRTOSTR_NUM || ir->op2 == IRTOSTR_NUM_G14) {
     args[1] = ASMREF_TMP1;  /* cTValue * */
-    ci = &lj_ir_callinfo[IRCALL_lj_strfmt_num];
+    ci = &lj_ir_callinfo[ir->op2 == IRTOSTR_NUM ? IRCALL_lj_strfmt_num
+      : IRCALL_lj_strfmt_num_g14];
   } else {
     args[1] = ir->op1;  /* int32_t k */
     if (ir->op2 == IRTOSTR_INT)
@@ -1350,7 +1354,7 @@ static void asm_tostr(ASMState *as, IRIns *ir)
   }
   asm_setupresult(as, ir, ci);  /* GCstr * */
   asm_gencall(as, ci, args);
-  if (ir->op2 == IRTOSTR_NUM)
+  if (ir->op2 == IRTOSTR_NUM || ir->op2 == IRTOSTR_NUM_G14)
     asm_tvptr(as, ra_releasetmp(as, ASMREF_TMP1), ir->op1, IRTMPREF_IN1);
 }
 

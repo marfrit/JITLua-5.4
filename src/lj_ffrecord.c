@@ -2022,11 +2022,16 @@ static void LJ_FASTCALL recff_io_write(jit_State *J, RecordFFData *rd)
   ptrdiff_t i = rd->data == 0 ? 1 : 0;
   for (; J->base[i]; i++) {
     /* 5.4 g_write renders floats with "%.14g" (no ".0" suffix); the trace
-    ** string conversion uses tostring rules, so float arguments abort the
-    ** trace, as do non-string non-integer values (g_write wants strings). */
-    if (!tref_isstr(J->base[i]) && !tref_isinteger(J->base[i]))
-      lj_trace_err(J, LJ_TRERR_BADTYPE);
-    TRef str = lj_ir_tostr(J, J->base[i]);
+    ** default string conversion uses tostring rules (a ".0" suffix), so
+    ** floats get a dedicated IRTOSTR mode matching io's rendering.
+    ** Non-string non-number values abort the trace (g_write wants strings). */
+    TRef str;
+    if (tref_isstr(J->base[i]))
+      str = J->base[i];
+    else if (tref_isnum(J->base[i]))
+      str = emitir(IRT(IR_TOSTR, IRT_STR), J->base[i], IRTOSTR_NUM_G14);
+    else
+      str = lj_ir_tostr(J, J->base[i]);
     TRef buf = emitir(IRT(IR_STRREF, IRT_PGC), str, zero);
     TRef len = emitir(IRTI(IR_FLOAD), str, IRFL_STR_LEN);
     if (tref_isk(len) && IR(tref_ref(len))->i == 1) {

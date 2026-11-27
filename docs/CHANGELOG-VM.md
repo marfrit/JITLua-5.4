@@ -253,8 +253,9 @@ target x86_64 (GC64) and arm64.
   `LUA_NUMBER_FMT "%.14g"` (`3.0 -> "3"`, `-0.0 -> "-0"`)
   (`io_03_write_number.lua`); its trace path records strings, integers and
   floats (a float through the `G14` mode of `TOSTR`, the same `%.14g` the
-  interpreter uses, `tests/lib/io-write-jit.lua`) and aborts for other
-  arguments, 64-bit integers included; the file-handle metatable now has only
+  interpreter uses, `tests/lib/io-write-jit.lua`) and 64-bit integers (exact
+  decimals through `lj_strfmt_i64`, like `LUA_INTEGER_FMT`), and aborts for
+  other arguments; the file-handle metatable now has only
   `__index`/`__gc`/`__close`/`__tostring`/`__name` as direct keys and the
   methods behind `__index`, as PUC's `createmeta` does
   (`io_04_file_metatable.lua`). `math.min`/`max` are PUC's `lua_compare`

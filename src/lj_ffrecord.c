@@ -2113,15 +2113,19 @@ void lj_ffrecord_func(jit_State *J)
     uint32_t ffid = J->fn->c.ffid;
     /* Handlers that only copy, compare or type-dispatch their arguments, or
     ** that understand an IRT_I64 argument (step 4: tostring/tonumber,
-    ** string.format, math.abs/min/max, math.floor/ceil, and the FP functions, which take the
-    ** int64 as a double like lj_lib_checknum does; the bit library, which
-    ** narrows it modulo 2^32 through lj_opt_narrow_bitop, hybrid rule). */
+    ** string.format, io.write/file:write, which render it through
+    ** lj_ir_tostr as exact decimals like g_write's LUA_INTEGER_FMT,
+    ** math.abs/min/max, math.floor/ceil, and the FP functions, which take
+    ** the int64 as a double like lj_lib_checknum does; the bit library,
+    ** which narrows it modulo 2^32 through lj_opt_narrow_bitop, hybrid
+    ** rule). */
     int generic = (ffid >= FF_bit_tobit && ffid <= FF_bit_tohex) ||
 		  ffid == FF_type || ffid == FF_select || ffid == FF_assert ||
 		  ffid == FF_pcall || ffid == FF_xpcall || ffid == FF_rawequal ||
 		  ffid == FF_rawget || ffid == FF_rawset ||
 		  ffid == FF_tostring || ffid == FF_tonumber ||
 		  ffid == FF_string_format ||
+		  ffid == FF_io_write || ffid == FF_io_method_write ||
 		  ffid == FF_math_abs || ffid == FF_math_min || ffid == FF_math_max ||
 		  ffid == FF_math_floor || ffid == FF_math_ceil ||
 		  ffid == FF_math_sqrt || ffid == FF_math_log10 || ffid == FF_math_exp ||
